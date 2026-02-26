@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel, QFrame
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QStackedWidget, QFrame
 )
 from PyQt6.QtCore import Qt
 from config.settings import APP_NAME, APP_VERSION
@@ -9,53 +10,79 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(1100, 700)
         self._build_ui()
 
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        title = QLabel(APP_NAME)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        # ── Sidebar ──────────────────────────────────────
+        sidebar = QFrame()
+        sidebar.setFixedWidth(180)
+        sidebar.setObjectName("sidebar")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 20, 10, 20)
+        sidebar_layout.setSpacing(8)
 
-        buttons = [
-            ("Products",        self._open_products),
-            ("Suppliers",       self._open_suppliers),
-            ("Departments",     self._open_departments),
-            ("Purchase Orders", self._open_purchase_orders),
-            ("Reports",         self._open_reports),
+        app_label = QLabel(APP_NAME)
+        app_label.setWordWrap(True)
+        app_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sidebar_layout.addWidget(app_label)
+        sidebar_layout.addSpacing(20)
+
+        self.nav_buttons = []
+        nav_items = [
+            ("Products",        self._show_products),
+            ("Suppliers",       self._show_suppliers),
+            ("Departments",     self._show_departments),
+            ("Purchase Orders", self._show_purchase_orders),
+            ("Reports",         self._show_reports),
         ]
-
-        for label, handler in buttons:
+        for label, handler in nav_items:
             btn = QPushButton(label)
-            btn.setFixedWidth(250)
             btn.clicked.connect(handler)
-            layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            btn.setCheckable(True)
+            sidebar_layout.addWidget(btn)
+            self.nav_buttons.append(btn)
 
-    def _open_products(self):
+        sidebar_layout.addStretch()
+        main_layout.addWidget(sidebar)
+
+        # ── Content area ─────────────────────────────────
+        self.stack = QStackedWidget()
+        main_layout.addWidget(self.stack)
+
+        # Load all screens into the stack
         from views.products.product_list import ProductList
-        self._show(ProductList())
-
-    def _open_suppliers(self):
         from views.suppliers.supplier_list import SupplierList
-        self._show(SupplierList())
-
-    def _open_departments(self):
         from views.departments.department_list import DepartmentList
-        self._show(DepartmentList())
-
-    def _open_purchase_orders(self):
         from views.purchase_orders.po_list import POList
-        self._show(POList())
-
-    def _open_reports(self):
         from views.reports.stock_on_hand import StockOnHandReport
-        self._show(StockOnHandReport())
 
-    def _show(self, widget):
-        widget.setWindowTitle(widget.__class__.__name__)
-        widget.show()
+        self.screens = [
+            ProductList(),
+            SupplierList(),
+            DepartmentList(),
+            POList(),
+            StockOnHandReport(),
+        ]
+        for screen in self.screens:
+            self.stack.addWidget(screen)
+
+        # Start on Products
+        self._switch(0)
+
+    def _switch(self, index):
+        self.stack.setCurrentIndex(index)
+        for i, btn in enumerate(self.nav_buttons):
+            btn.setChecked(i == index)
+
+    def _show_products(self):        self._switch(0)
+    def _show_suppliers(self):       self._switch(1)
+    def _show_departments(self):     self._switch(2)
+    def _show_purchase_orders(self): self._switch(3)
+    def _show_reports(self):         self._switch(4)
