@@ -11,7 +11,7 @@ class ProductAdd(QWidget):
     def __init__(self, on_save=None):
         super().__init__()
         self.setWindowTitle("Add Product")
-        self.setMinimumWidth(450)
+        self.setMinimumWidth(500)
         self.on_save = on_save
         self._depts = dept_model.get_all()
         self._suppliers = supplier_model.get_all()
@@ -20,9 +20,13 @@ class ProductAdd(QWidget):
     def _build_ui(self):
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        form.setSpacing(10)
 
         self.barcode = QLineEdit()
+        self.barcode.setPlaceholderText("Scan or type barcode")
+
         self.description = QLineEdit()
+        self.description.setPlaceholderText("Product description")
 
         self.dept = QComboBox()
         for d in self._depts:
@@ -39,23 +43,29 @@ class ProductAdd(QWidget):
         self.sell_price = QDoubleSpinBox()
         self.sell_price.setMaximum(99999)
         self.sell_price.setPrefix("$")
+        self.sell_price.setDecimals(2)
 
         self.cost_price = QDoubleSpinBox()
         self.cost_price.setMaximum(99999)
         self.cost_price.setPrefix("$")
+        self.cost_price.setDecimals(2)
 
-        self.tax_rate = QDoubleSpinBox()
-        self.tax_rate.setMaximum(100)
-        self.tax_rate.setSuffix("%")
-        self.tax_rate.setValue(10.0)
+        # Tax rate — GST only (0% or 10%)
+        self.tax_rate = QComboBox()
+        self.tax_rate.addItem("GST Free (0%)", 0.0)
+        self.tax_rate.addItem("GST (10%)", 10.0)
+        self.tax_rate.setCurrentIndex(1)  # default to 10%
 
         self.reorder_point = QDoubleSpinBox()
         self.reorder_point.setMaximum(99999)
+        self.reorder_point.setDecimals(0)
+
         self.reorder_qty = QDoubleSpinBox()
         self.reorder_qty.setMaximum(99999)
+        self.reorder_qty.setDecimals(0)
 
-        self.variable_weight = QCheckBox()
-        self.expected = QCheckBox()
+        self.variable_weight = QCheckBox("Variable weight item (deli/meat)")
+        self.expected = QCheckBox("Include in stocktake")
         self.expected.setChecked(True)
 
         form.addRow("Barcode *", self.barcode)
@@ -68,14 +78,17 @@ class ProductAdd(QWidget):
         form.addRow("Tax Rate", self.tax_rate)
         form.addRow("Reorder Point", self.reorder_point)
         form.addRow("Reorder Qty", self.reorder_qty)
-        form.addRow("Variable Weight", self.variable_weight)
-        form.addRow("Include in Stocktake", self.expected)
+        form.addRow("", self.variable_weight)
+        form.addRow("", self.expected)
         layout.addLayout(form)
 
+        layout.addSpacing(10)
         btns = QHBoxLayout()
         save_btn = QPushButton("Save")
+        save_btn.setFixedHeight(35)
         save_btn.clicked.connect(self._save)
         cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.close)
         btns.addWidget(save_btn)
         btns.addWidget(cancel_btn)
@@ -96,7 +109,7 @@ class ProductAdd(QWidget):
                 unit=self.unit.currentText(),
                 sell_price=self.sell_price.value(),
                 cost_price=self.cost_price.value(),
-                tax_rate=self.tax_rate.value(),
+                tax_rate=self.tax_rate.currentData(),
                 reorder_point=self.reorder_point.value(),
                 reorder_qty=self.reorder_qty.value(),
                 variable_weight=int(self.variable_weight.isChecked()),
