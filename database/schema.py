@@ -180,7 +180,6 @@ CREATE TABLE IF NOT EXISTS barcode_aliases (
     created_at TEXT DEFAULT (datetime('now'))
 );
 """
-cat >> database/migrations.py << 'EOF'
 
 def migrate_v2(conn):
     """Add barcode_aliases table."""
