@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QStackedWidget, QFrame
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeySequence, QShortcut
 from config.settings import APP_NAME, APP_VERSION
 
 
@@ -23,7 +24,6 @@ class MainWindow(QMainWindow):
         # ── Sidebar ──────────────────────────────────────
         sidebar = QFrame()
         sidebar.setFixedWidth(180)
-        sidebar.setObjectName("sidebar")
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(10, 20, 10, 20)
         sidebar_layout.setSpacing(8)
@@ -36,27 +36,33 @@ class MainWindow(QMainWindow):
 
         self.nav_buttons = []
         nav_items = [
-            ("Products",        self._show_products),
-            ("Suppliers",       self._show_suppliers),
-            ("Departments",     self._show_departments),
-            ("Purchase Orders", self._show_purchase_orders),
-            ("Reports",         self._show_reports),
+            ("&Products",        0),
+            ("&Suppliers",       1),
+            ("&Departments",     2),
+            ("P&urchase Orders", 3),
+            ("&Reports",         4),
         ]
-        for label, handler in nav_items:
+        for label, index in nav_items:
             btn = QPushButton(label)
-            btn.clicked.connect(handler)
             btn.setCheckable(True)
+            btn.clicked.connect(lambda _, i=index: self._switch(i))
             sidebar_layout.addWidget(btn)
             self.nav_buttons.append(btn)
 
         sidebar_layout.addStretch()
+
+        # Hotkey hint label
+        hint = QLabel("Hotkeys:\nP · S · D · U · R")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("color: grey; font-size: 10px;")
+        sidebar_layout.addWidget(hint)
+
         main_layout.addWidget(sidebar)
 
         # ── Content area ─────────────────────────────────
         self.stack = QStackedWidget()
         main_layout.addWidget(self.stack)
 
-        # Load all screens into the stack
         from views.products.product_list import ProductList
         from views.suppliers.supplier_list import SupplierList
         from views.departments.department_list import DepartmentList
@@ -73,16 +79,16 @@ class MainWindow(QMainWindow):
         for screen in self.screens:
             self.stack.addWidget(screen)
 
-        # Start on Products
+        # Keyboard shortcuts
+        QShortcut(QKeySequence("P"), self, lambda: self._switch(0))
+        QShortcut(QKeySequence("S"), self, lambda: self._switch(1))
+        QShortcut(QKeySequence("D"), self, lambda: self._switch(2))
+        QShortcut(QKeySequence("U"), self, lambda: self._switch(3))
+        QShortcut(QKeySequence("R"), self, lambda: self._switch(4))
+
         self._switch(0)
 
     def _switch(self, index):
         self.stack.setCurrentIndex(index)
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
-
-    def _show_products(self):        self._switch(0)
-    def _show_suppliers(self):       self._switch(1)
-    def _show_departments(self):     self._switch(2)
-    def _show_purchase_orders(self): self._switch(3)
-    def _show_reports(self):         self._switch(4)
