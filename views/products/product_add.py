@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QComboBox,
-    QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QDoubleSpinBox
+    QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QDoubleSpinBox, QLabel
 )
+from PyQt6.QtCore import Qt
 import models.product as product_model
 import models.department as dept_model
 import models.supplier as supplier_model
@@ -24,7 +25,6 @@ class ProductAdd(QWidget):
 
         self.barcode = QLineEdit()
         self.barcode.setPlaceholderText("Scan or type barcode")
-
         self.description = QLineEdit()
         self.description.setPlaceholderText("Product description")
 
@@ -44,17 +44,21 @@ class ProductAdd(QWidget):
         self.sell_price.setMaximum(99999)
         self.sell_price.setPrefix("$")
         self.sell_price.setDecimals(2)
+        self.sell_price.valueChanged.connect(self._update_gp)
 
         self.cost_price = QDoubleSpinBox()
         self.cost_price.setMaximum(99999)
         self.cost_price.setPrefix("$")
         self.cost_price.setDecimals(2)
+        self.cost_price.valueChanged.connect(self._update_gp)
 
-        # Tax rate — GST only (0% or 10%)
+        self.gp_label = QLabel("<b style='color:grey'>—</b>")
+        self.gp_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
         self.tax_rate = QComboBox()
         self.tax_rate.addItem("GST Free (0%)", 0.0)
         self.tax_rate.addItem("GST (10%)", 10.0)
-        self.tax_rate.setCurrentIndex(1)  # default to 10%
+        self.tax_rate.setCurrentIndex(1)
 
         self.reorder_point = QDoubleSpinBox()
         self.reorder_point.setMaximum(99999)
@@ -75,6 +79,7 @@ class ProductAdd(QWidget):
         form.addRow("Unit", self.unit)
         form.addRow("Sell Price", self.sell_price)
         form.addRow("Cost Price", self.cost_price)
+        form.addRow("Gross Profit", self.gp_label)
         form.addRow("Tax Rate", self.tax_rate)
         form.addRow("Reorder Point", self.reorder_point)
         form.addRow("Reorder Qty", self.reorder_qty)
@@ -93,6 +98,16 @@ class ProductAdd(QWidget):
         btns.addWidget(save_btn)
         btns.addWidget(cancel_btn)
         layout.addLayout(btns)
+
+    def _update_gp(self):
+        sell = self.sell_price.value()
+        cost = self.cost_price.value()
+        if sell > 0 and cost >= 0:
+            gp = (1 - (cost / sell)) * 100
+            color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"
+            self.gp_label.setText(f"<b style='color:{color}'>{gp:.1f}%</b>")
+        else:
+            self.gp_label.setText("<b style='color:grey'>—</b>")
 
     def _save(self):
         barcode = self.barcode.text().strip()
