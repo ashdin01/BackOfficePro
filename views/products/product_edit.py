@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QComboBox,
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QDoubleSpinBox, QLabel
 )
+from PyQt6.QtCore import Qt
 import models.product as product_model
 import models.department as dept_model
 import models.supplier as supplier_model
@@ -10,7 +11,7 @@ import models.supplier as supplier_model
 class ProductEdit(QWidget):
     def __init__(self, barcode, on_save=None):
         super().__init__()
-        self.setWindowTitle("Edit Product")
+        self.setWindowTitle("Product Detail")
         self.setMinimumWidth(500)
         self.barcode = barcode
         self.on_save = on_save
@@ -26,7 +27,6 @@ class ProductEdit(QWidget):
         p = self.product
 
         form.addRow("Barcode", QLabel(p['barcode']))
-
         self.description = QLineEdit(p['description'])
 
         self.dept = QComboBox()
@@ -51,12 +51,18 @@ class ProductEdit(QWidget):
         self.sell_price.setPrefix("$")
         self.sell_price.setDecimals(2)
         self.sell_price.setValue(p['sell_price'])
+        self.sell_price.valueChanged.connect(self._update_gp)
 
         self.cost_price = QDoubleSpinBox()
         self.cost_price.setMaximum(99999)
         self.cost_price.setPrefix("$")
         self.cost_price.setDecimals(2)
         self.cost_price.setValue(p['cost_price'])
+        self.cost_price.valueChanged.connect(self._update_gp)
+
+        self.gp_label = QLabel()
+        self.gp_label.setTextFormat(Qt.TextFormat.RichText)
+        self._update_gp()
 
         self.tax_rate = QComboBox()
         self.tax_rate.addItem("GST Free (0%)", 0.0)
@@ -75,10 +81,8 @@ class ProductEdit(QWidget):
 
         self.variable_weight = QCheckBox("Variable weight item (deli/meat)")
         self.variable_weight.setChecked(bool(p['variable_weight']))
-
         self.expected = QCheckBox("Include in stocktake")
         self.expected.setChecked(bool(p['expected']))
-
         self.active = QCheckBox("Active")
         self.active.setChecked(bool(p['active']))
 
@@ -88,6 +92,7 @@ class ProductEdit(QWidget):
         form.addRow("Unit", self.unit)
         form.addRow("Sell Price", self.sell_price)
         form.addRow("Cost Price", self.cost_price)
+        form.addRow("Gross Profit", self.gp_label)
         form.addRow("Tax Rate", self.tax_rate)
         form.addRow("Reorder Point", self.reorder_point)
         form.addRow("Reorder Qty", self.reorder_qty)
@@ -107,6 +112,16 @@ class ProductEdit(QWidget):
         btns.addWidget(save_btn)
         btns.addWidget(cancel_btn)
         layout.addLayout(btns)
+
+    def _update_gp(self):
+        sell = self.sell_price.value()
+        cost = self.cost_price.value()
+        if sell > 0:
+            gp = (1 - (cost / sell)) * 100
+            color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"
+            self.gp_label.setText(f"<b style='color:{color}'>{gp:.1f}%</b>")
+        else:
+            self.gp_label.setText("<b style='color:grey'>--</b>")
 
     def _save(self):
         description = self.description.text().strip()
