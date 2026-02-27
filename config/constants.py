@@ -32,3 +32,14 @@ MOVE_STOCKTAKE  = 'STOCKTAKE'
 
 # Units
 UNITS = ['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML']
+
+# List of movement types for stock adjustment dropdown
+MOVE_TYPES = [
+    'RECEIPT',
+    'ADJUSTMENT_IN',
+    'RETURN',
+    'SALE',
+    'WASTAGE',
+    'ADJUSTMENT_OUT',
+    'SHRINKAGE',
+]
