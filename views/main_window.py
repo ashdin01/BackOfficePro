@@ -21,7 +21,6 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # ── Sidebar ──────────────────────────────────────
         sidebar = QFrame()
         sidebar.setFixedWidth(180)
         sidebar_layout = QVBoxLayout(sidebar)
@@ -36,11 +35,11 @@ class MainWindow(QMainWindow):
 
         self.nav_buttons = []
         nav_items = [
-            ("&Products",        0),
-            ("&Suppliers",       1),
-            ("&Departments",     2),
-            ("P&urchase Orders", 3),
-            ("&Reports",         4),
+            ("&Products",         0),
+            ("&Suppliers",        1),
+            ("&Departments",      2),
+            ("Purchase &Orders",  3),
+            ("&Reports",          4),
         ]
         for label, index in nav_items:
             btn = QPushButton(label)
@@ -51,15 +50,13 @@ class MainWindow(QMainWindow):
 
         sidebar_layout.addStretch()
 
-        # Hotkey hint label
-        hint = QLabel("Hotkeys:\nP · S · D · U · R")
+        hint = QLabel("Hotkeys:\nP · S · D · O · R")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: grey; font-size: 10px;")
         sidebar_layout.addWidget(hint)
 
         main_layout.addWidget(sidebar)
 
-        # ── Content area ─────────────────────────────────
         self.stack = QStackedWidget()
         main_layout.addWidget(self.stack)
 
@@ -79,11 +76,10 @@ class MainWindow(QMainWindow):
         for screen in self.screens:
             self.stack.addWidget(screen)
 
-        # Keyboard shortcuts
         QShortcut(QKeySequence("P"), self, lambda: self._switch(0))
         QShortcut(QKeySequence("S"), self, lambda: self._switch(1))
         QShortcut(QKeySequence("D"), self, lambda: self._switch(2))
-        QShortcut(QKeySequence("U"), self, lambda: self._switch(3))
+        QShortcut(QKeySequence("O"), self, lambda: self._switch(3))
         QShortcut(QKeySequence("R"), self, lambda: self._switch(4))
 
         self._switch(0)
