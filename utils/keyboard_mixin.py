@@ -5,15 +5,19 @@ from PyQt6.QtCore import Qt
 class KeyboardMixin:
     """
     Mixin that adds:
-    - Escape key: close/cancel the window
-    - Enter key on tables: open selected item (call self._edit if it exists)
-    Add to any QWidget or QDialog subclass.
+    - Escape: close/cancel
+    - Ctrl+S: save (if self._save exists)
+    - Enter on tables: open selected item
     """
 
     def setup_keyboard(self, table=None, on_enter=None, on_escape=None):
-        # Escape — close or cancel
+        # Escape — close
         escape_action = on_escape or self.close
         QShortcut(QKeySequence("Escape"), self, escape_action)
+
+        # Ctrl+S — save
+        if hasattr(self, '_save'):
+            QShortcut(QKeySequence("Ctrl+S"), self, self._save)
 
         # Enter on table
         if table is not None:

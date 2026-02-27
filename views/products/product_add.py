@@ -91,10 +91,10 @@ class ProductAdd(KeyboardMixin, QWidget):
 
         layout.addSpacing(10)
         btns = QHBoxLayout()
-        save_btn = QPushButton("&Save")
+        save_btn = QPushButton("Save  [Ctrl+S]")
         save_btn.setFixedHeight(35)
         save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("&Cancel")
+        cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.close)
         btns.addWidget(save_btn)
