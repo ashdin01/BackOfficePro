@@ -1,13 +1,14 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QAbstractItemView
+    QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
+from utils.keyboard_mixin import KeyboardMixin
 import models.product as product_model
 
 
-class ProductList(QWidget):
+class ProductList(KeyboardMixin, QWidget):
     def __init__(self):
         super().__init__()
         self._build_ui()
@@ -20,7 +21,6 @@ class ProductList(QWidget):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by description or barcode...")
         self.search_input.textChanged.connect(self._search)
-        # Pressing Enter in search box moves focus to table
         self.search_input.returnPressed.connect(self._focus_table)
         search_row.addWidget(self.search_input)
 
@@ -39,23 +39,14 @@ class ProductList(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(self._edit)
-        # Enter key on table opens the item
-        self.table.keyPressEvent = self._table_key_press
         layout.addWidget(self.table)
 
         self.status = QLabel("")
         layout.addWidget(self.status)
 
-        # Hotkeys
         QShortcut(QKeySequence("N"), self, self._add)
         QShortcut(QKeySequence("/"), self, self._focus_search)
-
-    def _table_key_press(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._edit()
-        else:
-            # Pass all other keys to default handler
-            QTableWidget.keyPressEvent(self.table, event)
+        self.setup_keyboard(table=self.table)
 
     def _focus_table(self):
         self.table.setFocus()

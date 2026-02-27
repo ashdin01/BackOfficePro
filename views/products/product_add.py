@@ -3,12 +3,13 @@ from PyQt6.QtWidgets import (
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QDoubleSpinBox, QLabel
 )
 from PyQt6.QtCore import Qt
+from utils.keyboard_mixin import KeyboardMixin
 import models.product as product_model
 import models.department as dept_model
 import models.supplier as supplier_model
 
 
-class ProductAdd(QWidget):
+class ProductAdd(KeyboardMixin, QWidget):
     def __init__(self, on_save=None):
         super().__init__()
         self.setWindowTitle("Add Product")
@@ -17,6 +18,7 @@ class ProductAdd(QWidget):
         self._depts = dept_model.get_all()
         self._suppliers = supplier_model.get_all()
         self._build_ui()
+        self.setup_keyboard()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -52,8 +54,8 @@ class ProductAdd(QWidget):
         self.cost_price.setDecimals(2)
         self.cost_price.valueChanged.connect(self._update_gp)
 
-        self.gp_label = QLabel("<b style='color:grey'>—</b>")
-        self.gp_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.gp_label = QLabel("<b style='color:grey'>--</b>")
+        self.gp_label.setTextFormat(Qt.TextFormat.RichText)
 
         self.tax_rate = QComboBox()
         self.tax_rate.addItem("GST Free (0%)", 0.0)
@@ -89,10 +91,10 @@ class ProductAdd(QWidget):
 
         layout.addSpacing(10)
         btns = QHBoxLayout()
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton("&Save")
         save_btn.setFixedHeight(35)
         save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton("&Cancel")
         cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.close)
         btns.addWidget(save_btn)
@@ -102,12 +104,12 @@ class ProductAdd(QWidget):
     def _update_gp(self):
         sell = self.sell_price.value()
         cost = self.cost_price.value()
-        if sell > 0 and cost >= 0:
+        if sell > 0:
             gp = (1 - (cost / sell)) * 100
             color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"
             self.gp_label.setText(f"<b style='color:{color}'>{gp:.1f}%</b>")
         else:
-            self.gp_label.setText("<b style='color:grey'>—</b>")
+            self.gp_label.setText("<b style='color:grey'>--</b>")
 
     def _save(self):
         barcode = self.barcode.text().strip()
@@ -117,8 +119,7 @@ class ProductAdd(QWidget):
             return
         try:
             product_model.add(
-                barcode=barcode,
-                description=description,
+                barcode=barcode, description=description,
                 department_id=self.dept.currentData(),
                 supplier_id=self.supplier.currentData(),
                 unit=self.unit.currentText(),

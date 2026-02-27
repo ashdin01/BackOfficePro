@@ -3,10 +3,11 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit
 )
 from PyQt6.QtCore import Qt
+from utils.keyboard_mixin import KeyboardMixin
 import models.supplier as supplier_model
 
 
-class SupplierList(QWidget):
+class SupplierList(KeyboardMixin, QWidget):
     def __init__(self):
         super().__init__()
         self._build_ui()
@@ -14,13 +15,13 @@ class SupplierList(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-
         top = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search suppliers...")
         self.search.textChanged.connect(self._search)
+        self.search.returnPressed.connect(lambda: self.table.setFocus())
         top.addWidget(self.search)
-        btn_add = QPushButton("+ Add Supplier")
+        btn_add = QPushButton("&Add Supplier")
         btn_add.clicked.connect(self._add)
         top.addWidget(btn_add)
         layout.addLayout(top)
@@ -36,6 +37,7 @@ class SupplierList(QWidget):
 
         self.status = QLabel("")
         layout.addWidget(self.status)
+        self.setup_keyboard(table=self.table)
 
     def _load(self, rows=None):
         if rows is None:

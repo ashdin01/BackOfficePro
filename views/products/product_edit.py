@@ -3,12 +3,13 @@ from PyQt6.QtWidgets import (
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QDoubleSpinBox, QLabel
 )
 from PyQt6.QtCore import Qt
+from utils.keyboard_mixin import KeyboardMixin
 import models.product as product_model
 import models.department as dept_model
 import models.supplier as supplier_model
 
 
-class ProductEdit(QWidget):
+class ProductEdit(KeyboardMixin, QWidget):
     def __init__(self, barcode, on_save=None):
         super().__init__()
         self.setWindowTitle("Product Detail")
@@ -19,6 +20,7 @@ class ProductEdit(QWidget):
         self._suppliers = supplier_model.get_all()
         self.product = product_model.get_by_barcode(barcode)
         self._build_ui()
+        self.setup_keyboard()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -103,10 +105,10 @@ class ProductEdit(QWidget):
 
         layout.addSpacing(10)
         btns = QHBoxLayout()
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton("&Save")
         save_btn.setFixedHeight(35)
         save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton("&Cancel")
         cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.close)
         btns.addWidget(save_btn)
@@ -130,8 +132,7 @@ class ProductEdit(QWidget):
             return
         try:
             product_model.update(
-                barcode=self.barcode,
-                description=description,
+                barcode=self.barcode, description=description,
                 department_id=self.dept.currentData(),
                 supplier_id=self.supplier.currentData(),
                 unit=self.unit.currentText(),

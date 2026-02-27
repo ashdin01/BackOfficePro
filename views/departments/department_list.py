@@ -3,10 +3,11 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView
 )
 from PyQt6.QtCore import Qt
+from utils.keyboard_mixin import KeyboardMixin
 import models.department as dept_model
 
 
-class DepartmentList(QWidget):
+class DepartmentList(KeyboardMixin, QWidget):
     def __init__(self):
         super().__init__()
         self._build_ui()
@@ -14,11 +15,10 @@ class DepartmentList(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-
         top = QHBoxLayout()
         top.addWidget(QLabel("Departments"))
         top.addStretch()
-        btn_add = QPushButton("+ Add Department")
+        btn_add = QPushButton("&Add Department")
         btn_add.clicked.connect(self._add)
         top.addWidget(btn_add)
         layout.addLayout(top)
@@ -34,6 +34,7 @@ class DepartmentList(QWidget):
 
         self.status = QLabel("")
         layout.addWidget(self.status)
+        self.setup_keyboard(table=self.table)
 
     def _load(self):
         rows = dept_model.get_all(active_only=False)

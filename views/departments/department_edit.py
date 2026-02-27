@@ -1,11 +1,12 @@
 from PyQt6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QPushButton,
-    QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QLabel
+    QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox
 )
+from utils.keyboard_mixin import KeyboardMixin
 import models.department as dept_model
 
 
-class DepartmentEdit(QWidget):
+class DepartmentEdit(KeyboardMixin, QWidget):
     def __init__(self, dept_id=None, on_save=None):
         super().__init__()
         self.dept_id = dept_id
@@ -13,6 +14,7 @@ class DepartmentEdit(QWidget):
         self.setWindowTitle("Edit Department" if dept_id else "Add Department")
         self.setMinimumWidth(350)
         self._build_ui()
+        self.setup_keyboard()
         if dept_id:
             self._populate()
 
@@ -20,25 +22,20 @@ class DepartmentEdit(QWidget):
         layout = QVBoxLayout(self)
         form = QFormLayout()
         form.setSpacing(10)
-
         self.code = QLineEdit()
-        self.code.setPlaceholderText("e.g. DAIRY")
         self.name = QLineEdit()
-        self.name.setPlaceholderText("e.g. Dairy")
         self.active = QCheckBox("Active")
         self.active.setChecked(True)
-
         form.addRow("Code *", self.code)
         form.addRow("Name *", self.name)
         form.addRow("", self.active)
         layout.addLayout(form)
-
         layout.addSpacing(10)
         btns = QHBoxLayout()
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton("&Save")
         save_btn.setFixedHeight(35)
         save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton("&Cancel")
         cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.close)
         btns.addWidget(save_btn)
