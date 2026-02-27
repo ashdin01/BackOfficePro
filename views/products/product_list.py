@@ -1,35 +1,34 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView
+    QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QAbstractItemView
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeySequence, QShortcut
 import models.product as product_model
 
 
 class ProductList(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Products")
-        self.setMinimumSize(900, 600)
         self._build_ui()
         self._load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
-        # Search bar
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by description or barcode...")
         self.search_input.textChanged.connect(self._search)
+        # Pressing Enter in search box moves focus to table
+        self.search_input.returnPressed.connect(self._focus_table)
         search_row.addWidget(self.search_input)
 
-        btn_add = QPushButton("+ Add Product")
+        btn_add = QPushButton("&Add Product")
         btn_add.clicked.connect(self._add)
         search_row.addWidget(btn_add)
         layout.addLayout(search_row)
 
-        # Table
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
@@ -40,11 +39,32 @@ class ProductList(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(self._edit)
+        # Enter key on table opens the item
+        self.table.keyPressEvent = self._table_key_press
         layout.addWidget(self.table)
 
-        # Status
         self.status = QLabel("")
         layout.addWidget(self.status)
+
+        # Hotkeys
+        QShortcut(QKeySequence("N"), self, self._add)
+        QShortcut(QKeySequence("/"), self, self._focus_search)
+
+    def _table_key_press(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._edit()
+        else:
+            # Pass all other keys to default handler
+            QTableWidget.keyPressEvent(self.table, event)
+
+    def _focus_table(self):
+        self.table.setFocus()
+        if self.table.rowCount() > 0:
+            self.table.selectRow(0)
+
+    def _focus_search(self):
+        self.search_input.setFocus()
+        self.search_input.selectAll()
 
     def _load(self, rows=None):
         if rows is None:
