@@ -1,3 +1,4 @@
+from models.barcode_alias import resolve as resolve_barcode
 from database.connection import get_connection
 
 
@@ -17,6 +18,7 @@ def get_all(active_only=True):
 
 
 def get_by_barcode(barcode):
+    barcode = resolve_barcode(barcode)
     conn = get_connection()
     row = conn.execute("""
         SELECT p.*, d.name as dept_name, s.name as supplier_name

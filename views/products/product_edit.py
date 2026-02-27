@@ -1,20 +1,23 @@
 from PyQt6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QComboBox,
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox,
-    QCheckBox, QDoubleSpinBox, QLabel, QDialog
+    QCheckBox, QDoubleSpinBox, QLabel, QDialog,
+    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox
 )
 from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
 import models.product as product_model
 import models.department as dept_model
 import models.supplier as supplier_model
+import models.barcode_alias as alias_model
 
 
 class ProductEdit(KeyboardMixin, QWidget):
     def __init__(self, barcode, on_save=None):
         super().__init__()
         self.setWindowTitle("Product Detail")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(560)
+        self.setMinimumHeight(700)
         self.barcode = barcode
         self.on_save = on_save
         self._depts = dept_model.get_all()
@@ -29,10 +32,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         form.setSpacing(10)
         p = self.product
 
-        # Barcode — always read only
         form.addRow("Barcode", QLabel(p['barcode']))
 
-        # Description — read only + edit button
         desc_row = QHBoxLayout()
         self.desc_label = QLabel(p['description'])
         self.desc_label.setWordWrap(True)
@@ -61,31 +62,24 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.unit.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
         self.unit.setCurrentText(p['unit'] or 'EA')
 
-        # Sell Price — read only + edit button
         sell_row = QHBoxLayout()
         self.sell_label = QLabel(f"${p['sell_price']:.2f}")
         self._sell_price = p['sell_price']
         sell_edit_btn = QPushButton("✎")
         sell_edit_btn.setFixedSize(28, 28)
-        sell_edit_btn.setToolTip("Edit sell price")
         sell_edit_btn.clicked.connect(self._edit_sell_price)
         sell_row.addWidget(self.sell_label)
         sell_row.addWidget(sell_edit_btn)
-        form.addRow("Sell Price", sell_row)
 
-        # Cost Price — read only + edit button
         cost_row = QHBoxLayout()
         self.cost_label = QLabel(f"${p['cost_price']:.2f}")
         self._cost_price = p['cost_price']
         cost_edit_btn = QPushButton("✎")
         cost_edit_btn.setFixedSize(28, 28)
-        cost_edit_btn.setToolTip("Edit cost price")
         cost_edit_btn.clicked.connect(self._edit_cost_price)
         cost_row.addWidget(self.cost_label)
         cost_row.addWidget(cost_edit_btn)
-        form.addRow("Cost Price", cost_row)
 
-        # GP — auto calculated, always read only
         self.gp_label = QLabel()
         self.gp_label.setTextFormat(Qt.TextFormat.RichText)
         self._update_gp()
@@ -112,10 +106,12 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.active = QCheckBox("Active")
         self.active.setChecked(bool(p['active']))
 
-        form.addRow("Gross Profit", self.gp_label)
         form.addRow("Department *", self.dept)
         form.addRow("Supplier", self.supplier)
         form.addRow("Unit", self.unit)
+        form.addRow("Sell Price", sell_row)
+        form.addRow("Cost Price", cost_row)
+        form.addRow("Gross Profit", self.gp_label)
         form.addRow("Tax Rate", self.tax_rate)
         form.addRow("Reorder Point", self.reorder_point)
         form.addRow("Reorder Qty", self.reorder_qty)
@@ -124,6 +120,33 @@ class ProductEdit(KeyboardMixin, QWidget):
         form.addRow("", self.active)
         layout.addLayout(form)
 
+        # ── Alternate Barcodes ──────────────────────────
+        alias_group = QGroupBox("Alternate Barcodes")
+        alias_layout = QVBoxLayout(alias_group)
+
+        self.alias_table = QTableWidget()
+        self.alias_table.setColumnCount(3)
+        self.alias_table.setHorizontalHeaderLabels(["Barcode", "Description", "Added"])
+        self.alias_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.alias_table.setMaximumHeight(150)
+        self.alias_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.alias_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        alias_layout.addWidget(self.alias_table)
+
+        alias_btns = QHBoxLayout()
+        btn_add_alias = QPushButton("+ Add Barcode")
+        btn_add_alias.clicked.connect(self._add_alias)
+        btn_del_alias = QPushButton("Remove")
+        btn_del_alias.clicked.connect(self._remove_alias)
+        alias_btns.addWidget(btn_add_alias)
+        alias_btns.addWidget(btn_del_alias)
+        alias_btns.addStretch()
+        alias_layout.addLayout(alias_btns)
+
+        layout.addWidget(alias_group)
+        self._load_aliases()
+
+        # ── Save/Cancel ─────────────────────────────────
         layout.addSpacing(10)
         btns = QHBoxLayout()
         save_btn = QPushButton("Save  [Ctrl+S]")
@@ -136,38 +159,50 @@ class ProductEdit(KeyboardMixin, QWidget):
         btns.addWidget(cancel_btn)
         layout.addLayout(btns)
 
+    def _load_aliases(self):
+        aliases = alias_model.get_aliases(self.barcode)
+        self.alias_table.setRowCount(0)
+        for a in aliases:
+            r = self.alias_table.rowCount()
+            self.alias_table.insertRow(r)
+            self.alias_table.setItem(r, 0, QTableWidgetItem(a['alias_barcode']))
+            self.alias_table.setItem(r, 1, QTableWidgetItem(a['description'] or ''))
+            self.alias_table.setItem(r, 2, QTableWidgetItem(a['created_at'][:10]))
+            self.alias_table.item(r, 0).setData(Qt.ItemDataRole.UserRole, a['id'])
+
+    def _add_alias(self):
+        dlg = AddAliasDialog(master_barcode=self.barcode, parent=self)
+        if dlg.exec():
+            self._load_aliases()
+
+    def _remove_alias(self):
+        row = self.alias_table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Remove", "Select a barcode first.")
+            return
+        alias_id = self.alias_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        reply = QMessageBox.question(self, "Confirm", "Remove this alternate barcode?")
+        if reply == QMessageBox.StandardButton.Yes:
+            alias_model.delete(alias_id)
+            self._load_aliases()
+
     def _edit_description(self):
-        dlg = SingleFieldDialog(
-            title="Edit Description",
-            label="Description",
-            current_value=self.desc_label.text(),
-            field_type="text",
-            parent=self
-        )
+        dlg = SingleFieldDialog("Edit Description", "Description",
+                                self.desc_label.text(), "text", self)
         if dlg.exec():
             self.desc_label.setText(dlg.value)
 
     def _edit_sell_price(self):
-        dlg = SingleFieldDialog(
-            title="Edit Sell Price",
-            label="Sell Price",
-            current_value=self._sell_price,
-            field_type="price",
-            parent=self
-        )
+        dlg = SingleFieldDialog("Edit Sell Price", "Sell Price",
+                                self._sell_price, "price", self)
         if dlg.exec():
             self._sell_price = dlg.value
             self.sell_label.setText(f"${self._sell_price:.2f}")
             self._update_gp()
 
     def _edit_cost_price(self):
-        dlg = SingleFieldDialog(
-            title="Edit Cost Price",
-            label="Cost Price",
-            current_value=self._cost_price,
-            field_type="price",
-            parent=self
-        )
+        dlg = SingleFieldDialog("Edit Cost Price", "Cost Price",
+                                self._cost_price, "price", self)
         if dlg.exec():
             self._cost_price = dlg.value
             self.cost_label.setText(f"${self._cost_price:.2f}")
@@ -211,8 +246,58 @@ class ProductEdit(KeyboardMixin, QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
 
+class AddAliasDialog(QDialog):
+    def __init__(self, master_barcode, parent=None):
+        super().__init__(parent)
+        self.master_barcode = master_barcode
+        self.setWindowTitle("Add Alternate Barcode")
+        self.setMinimumWidth(360)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        self.barcode = QLineEdit()
+        self.barcode.setPlaceholderText("Scan or type alternate barcode")
+        self.desc = QLineEdit()
+        self.desc.setPlaceholderText("e.g. Brand name or variant (optional)")
+
+        form.addRow("Barcode *", self.barcode)
+        form.addRow("Note", self.desc)
+        layout.addLayout(form)
+
+        layout.addSpacing(10)
+        btns = QHBoxLayout()
+        ok_btn = QPushButton("Add  [Ctrl+S]")
+        ok_btn.setFixedHeight(32)
+        ok_btn.clicked.connect(self._save)
+        cancel_btn = QPushButton("Cancel  [Esc]")
+        cancel_btn.setFixedHeight(32)
+        cancel_btn.clicked.connect(self.reject)
+        btns.addWidget(ok_btn)
+        btns.addWidget(cancel_btn)
+        layout.addLayout(btns)
+
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence("Escape"), self, self.reject)
+        QShortcut(QKeySequence("Ctrl+S"), self, self._save)
+        self.barcode.setFocus()
+
+    def _save(self):
+        barcode = self.barcode.text().strip()
+        if not barcode:
+            QMessageBox.warning(self, "Validation", "Barcode is required.")
+            return
+        try:
+            alias_model.add(barcode, self.master_barcode, self.desc.text().strip())
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not add barcode: {e}")
+
+
 class SingleFieldDialog(QDialog):
-    """Reusable popup to edit a single text or price field."""
     def __init__(self, title, label, current_value, field_type="text", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -224,7 +309,6 @@ class SingleFieldDialog(QDialog):
     def _build_ui(self, label, current_value):
         layout = QVBoxLayout(self)
         form = QFormLayout()
-
         if self.field_type == "price":
             self.input = QDoubleSpinBox()
             self.input.setMaximum(99999)
@@ -235,10 +319,8 @@ class SingleFieldDialog(QDialog):
             self.input = QLineEdit()
             self.input.setText(str(current_value))
             self.input.selectAll()
-
         form.addRow(label, self.input)
         layout.addLayout(form)
-
         layout.addSpacing(10)
         btns = QHBoxLayout()
         ok_btn = QPushButton("Save  [Ctrl+S]")
@@ -250,8 +332,6 @@ class SingleFieldDialog(QDialog):
         btns.addWidget(ok_btn)
         btns.addWidget(cancel_btn)
         layout.addLayout(btns)
-
-        # Keyboard shortcuts
         from PyQt6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Escape"), self, self.reject)
         QShortcut(QKeySequence("Ctrl+S"), self, self._confirm)

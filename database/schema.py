@@ -170,3 +170,28 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('po_prefix',      'PO',             'Purchase order number prefix'),
     ('po_next_number', '1',              'Next PO sequence number');
 """
+
+BARCODE_ALIASES_TABLE = """
+CREATE TABLE IF NOT EXISTS barcode_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias_barcode TEXT NOT NULL UNIQUE,
+    master_barcode TEXT NOT NULL REFERENCES products(barcode),
+    description TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+"""
+cat >> database/migrations.py << 'EOF'
+
+def migrate_v2(conn):
+    """Add barcode_aliases table."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS barcode_aliases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alias_barcode TEXT NOT NULL UNIQUE,
+            master_barcode TEXT NOT NULL REFERENCES products(barcode),
+            description TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("UPDATE settings SET value = '2' WHERE key = 'schema_version'")
+    conn.commit()
