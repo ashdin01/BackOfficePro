@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QLineEdit, QDoubleSpinBox, QDialog, QFormLayout
+    QLineEdit, QDoubleSpinBox, QDialog, QFormLayout, QSpinBox
 )
-from PyQt6.QtCore import Qt, QKeyCombination
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 import models.purchase_order as po_model
 import models.po_lines as lines_model
@@ -35,7 +35,7 @@ class PODetail(QWidget):
         super().__init__()
         self.po_id = po_id
         self.on_save = on_save
-        self.setMinimumSize(900, 650)
+        self.setMinimumSize(950, 650)
         self._build_ui()
         self._load()
 
@@ -49,37 +49,38 @@ class PODetail(QWidget):
         self.rec_banner.setStyleSheet("color: steelblue; padding: 4px;")
         layout.addWidget(self.rec_banner)
 
+        # Editable table
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            "Barcode", "Description", "On Hand", "Reorder Pt", "Ordered Qty", "Unit Cost", "Total"
+            "Barcode", "Description", "On Hand", "Reorder Pt", "Order Qty", "Unit Cost $"
         ])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Allow editing on Qty and Cost columns only — enforced via itemChanged
+        self.table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.table)
 
         self.total_label = QLabel()
         self.total_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.total_label)
 
-        # Buttons with hotkeys via & prefix (underlines the letter)
         btns = QHBoxLayout()
-
-        btn_recommend = QPushButton("&Load Recommendations")
-        btn_recommend.setFixedHeight(35)
-        btn_recommend.setToolTip("Load stock recommendations [L]")
-        btn_recommend.clicked.connect(self._load_recommendations)
 
         btn_add = QPushButton("&Add Line")
         btn_add.setFixedHeight(35)
-        btn_add.setToolTip("Add a line to this PO [A]")
+        btn_add.setToolTip("Add a line [A]")
         btn_add.clicked.connect(self._add_line)
 
         btn_del = QPushButton("&Remove Line")
         btn_del.setFixedHeight(35)
         btn_del.setToolTip("Remove selected line [R]")
         btn_del.clicked.connect(self._remove_line)
+
+        btn_reload = QPushButton("&Reload Recommendations")
+        btn_reload.setFixedHeight(35)
+        btn_reload.setToolTip("Reload recommendations [R... hold]")
+        btn_reload.clicked.connect(self._reload_recommendations)
 
         btn_send = QPushButton("&Mark as Sent ✓")
         btn_send.setFixedHeight(35)
@@ -91,20 +92,18 @@ class PODetail(QWidget):
         btn_cancel.setToolTip("Cancel this PO [C]")
         btn_cancel.clicked.connect(self._cancel_po)
 
-        btns.addWidget(btn_recommend)
         btns.addWidget(btn_add)
         btns.addWidget(btn_del)
+        btns.addWidget(btn_reload)
         btns.addStretch()
         btns.addWidget(btn_send)
         btns.addWidget(btn_cancel)
         layout.addLayout(btns)
 
-        # Keyboard shortcuts
-        QShortcut(QKeySequence("L"), self, self._load_recommendations)
         QShortcut(QKeySequence("A"), self, self._add_line)
-        QShortcut(QKeySequence("R"), self, self._remove_line)
         QShortcut(QKeySequence("M"), self, self._mark_sent)
         QShortcut(QKeySequence("C"), self, self._cancel_po)
+        QShortcut(QKeySequence("Escape"), self, self.close)
 
     def _load(self):
         po = po_model.get_by_id(self.po_id)
@@ -116,36 +115,33 @@ class PODetail(QWidget):
             f"Delivery: {po['delivery_date'] or 'TBC'}"
         )
         lines = lines_model.get_by_po(self.po_id)
-        self.table.setRowCount(0)
-        total = 0
-        for line in lines:
-            r = self.table.rowCount()
-            self.table.insertRow(r)
-            line_total = line['ordered_qty'] * line['unit_cost']
-            total += line_total
-            self.table.setItem(r, 0, QTableWidgetItem(line['barcode']))
-            self.table.setItem(r, 1, QTableWidgetItem(line['description']))
-            self.table.setItem(r, 2, QTableWidgetItem(""))
-            self.table.setItem(r, 3, QTableWidgetItem(""))
-            self.table.setItem(r, 4, QTableWidgetItem(str(int(line['ordered_qty']))))
-            self.table.setItem(r, 5, QTableWidgetItem(f"${line['unit_cost']:.2f}"))
-            self.table.setItem(r, 6, QTableWidgetItem(f"${line_total:.2f}"))
-            self.table.item(r, 0).setData(Qt.ItemDataRole.UserRole, line['id'])
-        self.total_label.setText(f"<b>Order Total: ${total:.2f}</b>")
+
+        # Auto-load recommendations if no lines yet
         if len(lines) == 0:
-            self._check_recommendations_available()
+            self._auto_load_recommendations()
+            lines = lines_model.get_by_po(self.po_id)
 
-    def _check_recommendations_available(self):
+        self._populate_table(lines)
+
+    def _auto_load_recommendations(self):
         recs = get_recommendations(self._po['supplier_id'])
-        if recs:
-            self.rec_banner.setText(
-                f"💡 {len(recs)} product(s) at or below reorder point. "
-                f"Press <b>L</b> to load recommendations."
-            )
-        else:
+        if not recs:
             self.rec_banner.setText("✓ All stock levels are above reorder points for this supplier.")
+            return
+        for r in recs:
+            lines_model.add(
+                po_id=self.po_id,
+                barcode=r['barcode'],
+                description=r['description'],
+                ordered_qty=int(r['reorder_qty']),
+                unit_cost=r['cost_price'],
+            )
+        self.rec_banner.setText(
+            f"💡 {len(recs)} line(s) auto-loaded from reorder points. "
+            f"Edit quantities and costs directly in the table."
+        )
 
-    def _load_recommendations(self):
+    def _reload_recommendations(self):
         recs = get_recommendations(self._po['supplier_id'])
         if not recs:
             QMessageBox.information(self, "Recommendations",
@@ -157,18 +153,6 @@ class PODetail(QWidget):
             QMessageBox.information(self, "Recommendations",
                 "All recommended products are already on this PO.")
             return
-        summary = "\n".join([
-            f"  {r['description'][:40]:<40}  "
-            f"On hand: {int(r['on_hand'])}  →  Order: {int(r['reorder_qty'])}"
-            for r in new_recs
-        ])
-        reply = QMessageBox.question(
-            self, "Load Recommendations",
-            f"Add {len(new_recs)} recommended line(s)?\n\n{summary}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
         for r in new_recs:
             lines_model.add(
                 po_id=self.po_id,
@@ -177,15 +161,118 @@ class PODetail(QWidget):
                 ordered_qty=int(r['reorder_qty']),
                 unit_cost=r['cost_price'],
             )
-        self.rec_banner.setText(f"✓ {len(new_recs)} line(s) added from recommendations.")
-        self._load()
+        self.rec_banner.setText(f"✓ {len(new_recs)} additional line(s) added.")
+        lines = lines_model.get_by_po(self.po_id)
+        self._populate_table(lines)
         if self.on_save:
             self.on_save()
+
+    def _populate_table(self, lines):
+        # Block signals while populating to avoid itemChanged firing
+        self.table.blockSignals(True)
+        self.table.setRowCount(0)
+        self._line_ids = []
+        total = 0
+
+        for line in lines:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self._line_ids.append(line['id'])
+
+            # Barcode — read only
+            barcode_item = QTableWidgetItem(line['barcode'])
+            barcode_item.setFlags(barcode_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(r, 0, barcode_item)
+
+            # Description — read only
+            desc_item = QTableWidgetItem(line['description'])
+            desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(r, 1, desc_item)
+
+            # On Hand — read only
+            soh = stock_model.get_by_barcode(line['barcode'])
+            on_hand = int(soh['quantity']) if soh else 0
+            soh_item = QTableWidgetItem(str(on_hand))
+            soh_item.setFlags(soh_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            soh_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(r, 2, soh_item)
+
+            # Reorder Point — read only
+            product = product_model.get_by_barcode(line['barcode'])
+            reorder_pt = int(product['reorder_point']) if product else 0
+            rp_item = QTableWidgetItem(str(reorder_pt))
+            rp_item.setFlags(rp_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            rp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(r, 3, rp_item)
+
+            # Qty — EDITABLE
+            qty_item = QTableWidgetItem(str(int(line['ordered_qty'])))
+            qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(r, 4, qty_item)
+
+            # Unit Cost — EDITABLE
+            cost_item = QTableWidgetItem(f"{line['unit_cost']:.2f}")
+            cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(r, 5, cost_item)
+
+            total += line['ordered_qty'] * line['unit_cost']
+
+        self.table.blockSignals(False)
+        self._update_total()
+
+    def _on_item_changed(self, item):
+        row = item.row()
+        col = item.column()
+        if col not in (4, 5):  # Only qty and cost are editable
+            return
+        if row >= len(self._line_ids):
+            return
+
+        line_id = self._line_ids[row]
+        try:
+            if col == 4:  # Qty
+                qty = int(float(item.text()))
+                if qty < 1:
+                    qty = 1
+                # MOQ check
+                barcode = self.table.item(row, 0).text()
+                product = product_model.get_by_barcode(barcode)
+                if product and product['reorder_qty'] > 0:
+                    moq = int(product['reorder_qty'])
+                    if qty % moq != 0:
+                        self.rec_banner.setText(
+                            f"⚠ MOQ warning: {self.table.item(row,1).text()} — "
+                            f"order in multiples of {moq}"
+                        )
+                    else:
+                        self.rec_banner.setText("")
+                lines_model.update(line_id, ordered_qty=qty)
+            elif col == 5:  # Cost
+                cost = float(item.text().replace("$", "").strip())
+                if cost < 0:
+                    cost = 0
+                lines_model.update(line_id, unit_cost=cost)
+        except (ValueError, TypeError):
+            pass  # Ignore bad input
+
+        self._update_total()
+
+    def _update_total(self):
+        total = 0
+        for r in range(self.table.rowCount()):
+            try:
+                qty = float(self.table.item(r, 4).text())
+                cost = float(self.table.item(r, 5).text().replace("$", "").strip())
+                total += qty * cost
+            except (ValueError, AttributeError):
+                pass
+        self.total_label.setText(f"<b>Order Total: ${total:.2f}</b>")
 
     def _add_line(self):
         dlg = AddLineDialog(self.po_id, parent=self)
         if dlg.exec():
-            self._load()
+            lines = lines_model.get_by_po(self.po_id)
+            self._populate_table(lines)
             if self.on_save:
                 self.on_save()
 
@@ -194,11 +281,14 @@ class PODetail(QWidget):
         if row < 0:
             QMessageBox.information(self, "Remove Line", "Select a line first.")
             return
-        line_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if row >= len(self._line_ids):
+            return
+        line_id = self._line_ids[row]
         reply = QMessageBox.question(self, "Confirm", "Remove this line?")
         if reply == QMessageBox.StandardButton.Yes:
             lines_model.delete(line_id)
-            self._load()
+            lines = lines_model.get_by_po(self.po_id)
+            self._populate_table(lines)
 
     def _mark_sent(self):
         lines = lines_model.get_by_po(self.po_id)
@@ -217,7 +307,6 @@ class PODetail(QWidget):
             self, "Confirm", "Cancel this PO? This cannot be undone.")
         if reply == QMessageBox.StandardButton.Yes:
             po_model.cancel(self.po_id)
-            self._load()
             if self.on_save:
                 self.on_save()
             self.close()
@@ -276,15 +365,19 @@ class AddLineDialog(QDialog):
 
         layout.addSpacing(10)
         btns = QHBoxLayout()
-        ok_btn = QPushButton("&Add to PO")
+        ok_btn = QPushButton("Add to PO")
         ok_btn.setFixedHeight(35)
         ok_btn.clicked.connect(self._add)
-        cancel_btn = QPushButton("&Cancel")
+        cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.reject)
         btns.addWidget(ok_btn)
         btns.addWidget(cancel_btn)
         layout.addLayout(btns)
+
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence("Escape"), self, self.reject)
+        QShortcut(QKeySequence("Ctrl+S"), self, self._add)
 
     def _lookup(self):
         barcode = self.barcode.text().strip()
