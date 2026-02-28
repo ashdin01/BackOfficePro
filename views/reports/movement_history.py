@@ -13,7 +13,7 @@ def get_movements(barcode=None, move_type=None, date_from=None, date_to=None, li
     conn = get_connection()
     sql = """
         SELECT sm.id, sm.barcode, p.description, sm.movement_type,
-               sm.quantity, sm.reference, sm.moved_at
+               sm.quantity, sm.reference, sm.created_at
         FROM stock_movements sm
         LEFT JOIN products p ON sm.barcode = p.barcode
         WHERE 1=1
@@ -26,12 +26,12 @@ def get_movements(barcode=None, move_type=None, date_from=None, date_to=None, li
         sql += " AND sm.movement_type = ?"
         params.append(move_type)
     if date_from:
-        sql += " AND date(sm.moved_at) >= ?"
+        sql += " AND date(sm.created_at) >= ?"
         params.append(date_from)
     if date_to:
-        sql += " AND date(sm.moved_at) <= ?"
+        sql += " AND date(sm.created_at) <= ?"
         params.append(date_to)
-    sql += f" ORDER BY sm.moved_at DESC LIMIT {limit}"
+    sql += f" ORDER BY sm.created_at DESC LIMIT {limit}"
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return rows
