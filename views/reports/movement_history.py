@@ -107,13 +107,13 @@ class MovementHistoryReport(QWidget):
         for row in rows:
             r = self.table.rowCount()
             self.table.insertRow(r)
-            self.table.setItem(r, 0, QTableWidgetItem(str(row['moved_at'])[:16]))
+
+            self.table.setItem(r, 0, QTableWidgetItem(str(row['created_at'])[:16]))
             self.table.setItem(r, 1, QTableWidgetItem(row['barcode']))
             self.table.setItem(r, 2, QTableWidgetItem(row['description'] or ''))
 
             type_item = QTableWidgetItem(row['movement_type'])
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            # Colour code movement type
             if row['movement_type'] in ('RECEIPT', 'ADJUSTMENT_IN', 'RETURN'):
                 type_item.setForeground(QColor("green"))
             elif row['movement_type'] in ('SALE', 'WASTAGE', 'ADJUSTMENT_OUT', 'SHRINKAGE'):
@@ -147,6 +147,6 @@ class MovementHistoryReport(QWidget):
             w = csv.writer(f)
             w.writerow(["Date/Time", "Barcode", "Description", "Type", "Qty", "Reference"])
             for row in rows:
-                w.writerow([row['moved_at'], row['barcode'], row['description'],
+                w.writerow([row['created_at'], row['barcode'], row['description'],
                              row['movement_type'], row['quantity'], row['reference']])
         QMessageBox.information(self, "Export", f"Exported to {path}")
