@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
 from utils.keyboard_mixin import KeyboardMixin
 import models.supplier as supplier_model
 
-
 class SupplierEdit(KeyboardMixin, QWidget):
     def __init__(self, supplier_id=None, on_save=None):
         super().__init__()
@@ -29,6 +28,8 @@ class SupplierEdit(KeyboardMixin, QWidget):
         self.email = QLineEdit()
         self.account = QLineEdit()
         self.terms = QLineEdit()
+        self.address = QTextEdit()
+        self.address.setMaximumHeight(80)
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(80)
         self.active = QCheckBox("Active")
@@ -40,6 +41,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
         form.addRow("Email", self.email)
         form.addRow("Account No.", self.account)
         form.addRow("Payment Terms", self.terms)
+        form.addRow("Address", self.address)
         form.addRow("Notes", self.notes)
         form.addRow("", self.active)
         layout.addLayout(form)
@@ -65,6 +67,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
             self.email.setText(s['email'] or '')
             self.account.setText(s['account_number'] or '')
             self.terms.setText(s['payment_terms'] or '')
+            self.address.setText(s.get('address') or '')
             self.notes.setText(s['notes'] or '')
             self.active.setChecked(bool(s['active']))
 
@@ -80,14 +83,16 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     self.supplier_id, code, name,
                     self.contact.text(), self.phone.text(),
                     self.email.text(), self.account.text(),
-                    self.terms.text(), self.notes.toPlainText(),
+                    self.terms.text(), self.address.toPlainText(),
+                    self.notes.toPlainText(),
                     int(self.active.isChecked())
                 )
             else:
                 supplier_model.add(
                     code, name, self.contact.text(), self.phone.text(),
                     self.email.text(), self.account.text(),
-                    self.terms.text(), self.notes.toPlainText()
+                    self.terms.text(), self.address.toPlainText(),
+                    self.notes.toPlainText()
                 )
             if self.on_save:
                 self.on_save()
