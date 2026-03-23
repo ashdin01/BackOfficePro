@@ -1,0 +1,44 @@
+# Database — never commit real store data
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Backups
+backups/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.spec
+
+# PyInstaller output
+dist/
+build/
+
+# Environment
+.env
+.venv
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Import scripts with personal data
+import_products.py
+LittleRedApple_Merged.csv

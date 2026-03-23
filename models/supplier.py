@@ -15,23 +15,32 @@ def get_by_id(supplier_id):
     conn.close()
     return row
 
-def add(code, name, contact_name='', phone='', email='', account_number='', payment_terms='', address='', notes=''):
+def add(code, name, contact_name='', phone='', email='', account_number='',
+        payment_terms='', address='', notes='', abn='', rep_name='', rep_phone='',
+        order_minimum=0):
     conn = get_connection()
     conn.execute("""
-        INSERT INTO suppliers (code, name, contact_name, phone, email, account_number, payment_terms, address, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (code.upper(), name, contact_name, phone, email, account_number, payment_terms, address, notes))
+        INSERT INTO suppliers (code, name, contact_name, phone, email, account_number,
+            payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (code.upper(), name, contact_name, phone, email, account_number,
+          payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum))
     conn.commit()
     conn.close()
 
-def update(supplier_id, code, name, contact_name, phone, email, account_number, payment_terms, address, notes, active):
+def update(supplier_id, code, name, contact_name, phone, email, account_number,
+           payment_terms, address, notes, active, abn='', rep_name='', rep_phone='',
+           order_minimum=0):
     conn = get_connection()
     conn.execute("""
         UPDATE suppliers
         SET code=?, name=?, contact_name=?, phone=?, email=?,
-            account_number=?, payment_terms=?, address=?, notes=?, active=?
+            account_number=?, payment_terms=?, address=?, notes=?, active=?,
+            abn=?, rep_name=?, rep_phone=?, order_minimum=?
         WHERE id=?
-    """, (code.upper(), name, contact_name, phone, email, account_number, payment_terms, address, notes, active, supplier_id))
+    """, (code.upper(), name, contact_name, phone, email, account_number,
+          payment_terms, address, notes, active, abn, rep_name, rep_phone,
+          order_minimum, supplier_id))
     conn.commit()
     conn.close()
 

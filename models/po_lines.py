@@ -1,6 +1,5 @@
 from database.connection import get_connection
 
-
 def get_by_po(po_id):
     conn = get_connection()
     rows = conn.execute("""
@@ -8,7 +7,6 @@ def get_by_po(po_id):
     """, (po_id,)).fetchall()
     conn.close()
     return rows
-
 
 def add(po_id, barcode, description, ordered_qty, unit_cost=0, notes=''):
     conn = get_connection()
@@ -19,7 +17,6 @@ def add(po_id, barcode, description, ordered_qty, unit_cost=0, notes=''):
     conn.commit()
     conn.close()
 
-
 def update(line_id, ordered_qty, unit_cost, notes):
     conn = get_connection()
     conn.execute("""
@@ -28,15 +25,18 @@ def update(line_id, ordered_qty, unit_cost, notes):
     conn.commit()
     conn.close()
 
-
-def receive(line_id, received_qty):
+def receive(line_id, received_qty, actual_cost=None):
     conn = get_connection()
-    conn.execute("""
-        UPDATE po_lines SET received_qty = ? WHERE id = ?
-    """, (received_qty, line_id))
+    if actual_cost is not None:
+        conn.execute("""
+            UPDATE po_lines SET received_qty=?, actual_cost=? WHERE id=?
+        """, (received_qty, actual_cost, line_id))
+    else:
+        conn.execute("""
+            UPDATE po_lines SET received_qty=? WHERE id=?
+        """, (received_qty, line_id))
     conn.commit()
     conn.close()
-
 
 def delete(line_id):
     conn = get_connection()

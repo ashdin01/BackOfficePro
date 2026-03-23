@@ -1,3 +1,4 @@
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
@@ -6,6 +7,18 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from database.connection import get_connection
+
+class NumItem(QTableWidgetItem):
+    """Sorts numerically, stripping $, %, commas and +/-."""
+    def __lt__(self, other):
+        def _val(t):
+            try:
+                return float(t.replace('$','').replace('%','').replace(',','').replace('+','').strip())
+            except ValueError:
+                return t
+        return _val(self.text()) < _val(other.text())
+
+
 import csv
 
 
@@ -118,6 +131,8 @@ class GPReport(QWidget):
             "Sell Price", "Cost Price", "GP %"
         ])
         self.detail_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.detail_table.setSortingEnabled(True)
+        self.detail_table.horizontalHeader().setSectionsClickable(True)
         self.detail_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.detail_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.detail_table)
@@ -129,6 +144,8 @@ class GPReport(QWidget):
             "Department", "Products", "Avg GP %", "✓ Healthy", "⚠ Marginal", "✕ Low"
         ])
         self.summary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.summary_table.setSortingEnabled(True)
+        self.summary_table.horizontalHeader().setSectionsClickable(True)
         self.summary_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.summary_table.hide()
         layout.addWidget(self.summary_table)
@@ -148,6 +165,7 @@ class GPReport(QWidget):
             self.detail_table.hide()
             self.summary_table.show()
             rows = get_gp_summary(dept_id)
+            self.summary_table.setSortingEnabled(False)
             self.summary_table.setRowCount(0)
             for row in rows:
                 r = self.summary_table.rowCount()
@@ -155,7 +173,7 @@ class GPReport(QWidget):
                 self.summary_table.setItem(r, 0, QTableWidgetItem(row['dept_name'] or ''))
                 self._center(self.summary_table, r, 1, str(row['product_count']))
                 avg = row['avg_gp'] or 0
-                avg_item = QTableWidgetItem(f"{avg:.1f}%")
+                avg_item = NumItem(f"{avg:.1f}%")
                 avg_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 avg_item.setForeground(
                     QColor("green") if avg >= 30 else QColor("orange") if avg >= 15 else QColor("red")
@@ -164,11 +182,13 @@ class GPReport(QWidget):
                 self._center(self.summary_table, r, 3, str(row['healthy']))
                 self._center(self.summary_table, r, 4, str(row['marginal']))
                 self._center(self.summary_table, r, 5, str(row['low_gp']))
+            self.summary_table.setSortingEnabled(True)
             self.status_label.setText(f"{len(rows)} departments")
         else:
             self.summary_table.hide()
             self.detail_table.show()
             rows = get_gp_data(dept_id, gp_filter)
+            self.detail_table.setSortingEnabled(False)
             self.detail_table.setRowCount(0)
             low_count = marginal_count = healthy_count = 0
             for row in rows:
@@ -189,10 +209,11 @@ class GPReport(QWidget):
                 self.detail_table.setItem(r, 2, QTableWidgetItem(row['dept_name'] or ''))
                 self._right(self.detail_table, r, 3, f"${row['sell_price']:.2f}")
                 self._right(self.detail_table, r, 4, f"${row['cost_price']:.2f}")
-                gp_item = QTableWidgetItem(f"{gp:.1f}%")
+                gp_item = NumItem(f"{gp:.1f}%")
                 gp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 gp_item.setForeground(color)
                 self.detail_table.setItem(r, 5, gp_item)
+            self.detail_table.setSortingEnabled(True)
             self.status_label.setText(
                 f"{self.detail_table.rowCount()} products — "
                 f"<span style='color:green'>✓ {healthy_count} healthy</span>  "
@@ -201,17 +222,17 @@ class GPReport(QWidget):
             )
 
     def _center(self, table, row, col, text):
-        item = QTableWidgetItem(text)
+        item = NumItem(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         table.setItem(row, col, item)
 
     def _right(self, table, row, col, text):
-        item = QTableWidgetItem(text)
+        item = NumItem(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         table.setItem(row, col, item)
 
     def _export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "gp_report.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "gp_report.csv"), "CSV (*.csv)")
         if not path:
             return
         rows = get_gp_data(self.dept_filter.currentData(), self.gp_filter.currentData())

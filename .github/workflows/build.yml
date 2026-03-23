@@ -1,0 +1,45 @@
+name: Build BackOfficePro
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build exe
+        run: |
+          pyinstaller --onefile --windowed --name BackOfficePro --icon=assets/icon.ico main.py
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BackOfficePro.exe
+          name: BackOfficePro ${{ github.ref_name }}
+          body: |
+            ## BackOfficePro ${{ github.ref_name }}
+            
+            ### Installation
+            1. Download BackOfficePro.exe
+            2. Run it — a fresh database will be created automatically
+            3. No installation required
+            
+            ### Requirements
+            - Windows 10 or later
+            - No Python required (standalone exe)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

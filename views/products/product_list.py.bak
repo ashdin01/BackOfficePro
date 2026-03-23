@@ -1,0 +1,140 @@
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
+    QFileDialog, QMessageBox
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeySequence, QShortcut
+from utils.keyboard_mixin import KeyboardMixin
+import models.product as product_model
+import csv
+import os
+
+
+class ProductList(KeyboardMixin, QWidget):
+    def __init__(self):
+        super().__init__()
+        self._build_ui()
+        self._load()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+
+        search_row = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search by description, barcode or brand...")
+        self.search_input.textChanged.connect(self._search)
+        self.search_input.returnPressed.connect(self._focus_table)
+        search_row.addWidget(self.search_input)
+
+        btn_add = QPushButton("&Add Product")
+        btn_add.clicked.connect(self._add)
+        search_row.addWidget(btn_add)
+
+        btn_export = QPushButton("⬇ Export CSV")
+        btn_export.clicked.connect(self._export_csv)
+        search_row.addWidget(btn_export)
+
+        layout.addLayout(search_row)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels([
+            "Barcode", "Description", "Brand", "Department", "Supplier",
+            "Unit", "Sell Price", "Cost Price"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.doubleClicked.connect(self._edit)
+        layout.addWidget(self.table)
+
+        self.status = QLabel("")
+        layout.addWidget(self.status)
+
+        QShortcut(QKeySequence("N"), self, self._add)
+        QShortcut(QKeySequence("/"), self, self._focus_search)
+        self.setup_keyboard(table=self.table)
+
+    def _focus_table(self):
+        self.table.setFocus()
+        if self.table.rowCount() > 0:
+            self.table.selectRow(0)
+
+    def _focus_search(self):
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def _load(self, rows=None):
+        if rows is None:
+            rows = product_model.get_all()
+        self.table.setRowCount(0)
+        for row in rows:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self.table.setItem(r, 0, QTableWidgetItem(row['barcode']))
+            self.table.setItem(r, 1, QTableWidgetItem(row['description']))
+            self.table.setItem(r, 2, QTableWidgetItem(row['brand'] or ''))
+            self.table.setItem(r, 3, QTableWidgetItem(row['dept_name'] or ''))
+            self.table.setItem(r, 4, QTableWidgetItem(row['supplier_name'] or ''))
+            self.table.setItem(r, 5, QTableWidgetItem(row['unit'] or ''))
+            self.table.setItem(r, 6, QTableWidgetItem(f"${row['sell_price']:.2f}"))
+            self.table.setItem(r, 7, QTableWidgetItem(f"${row['cost_price']:.2f}"))
+        self.status.setText(f"{self.table.rowCount()} products")
+
+    def _search(self, term):
+        if term.strip():
+            self._load(product_model.search(term))
+        else:
+            self._load()
+
+    def _add(self):
+        from views.products.product_add import ProductAdd
+        self.add_win = ProductAdd(on_save=self._load)
+        self.add_win.show()
+
+    def _edit(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        barcode = self.table.item(row, 0).text()
+        from views.products.product_edit import ProductEdit
+        self.edit_win = ProductEdit(barcode=barcode, on_save=self._load)
+        self.edit_win.show()
+
+    def _export_csv(self):
+        row_count = self.table.rowCount()
+        if row_count == 0:
+            QMessageBox.information(self, "Export", "No products to export.")
+            return
+
+        # Suggest a default filename in the user's home directory
+        default_path = os.path.join(os.path.expanduser("~"), "products_export.csv")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Products to CSV", default_path,
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if not path:
+            return  # user cancelled
+
+        col_count = self.table.columnCount()
+        headers = [
+            self.table.horizontalHeaderItem(c).text()
+            for c in range(col_count)
+        ]
+
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                for r in range(row_count):
+                    writer.writerow([
+                        self.table.item(r, c).text() if self.table.item(r, c) else ""
+                        for c in range(col_count)
+                    ])
+            QMessageBox.information(
+                self, "Export Complete",
+                f"Exported {row_count} products to:\n{path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Export Failed", str(e))

@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QPushButton,
-    QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QTextEdit
+    QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QTextEdit, QDoubleSpinBox
 )
 from utils.keyboard_mixin import KeyboardMixin
 import models.supplier as supplier_model
@@ -32,13 +32,24 @@ class SupplierEdit(KeyboardMixin, QWidget):
         self.address.setMaximumHeight(80)
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(80)
+        self.abn = QLineEdit()
+        self.rep_name = QLineEdit()
+        self.rep_phone = QLineEdit()
+        self.order_minimum = QDoubleSpinBox()
+        self.order_minimum.setMaximum(999999)
+        self.order_minimum.setPrefix("$")
+        self.order_minimum.setDecimals(2)
         self.active = QCheckBox("Active")
         self.active.setChecked(True)
         form.addRow("Code *", self.code)
-        form.addRow("Name *", self.name)
+        form.addRow("Company Name *", self.name)
+        form.addRow("ABN", self.abn)
         form.addRow("Contact Name", self.contact)
         form.addRow("Phone", self.phone)
         form.addRow("Email", self.email)
+        form.addRow("Rep Name", self.rep_name)
+        form.addRow("Rep Phone", self.rep_phone)
+        form.addRow("Order Minimum", self.order_minimum)
         form.addRow("Account No.", self.account)
         form.addRow("Payment Terms", self.terms)
         form.addRow("Address", self.address)
@@ -67,8 +78,13 @@ class SupplierEdit(KeyboardMixin, QWidget):
             self.email.setText(s['email'] or '')
             self.account.setText(s['account_number'] or '')
             self.terms.setText(s['payment_terms'] or '')
-            self.address.setText(s.get('address') or '')
+            keys = s.keys()
+            self.address.setText(s['address'] if 'address' in keys else '')
             self.notes.setText(s['notes'] or '')
+            self.abn.setText(s['abn'] if 'abn' in keys else '')
+            self.rep_name.setText(s['rep_name'] if 'rep_name' in keys else '')
+            self.rep_phone.setText(s['rep_phone'] if 'rep_phone' in keys else '')
+            self.order_minimum.setValue(float(s['order_minimum']) if 'order_minimum' in keys and s['order_minimum'] else 0)
             self.active.setChecked(bool(s['active']))
 
     def _save(self):
@@ -85,14 +101,22 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     self.email.text(), self.account.text(),
                     self.terms.text(), self.address.toPlainText(),
                     self.notes.toPlainText(),
-                    int(self.active.isChecked())
+                    int(self.active.isChecked()),
+                    abn=self.abn.text().strip(),
+                    rep_name=self.rep_name.text().strip(),
+                    rep_phone=self.rep_phone.text().strip(),
+                    order_minimum=self.order_minimum.value(),
                 )
             else:
                 supplier_model.add(
                     code, name, self.contact.text(), self.phone.text(),
                     self.email.text(), self.account.text(),
                     self.terms.text(), self.address.toPlainText(),
-                    self.notes.toPlainText()
+                    self.notes.toPlainText(),
+                    abn=self.abn.text().strip(),
+                    rep_name=self.rep_name.text().strip(),
+                    rep_phone=self.rep_phone.text().strip(),
+                    order_minimum=self.order_minimum.value(),
                 )
             if self.on_save:
                 self.on_save()

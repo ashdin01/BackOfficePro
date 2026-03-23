@@ -27,8 +27,10 @@ class SupplierList(KeyboardMixin, QWidget):
         layout.addLayout(top)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Code", "Name", "Contact", "Phone", "Active"])
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(
+            ["Code", "Name", "Phone", "Rep Name", "Rep Phone", "Order Min", "Active"]
+        )
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -48,11 +50,16 @@ class SupplierList(KeyboardMixin, QWidget):
             self.table.insertRow(r)
             self.table.setItem(r, 0, QTableWidgetItem(row['code']))
             self.table.setItem(r, 1, QTableWidgetItem(row['name']))
-            self.table.setItem(r, 2, QTableWidgetItem(row['contact_name'] or ''))
-            self.table.setItem(r, 3, QTableWidgetItem(row['phone'] or ''))
+            self.table.setItem(r, 2, QTableWidgetItem(row['phone'] or ''))
+            self.table.setItem(r, 3, QTableWidgetItem(row['rep_name'] if 'rep_name' in row.keys() else ''))
+            self.table.setItem(r, 4, QTableWidgetItem(row['rep_phone'] if 'rep_phone' in row.keys() else ''))
+            order_min = row['order_minimum'] if 'order_minimum' in row.keys() else 0
+            min_item = QTableWidgetItem(f"${order_min:.2f}" if order_min else "")
+            min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(r, 5, min_item)
             active = QTableWidgetItem("Yes" if row['active'] else "No")
             active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(r, 4, active)
+            self.table.setItem(r, 6, active)
             self.table.item(r, 0).setData(Qt.ItemDataRole.UserRole, row['id'])
         self.status.setText(f"{self.table.rowCount()} suppliers")
 

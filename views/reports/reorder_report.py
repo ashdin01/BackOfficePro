@@ -1,3 +1,4 @@
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
@@ -6,6 +7,18 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from database.connection import get_connection
+
+class NumItem(QTableWidgetItem):
+    """Sorts numerically, stripping $, %, commas and +/-."""
+    def __lt__(self, other):
+        def _val(t):
+            try:
+                return float(t.replace('$','').replace('%','').replace(',','').replace('+','').strip())
+            except ValueError:
+                return t
+        return _val(self.text()) < _val(other.text())
+
+
 import csv
 
 
@@ -15,8 +28,19 @@ def get_reorder_items(dept_id=None, supplier_id=None):
         SELECT p.barcode, p.description, d.name as dept_name,
                sup.name as supplier_name,
                COALESCE(s.quantity, 0) as on_hand,
-               p.reorder_point, p.reorder_qty, p.unit, p.cost_price,
-               p.reorder_qty * p.cost_price as order_cost
+               p.reorder_point,
+               COALESCE(p.reorder_max, 0) as reorder_max,
+               p.unit, p.cost_price,
+               CASE
+                   WHEN COALESCE(p.reorder_max, 0) > 0
+                   THEN MAX(1, COALESCE(p.reorder_max, 0) - COALESCE(s.quantity, 0))
+                   ELSE 0
+               END as suggested_qty,
+               CASE
+                   WHEN COALESCE(p.reorder_max, 0) > 0
+                   THEN MAX(1, COALESCE(p.reorder_max, 0) - COALESCE(s.quantity, 0)) * p.cost_price
+                   ELSE 0
+               END as order_cost
         FROM products p
         LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
         LEFT JOIN departments d ON p.department_id = d.id
@@ -94,6 +118,8 @@ class ReorderReport(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSectionsClickable(True)
         layout.addWidget(self.table)
 
         footer = QHBoxLayout()
@@ -110,6 +136,7 @@ class ReorderReport(QWidget):
         sup_id = self.sup_filter.currentData()
         rows = get_reorder_items(dept_id, sup_id)
 
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         total_cost = 0
 
@@ -124,32 +151,32 @@ class ReorderReport(QWidget):
             self.table.setItem(r, 2, QTableWidgetItem(row['dept_name'] or ''))
             self.table.setItem(r, 3, QTableWidgetItem(row['supplier_name'] or ''))
 
-            qty_item = QTableWidgetItem(f"{on_hand:.0f}")
+            qty_item = NumItem(f"{on_hand:.0f}")
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             qty_item.setForeground(QColor("red") if on_hand == 0 else QColor("orange"))
             self.table.setItem(r, 4, qty_item)
 
             self._center(r, 5, f"{reorder:.0f}")
-            self._center(r, 6, f"{row['reorder_qty']:.0f}")
             self._right(r, 7, f"${row['cost_price']:.2f}")
             self._right(r, 8, f"${row['order_cost']:.2f}")
             total_cost += row['order_cost'] or 0
 
+        self.table.setSortingEnabled(True)
         self.status_label.setText(f"{self.table.rowCount()} items need reordering")
         self.cost_label.setText(f"<b>Estimated Order Cost: ${total_cost:,.2f}</b>")
 
     def _center(self, row, col, text):
-        item = QTableWidgetItem(text)
+        item = NumItem(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.setItem(row, col, item)
 
     def _right(self, row, col, text):
-        item = QTableWidgetItem(text)
+        item = NumItem(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.table.setItem(row, col, item)
 
     def _export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "reorder_report.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "reorder_report.csv"), "CSV (*.csv)")
         if not path:
             return
         rows = get_reorder_items(self.dept_filter.currentData(), self.sup_filter.currentData())
@@ -160,5 +187,5 @@ class ReorderReport(QWidget):
             for row in rows:
                 w.writerow([row['barcode'], row['description'], row['dept_name'],
                              row['supplier_name'], row['on_hand'], row['reorder_point'],
-                             row['reorder_qty'], row['cost_price'], row['order_cost']])
+                             row['cost_price'], row['order_cost']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

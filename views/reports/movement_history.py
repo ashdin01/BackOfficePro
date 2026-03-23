@@ -1,3 +1,4 @@
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
@@ -6,21 +7,34 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
 from database.connection import get_connection
+
+class NumItem(QTableWidgetItem):
+    """Sorts numerically, stripping $, %, commas and +/-."""
+    def __lt__(self, other):
+        def _val(t):
+            try:
+                return float(t.replace('$','').replace('%','').replace(',','').replace('+','').strip())
+            except ValueError:
+                return t
+        return _val(self.text()) < _val(other.text())
+
+
 import csv
 
 
-def get_movements(barcode=None, move_type=None, date_from=None, date_to=None, limit=500):
+def get_movements(barcode=None, move_type=None, date_from=None, date_to=None, limit=2000):
     conn = get_connection()
     sql = """
         SELECT sm.id, sm.barcode, p.description, sm.movement_type,
-               sm.quantity, sm.reference, sm.created_at
+               sm.quantity, sm.reference, sm.notes, sm.created_at
         FROM stock_movements sm
         LEFT JOIN products p ON sm.barcode = p.barcode
         WHERE 1=1
     """
     params = []
     if barcode:
-        sql += " AND sm.barcode LIKE ?"
+        sql += " AND (sm.barcode LIKE ? OR p.description LIKE ?)"
+        params.append(f"%{barcode}%")
         params.append(f"%{barcode}%")
     if move_type and move_type != "ALL":
         sql += " AND sm.movement_type = ?"
@@ -84,13 +98,26 @@ class MovementHistoryReport(QWidget):
         layout.addLayout(filter_row)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "Date/Time", "Barcode", "Description", "Type", "Qty", "Reference"
+            "Date/Time", "Barcode", "Description", "Type", "Qty", "Reference", "Notes"
         ])
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr = self.table.horizontalHeader()
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        for ci in [0, 1, 3, 4, 5]:
+            hdr.setSectionResizeMode(ci, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(0, 130)
+        self.table.setColumnWidth(1, 130)
+        self.table.setColumnWidth(3, 110)
+        self.table.setColumnWidth(4, 60)
+        self.table.setColumnWidth(5, 110)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSectionsClickable(True)
+        self.table.doubleClicked.connect(self._open_product)
         layout.addWidget(self.table)
 
         self.status_label = QLabel("")
@@ -103,6 +130,7 @@ class MovementHistoryReport(QWidget):
             date_from=self.date_from.date().toString("yyyy-MM-dd"),
             date_to=self.date_to.date().toString("yyyy-MM-dd"),
         )
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         for row in rows:
             r = self.table.rowCount()
@@ -123,17 +151,29 @@ class MovementHistoryReport(QWidget):
             self.table.setItem(r, 3, type_item)
 
             qty = row['quantity']
-            qty_item = QTableWidgetItem(f"{'+' if qty > 0 else ''}{qty:.0f}")
+            qty_item = NumItem(f"{'+' if qty > 0 else ''}{qty:.0f}")
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             qty_item.setForeground(QColor("green") if qty > 0 else QColor("red"))
             self.table.setItem(r, 4, qty_item)
 
             self.table.setItem(r, 5, QTableWidgetItem(row['reference'] or ''))
+            self.table.setItem(r, 6, QTableWidgetItem(row['notes'] or ''))
 
-        self.status_label.setText(f"{self.table.rowCount()} movements shown  (max 500)")
+        self.table.setSortingEnabled(True)
+        self.status_label.setText(f"{self.table.rowCount()} movements  ·  double-click a row to view product")
+
+    def _open_product(self, index):
+        row = index.row()
+        barcode_item = self.table.item(row, 1)
+        if not barcode_item:
+            return
+        barcode = barcode_item.text()
+        from views.products.product_edit import ProductEdit
+        self._prod_win = ProductEdit(barcode=barcode)
+        self._prod_win.show()
 
     def _export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "movements.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "movements.csv"), "CSV (*.csv)")
         if not path:
             return
         rows = get_movements(
@@ -145,8 +185,8 @@ class MovementHistoryReport(QWidget):
         )
         with open(path, 'w', newline='') as f:
             w = csv.writer(f)
-            w.writerow(["Date/Time", "Barcode", "Description", "Type", "Qty", "Reference"])
+            w.writerow(["Date/Time", "Barcode", "Description", "Type", "Qty", "Reference", "Notes"])
             for row in rows:
                 w.writerow([row['created_at'], row['barcode'], row['description'],
-                             row['movement_type'], row['quantity'], row['reference']])
+                             row['movement_type'], row['quantity'], row['reference'], row['notes']])
         QMessageBox.information(self, "Export", f"Exported to {path}")
