@@ -37,8 +37,8 @@ class ProductAdd(KeyboardMixin, QWidget):
         self.brand = QLineEdit()
         self.brand.setPlaceholderText("Brand name (optional)")
 
-        self.sku = QLineEdit()
-        self.sku.setPlaceholderText("Internal SKU (optional)")
+        self.plu = QLineEdit()
+        self.plu.setPlaceholderText("PLU / POS code (optional)")
 
         self.supplier = QComboBox()
         self.supplier.addItem("-- None --", None)
@@ -115,7 +115,7 @@ class ProductAdd(KeyboardMixin, QWidget):
         form.addRow("Barcode *",        self.barcode)
         form.addRow("Description *",    self.description)
         form.addRow("Brand",            self.brand)
-        form.addRow("SKU",              self.sku)
+        form.addRow("PLU",              self.plu)
         form.addRow("Supplier",         self.supplier)
         form.addRow("Supplier SKU",     self.supplier_sku)
         form.addRow("Units per Carton", pack_row)
@@ -173,7 +173,7 @@ class ProductAdd(KeyboardMixin, QWidget):
                 barcode=barcode,
                 description=description,
                 brand=self.brand.text().strip(),
-                sku=self.sku.text().strip(),
+                plu=self.plu.text().strip(),
                 supplier_sku=self.supplier_sku.text().strip(),
                 pack_qty=self.pack_qty.value(),
                 pack_unit=self.pack_unit.currentText(),

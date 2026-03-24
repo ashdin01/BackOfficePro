@@ -102,6 +102,68 @@ def _save_plu_map(plu, barcode: str):
         conn.commit()
     finally:
         conn.close()
+    # Backfill any historical sales movements now that PLU is mapped
+    _backfill_sale_movements(plu, barcode)
+
+
+def _backfill_sale_movements(plu, barcode: str):
+    """
+    After a PLU→barcode mapping is saved, retroactively create stock movements
+    for any historical sales_daily records that were imported before the mapping
+    existed.
+    """
+    try:
+        plu_str = str(plu).strip()
+        conn = get_connection()
+        try:
+            # Find all sales_daily rows for this PLU with no existing movement
+            orphaned = conn.execute("""
+                SELECT sd.sale_date, sd.plu, sd.plu_name, sd.quantity
+                FROM sales_daily sd
+                WHERE sd.plu = ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM stock_movements sm
+                    WHERE sm.barcode = ?
+                    AND sm.reference = 'SALE-' || sd.sale_date || '-PLU' || sd.plu
+                )
+                ORDER BY sd.sale_date
+            """, (plu_str, barcode)).fetchall()
+
+            if not orphaned:
+                return
+
+            backfilled = 0
+            for row in orphaned:
+                reference = f"SALE-{row['sale_date']}-PLU{row['plu']}"
+                quantity  = float(row['quantity'])
+                plu_name  = row['plu_name'] or ""
+
+                # Create movement
+                conn.execute("""
+                    INSERT INTO stock_movements
+                        (barcode, movement_type, quantity, reference, notes, created_by)
+                    VALUES (?, 'SALE', ?, ?, ?, 'PDF Import (backfill)')
+                """, (barcode, -quantity, reference,
+                      f"Backfill: {plu_name} ({quantity} units)"))
+
+                # Update SOH — creates row if not exists
+                conn.execute("""
+                    INSERT INTO stock_on_hand (barcode, quantity)
+                    VALUES (?, ?)
+                    ON CONFLICT(barcode) DO UPDATE SET
+                        quantity = quantity + excluded.quantity,
+                        last_updated = CURRENT_TIMESTAMP
+                """, (barcode, -quantity))
+
+                backfilled += 1
+
+            conn.commit()
+            if backfilled:
+                print(f"  Backfilled {backfilled} sale movements for PLU {plu} → {barcode}")
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"  Backfill error: {e}")
 
 
 def _load_plu_map() -> dict:
@@ -157,7 +219,7 @@ def _get_all_products():
     try:
         rows = conn.execute("""
             SELECT p.barcode, p.description, p.brand,
-                   COALESCE(p.sku, p.base_sku, '') as plu,
+                   COALESCE(p.plu, '') as plu,
                    d.name as dept_name, d.id as dept_id,
                    s.name as supplier_name, s.id as supplier_id,
                    p.sell_price, p.cost_price, p.unit
@@ -242,7 +304,7 @@ class _AddProductDialog(QDialog):
         self.f_brand.setPlaceholderText("Brand name (optional)")
         form.addRow(opt("Brand"), self.f_brand)
 
-        self.f_sku = QLineEdit(pf.get("base_sku",""))
+        self.f_plu = QLineEdit(pf.get("plu",""))
         self.f_sku.setPlaceholderText("Internal SKU (optional)")
         form.addRow(opt("SKU"), self.f_sku)
 
@@ -864,7 +926,7 @@ class SalesReportView(QWidget):
         # Load ALL products from DB keyed by PLU (zero-padded barcode)
         # so we can join full product data onto each sales row.
         all_prods_rows = conn.execute("""
-            SELECT p.barcode, p.base_sku, p.description, p.brand,
+            SELECT p.barcode, p.plu, p.description, p.brand,
                    d.name  AS dept_name,
                    s.name  AS supplier_name,
                    p.unit, p.sell_price, p.cost_price,
@@ -888,8 +950,8 @@ class SalesReportView(QWidget):
             stripped = bc.lstrip("0")
             if stripped.isdigit():
                 plu_to_prod[int(stripped)] = p
-            # Also index by base_sku if numeric
-            sku = p.get("base_sku") or ""
+            # Also index by plu if numeric
+            sku = p.get("plu") or ""
             if sku.isdigit():
                 plu_to_prod[int(sku)] = p
             # Store-specific: barcode format is "02" + zero-padded PLU
@@ -950,11 +1012,11 @@ class SalesReportView(QWidget):
             # 2. PLU itself is a barcode
             if prod is None:
                 prod = bc_to_prod.get(str(plu).strip())
-            # 3. Auto-assign: PLU exactly matches product base_sku/PLU field
+            # 3. Auto-assign: PLU exactly matches product plu field
             if prod is None and plu_int is not None:
                 for p in all_prods:
                     try:
-                        if int(str(p.get("base_sku") or "").strip()) == plu_int:
+                        if int(str(p.get("plu") or "").strip()) == plu_int:
                             prod = p
                             _save_plu_map(plu_int, p["barcode"])
                             break
@@ -1206,7 +1268,7 @@ class SalesReportView(QWidget):
 
         # ── Build product lookups (same as _load) ─────────────────────
         all_prods_rows = conn.execute("""
-            SELECT p.barcode, p.base_sku, p.description,
+            SELECT p.barcode, p.plu, p.description,
                    d.name AS dept_name,
                    COALESCE(soh.quantity, 0) AS on_hand
             FROM products p
@@ -1224,7 +1286,7 @@ class SalesReportView(QWidget):
             stripped = bc.lstrip("0")
             if stripped.isdigit():
                 plu_to_prod[int(stripped)] = p
-            sku = p.get("base_sku") or ""
+            sku = p.get("plu") or ""
             if sku.isdigit():
                 plu_to_prod[int(sku)] = p
             if bc.startswith("02") and len(bc) == 7:

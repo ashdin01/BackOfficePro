@@ -158,7 +158,7 @@ class ProductList(KeyboardMixin, QWidget):
                 bc_item.setForeground(QColor('#69f0ae'))
                 bc_item.setToolTip('Temporary barcode — update when real barcode is scanned')
             self.table.setItem(r, 0, bc_item)
-            self.table.setItem(r, 1,  QTableWidgetItem(str(row['sku'] or '')))
+            self.table.setItem(r, 1,  QTableWidgetItem(str(row['plu'] or '')))
             self.table.setItem(r, 2,  QTableWidgetItem(row['description']))
             self.table.setItem(r, 3,  QTableWidgetItem(row['brand'] or ''))
             self.table.setItem(r, 4,  QTableWidgetItem(row['dept_name'] or ''))

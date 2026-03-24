@@ -48,7 +48,7 @@ def get_by_barcode(barcode):
     barcode = resolve_barcode(barcode)
     conn = get_connection()
     row = conn.execute("""
-        SELECT p.*, d.name as dept_name, s.name as supplier_name,
+        SELECT p.*, p.plu, d.name as dept_name, s.name as supplier_name,
                g.name as group_name, g.id as group_id_val
         FROM products p
         LEFT JOIN departments d    ON p.department_id = d.id
@@ -88,7 +88,7 @@ def search(term, active_only=True):
     where = " AND ".join(word_clauses)
 
     rows = conn.execute(f"""
-        SELECT p.*, d.name as dept_name, s.name as supplier_name,
+        SELECT p.*, p.plu, d.name as dept_name, s.name as supplier_name,
                g.name as group_name, g.id as group_id_val
         FROM products p
         LEFT JOIN departments d    ON p.department_id = d.id
@@ -105,16 +105,16 @@ def search(term, active_only=True):
 def add(barcode, description, department_id, supplier_id=None, unit='EA',
         sell_price=0, cost_price=0, tax_rate=0, reorder_point=0,
         reorder_max=0, variable_weight=0, expected=1, brand='',
-        sku='', supplier_sku='', pack_qty=1, pack_unit='EA', group_id=None):
+        plu='', supplier_sku='', pack_qty=1, pack_unit='EA', group_id=None):
     conn = get_connection()
     conn.execute("""
         INSERT INTO products
-            (barcode, description, brand, sku, supplier_sku, pack_qty, pack_unit,
+            (barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
              group_id, department_id, supplier_id, unit,
              sell_price, cost_price, tax_rate, reorder_point, reorder_max,
              variable_weight, expected)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (barcode, description, brand, sku, supplier_sku, pack_qty, pack_unit,
+    """, (barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
           group_id, department_id, supplier_id, unit,
           sell_price, cost_price, tax_rate, reorder_point, reorder_max,
           variable_weight, expected))
@@ -122,20 +122,20 @@ def add(barcode, description, department_id, supplier_id=None, unit='EA',
     conn.close()
 
 
-def update(barcode, description, brand, sku, supplier_sku, pack_qty, pack_unit,
+def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
            group_id, department_id, supplier_id, unit,
            sell_price, cost_price, tax_rate, reorder_point, reorder_max=0,
            variable_weight=0, expected=1, active=1):
     conn = get_connection()
     conn.execute("""
         UPDATE products
-        SET description=?, brand=?, sku=?, supplier_sku=?, pack_qty=?, pack_unit=?,
+        SET description=?, brand=?, plu=?, supplier_sku=?, pack_qty=?, pack_unit=?,
             group_id=?, department_id=?, supplier_id=?, unit=?,
             sell_price=?, cost_price=?, tax_rate=?, reorder_point=?,
             reorder_max=?, variable_weight=?, expected=?, active=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE barcode=?
-    """, (description, brand, sku, supplier_sku, pack_qty, pack_unit,
+    """, (description, brand, plu, supplier_sku, pack_qty, pack_unit,
           group_id, department_id, supplier_id, unit, sell_price,
           cost_price, tax_rate, reorder_point, reorder_max,
           variable_weight, expected, active, barcode))

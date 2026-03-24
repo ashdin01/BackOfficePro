@@ -34,7 +34,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         p = self.product
         self._description   = p['description']
         self._brand         = p['brand'] or ''
-        self._sku           = p['sku'] or ''
+        self._plu           = p['plu'] or '' if 'plu' in p.keys() else ''
         self._supplier_sku  = p['supplier_sku'] or ''
         self._pack_qty      = int(p['pack_qty']) if 'pack_qty' in p.keys() and p['pack_qty'] else 1
         self._pack_unit     = p['pack_unit'] if 'pack_unit' in p.keys() and p['pack_unit'] else 'EA'
@@ -77,7 +77,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_brand = ro_row(self._brand or "—", self._edit_brand)
         form.addRow("Brand", r)
 
-        r, self.lbl_sku = ro_row(self._sku or "—", self._edit_sku)
+        r, self.lbl_plu = ro_row(self._plu or "—", self._edit_plu)
         form.addRow("SKU", r)
 
         r, self.lbl_supplier = ro_row(self._supplier_name(), self._edit_supplier)
@@ -194,11 +194,11 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._brand = val
             self.lbl_brand.setText(val or "—")
 
-    def _edit_sku(self):
-        val = _text_popup_optional("Edit SKU", "SKU", self._sku, self)
+    def _edit_plu(self):
+        val = _text_popup_optional("Edit PLU", "PLU", self._plu, self)
         if val is not None:
-            self._sku = val
-            self.lbl_sku.setText(val or "—")
+            self._plu = val
+            self.lbl_plu.setText(val or "—")
 
     def _edit_supplier_sku(self):
         result = _supplier_sku_popup(self._supplier_sku, self._pack_qty, self._pack_unit, self)
@@ -484,7 +484,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 barcode=self.barcode,
                 description=self._description,
                 brand=self._brand,
-                sku=self._sku,
+                plu=self._plu,
                 supplier_sku=self._supplier_sku,
                 pack_qty=self._pack_qty,
                 pack_unit=self._pack_unit,

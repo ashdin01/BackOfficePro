@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
 CREATE TABLE IF NOT EXISTS products (
     barcode         TEXT    PRIMARY KEY,
     base_sku        TEXT,
+    plu             TEXT,
     description     TEXT    NOT NULL,
     department_id   INTEGER NOT NULL,
     supplier_id     INTEGER,

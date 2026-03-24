@@ -115,6 +115,7 @@ def migrate_v7(conn):
         ("pack_unit",   "TEXT DEFAULT 'EA'"),
         ("reorder_max", "REAL DEFAULT 0"),
         ("base_sku",    "TEXT"),
+        ("plu",         "TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE products ADD COLUMN {col} {typedef}")
@@ -159,5 +160,8 @@ def migrate_v7(conn):
         )
     """)
 
+    # Migrate sku and base_sku into plu
+    conn.execute("UPDATE products SET plu = sku WHERE sku IS NOT NULL AND sku != '' AND (plu IS NULL OR plu = '')")
+    conn.execute("UPDATE products SET plu = base_sku WHERE base_sku IS NOT NULL AND base_sku != '' AND (plu IS NULL OR plu = '')")
     conn.execute("UPDATE settings SET value = '7' WHERE key = 'schema_version'")
     conn.commit()
