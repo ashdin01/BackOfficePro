@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS products (
     tax_rate        REAL    DEFAULT 0,
     reorder_point   REAL    DEFAULT 0,
     reorder_qty     REAL    DEFAULT 0,
+    reorder_max     REAL    DEFAULT 0,
+    pack_qty        INTEGER DEFAULT 1,
+    pack_unit       TEXT    DEFAULT 'EA',
+    plu             TEXT,
     variable_weight INTEGER NOT NULL DEFAULT 0,
     expected        INTEGER NOT NULL DEFAULT 1,
     active          INTEGER NOT NULL DEFAULT 1,
@@ -109,6 +113,7 @@ CREATE TABLE IF NOT EXISTS po_lines (
     received_qty    REAL    NOT NULL DEFAULT 0,
     unit_cost       REAL    NOT NULL DEFAULT 0,
     notes           TEXT,
+    actual_cost     REAL    DEFAULT 0,
     FOREIGN KEY (po_id)   REFERENCES purchase_orders(id),
     FOREIGN KEY (barcode) REFERENCES products(barcode)
 );
