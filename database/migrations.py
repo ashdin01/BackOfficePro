@@ -115,7 +115,6 @@ def migrate_v7(conn):
         ("pack_unit",   "TEXT DEFAULT 'EA'"),
         ("reorder_max", "REAL DEFAULT 0"),
         ("base_sku",    "TEXT"),
-        ("plu",         "TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE products ADD COLUMN {col} {typedef}")
