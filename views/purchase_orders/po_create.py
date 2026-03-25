@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox, QTextEdit, QLabel
 )
 from PyQt6.QtCore import QDate
+from PyQt6.QtGui import QKeySequence, QShortcut
 import models.purchase_order as po_model
 import models.supplier as supplier_model
 
@@ -41,12 +42,18 @@ class POCreate(QWidget):
 
         layout.addSpacing(10)
         btns = QHBoxLayout()
-        save_btn = QPushButton("Create PO")
+        save_btn = QPushButton("Create PO  [Ctrl+S]")
         save_btn.setFixedHeight(35)
+        save_btn.setDefault(False)
+        save_btn.setAutoDefault(False)
         save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(35)
+        cancel_btn.setDefault(False)
+        cancel_btn.setAutoDefault(False)
         cancel_btn.clicked.connect(self.close)
+        QShortcut(QKeySequence("Ctrl+S"), self, self._save)
+        QShortcut(QKeySequence("Escape"), self, self.close)
         btns.addWidget(save_btn)
         btns.addWidget(cancel_btn)
         layout.addLayout(btns)

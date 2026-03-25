@@ -81,9 +81,9 @@ def search(term, active_only=True):
         like = f"%{word}%"
         word_clauses.append(
             "(p.description LIKE ? OR p.barcode LIKE ? OR p.brand LIKE ? OR "
-            "d.name LIKE ? OR s.name LIKE ?)"
+            "d.name LIKE ? OR s.name LIKE ? OR p.plu LIKE ?)"
         )
-        params.extend([like, like, like, like, like])
+        params.extend([like, like, like, like, like, like])
 
     where = " AND ".join(word_clauses)
 

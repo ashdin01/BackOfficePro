@@ -144,7 +144,8 @@ class MainWindow(QMainWindow):
         for screen in self.screens:
             self.stack.addWidget(screen)
 
-        QShortcut(QKeySequence("P"), self, lambda: self._switch(0))
+        QShortcut(QKeySequence("P"),      self, lambda: self._switch(0))
+        QShortcut(QKeySequence("Escape"),  self, lambda: self._switch(0))
         QShortcut(QKeySequence("S"), self, lambda: self._switch(1))
         QShortcut(QKeySequence("D"), self, lambda: self._switch(2))
         QShortcut(QKeySequence("O"), self, lambda: self._switch(3))

@@ -108,6 +108,8 @@ class POList(QWidget):
         QShortcut(QKeySequence("N"), self, self._create)
         QShortcut(QKeySequence("O"), self, self._open)
         QShortcut(QKeySequence("R"), self, self._open_receive)
+        QShortcut(QKeySequence("Return"),  self, self._open)
+        QShortcut(QKeySequence("Enter"),   self, self._open)
 
     def _make_table(self):
         t = QTableWidget()
@@ -163,8 +165,12 @@ class POList(QWidget):
 
         self.active_status.setText(
             f"{self.active_table.rowCount()} active purchase orders  "
-            f"·  Double-click to open  ·  Right-click for options"
+            f"·  Enter to open  ·  Right-click for options"
         )
+        # Auto-focus table and select first row
+        if self.active_table.rowCount() > 0:
+            self.active_table.setFocus()
+            self.active_table.selectRow(0)
 
     def _load_archive(self):
         status = self.archive_filter.currentData()
@@ -270,6 +276,14 @@ class POList(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             po_model.cancel(po_id)
             self._load()
+
+    def showEvent(self, event):
+        """Auto-focus table when screen becomes visible."""
+        super().showEvent(event)
+        if self.active_table.rowCount() > 0:
+            self.active_table.setFocus()
+            if self.active_table.currentRow() < 0:
+                self.active_table.selectRow(0)
 
     def _show_context_menu(self, pos):
         row = self.active_table.rowAt(pos.y())

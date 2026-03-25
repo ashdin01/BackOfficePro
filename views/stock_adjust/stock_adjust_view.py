@@ -39,26 +39,9 @@ CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
 
 
 def search_products(term):
-    """Search by description, barcode, brand, supplier_sku, or sku."""
-    conn = get_connection()
-    like = f"%{term}%"
-    rows = conn.execute("""
-        SELECT p.barcode, p.description, p.supplier_sku, p.sku, p.brand,
-               d.name as department_name, s.name as supplier_name
-        FROM products p
-        LEFT JOIN departments d ON p.department_id = d.id
-        LEFT JOIN suppliers s   ON p.supplier_id   = s.id
-        WHERE p.active = 1
-          AND (p.description LIKE ?
-               OR p.barcode LIKE ?
-               OR p.brand LIKE ?
-               OR p.supplier_sku LIKE ?
-               OR p.sku LIKE ?)
-        ORDER BY p.description
-        LIMIT 100
-    """, (like, like, like, like, like)).fetchall()
-    conn.close()
-    return rows
+    """Delegate to product_model.search() for consistent multi-word PLU/barcode/description search."""
+    import models.product as product_model
+    return product_model.search(term, active_only=True)
 
 
 class StockAdjustView(QWidget):
@@ -74,7 +57,7 @@ class StockAdjustView(QWidget):
         layout.addWidget(QLabel("Manually adjust stock on hand for any product"))
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search by barcode, description, brand or supplier SKU…")
+        self.search.setPlaceholderText("Search by barcode, PLU, description, brand, supplier or department…")
         self.search.setMinimumHeight(36)
         self.search.textChanged.connect(self._on_search_changed)
         layout.addWidget(self.search)

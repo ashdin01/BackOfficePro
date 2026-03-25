@@ -32,7 +32,7 @@ class ProductList(KeyboardMixin, QWidget):
         # ── Search row ────────────────────────────────────────────────
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by description, barcode or brand...")
+        self.search_input.setPlaceholderText("Search by barcode, PLU, description, brand, supplier or department…")
         self.search_input.textChanged.connect(self._search)
         self.search_input.returnPressed.connect(self._focus_table)
         search_row.addWidget(self.search_input)
