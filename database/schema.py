@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS products (
     reorder_max     REAL    DEFAULT 0,
     pack_qty        INTEGER DEFAULT 1,
     pack_unit       TEXT    DEFAULT 'EA',
-    plu             TEXT,
     variable_weight INTEGER NOT NULL DEFAULT 0,
     expected        INTEGER NOT NULL DEFAULT 1,
     active          INTEGER NOT NULL DEFAULT 1,
