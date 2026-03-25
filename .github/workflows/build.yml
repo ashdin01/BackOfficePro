@@ -23,7 +23,7 @@ jobs:
 
       - name: Build exe
         run: |
-          pyinstaller --onefile --windowed --name BackOfficePro --icon=assets/icon.ico main.py
+          pyinstaller BackOfficePro.spec
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
