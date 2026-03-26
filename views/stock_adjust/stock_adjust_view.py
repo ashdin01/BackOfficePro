@@ -168,7 +168,7 @@ class StockAdjustView(QWidget):
             self.results_table.setItem(r, 0, _item(p["barcode"]))
             self.results_table.setItem(r, 1, _item(p["description"]))
             self.results_table.setItem(r, 2, _item(p["supplier_sku"] or ""))
-            self.results_table.setItem(r, 3, _item(p["department_name"] or ""))
+            self.results_table.setItem(r, 3, _item(p["dept_name"] or ""))
             self.results_table.setItem(r, 4, _item(str(on_hand), CENTER))
             sel_btn = QPushButton("Select")
             sel_btn.setFixedHeight(26)

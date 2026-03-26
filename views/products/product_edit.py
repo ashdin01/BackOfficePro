@@ -69,7 +69,8 @@ class ProductEdit(KeyboardMixin, QWidget):
             return row, lbl
 
         # ── Field order per spec ──────────────────────────────────────
-        form.addRow("Barcode", QLabel(self.product['barcode']))
+        r, self.lbl_barcode = ro_row(self.product['barcode'], self._edit_barcode)
+        form.addRow("Barcode", r)
 
         r, self.lbl_desc = ro_row(self._description, self._edit_description)
         form.addRow("Description", r)
@@ -181,6 +182,49 @@ class ProductEdit(KeyboardMixin, QWidget):
         return base
 
     # ── Edit popup helpers ────────────────────────────────────────────
+
+    def _edit_barcode(self):
+        new_bc = _text_popup("Edit Barcode", "Barcode", self.product['barcode'], self)
+        if new_bc is None or new_bc == self.product['barcode']:
+            return
+        # Check barcode doesn't already exist
+        from database.connection import get_connection
+        conn = get_connection()
+        existing = conn.execute(
+            "SELECT description FROM products WHERE barcode=?", (new_bc,)
+        ).fetchone()
+        conn.close()
+        if existing:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Barcode Exists",
+                f"Barcode {new_bc!r} already belongs to:\n{existing['description']}")
+            return
+        # Update barcode in database
+        try:
+            conn = get_connection()
+            # Update all related tables
+            conn.execute("UPDATE stock_movements SET barcode=? WHERE barcode=?",
+                        (new_bc, self.barcode))
+            conn.execute("UPDATE stock_on_hand SET barcode=? WHERE barcode=?",
+                        (new_bc, self.barcode))
+            conn.execute("UPDATE po_lines SET barcode=? WHERE barcode=?",
+                        (new_bc, self.barcode))
+            conn.execute("UPDATE barcode_aliases SET master_barcode=? WHERE master_barcode=?",
+                        (new_bc, self.barcode))
+            conn.execute("UPDATE plu_barcode_map SET barcode=? WHERE barcode=?",
+                        (new_bc, self.barcode))
+            conn.execute("UPDATE products SET barcode=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
+                        (new_bc, self.barcode))
+            conn.commit()
+            conn.close()
+            self.barcode = new_bc
+            self.lbl_barcode.setText(new_bc)
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Updated",
+                f"Barcode updated to {new_bc!r}")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", str(e))
 
     def _edit_description(self):
         val = _text_popup("Edit Description", "Description", self._description, self)

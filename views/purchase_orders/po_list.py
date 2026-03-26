@@ -56,9 +56,9 @@ class POList(QWidget):
 
         # ── Active bottom buttons ─────────────────────────────────────
         active_btns = QHBoxLayout()
-        self.btn_new     = self._btn("＋ New PO  [N]",     "#1565c0", self._create)
-        self.btn_open    = self._btn("📋 Open PO  [O]",    "#37474f", self._open)
-        self.btn_receive = self._btn("📦 Receive PO  [R]", "#2e7d32", self._open_receive)
+        self.btn_new     = self._btn("＋ New PO  [Ctrl+N]",     "#1565c0", self._create)
+        self.btn_open    = self._btn("📋 Open PO  [Ctrl+O]",    "#37474f", self._open)
+        self.btn_receive = self._btn("📦 Receive PO  [Ctrl+R]", "#2e7d32", self._open_receive)
         self.btn_cancel  = self._btn("✕ Cancel PO",        "#7f1d1d", self._cancel_po)
         for b in [self.btn_new, self.btn_open, self.btn_receive, self.btn_cancel]:
             active_btns.addWidget(b)
@@ -105,9 +105,9 @@ class POList(QWidget):
         layout.addWidget(self.tabs)
 
         # ── Hotkeys ───────────────────────────────────────────────────
-        QShortcut(QKeySequence("N"), self, self._create)
-        QShortcut(QKeySequence("O"), self, self._open)
-        QShortcut(QKeySequence("R"), self, self._open_receive)
+        QShortcut(QKeySequence("Ctrl+N"), self, self._create)
+        QShortcut(QKeySequence("Ctrl+O"), self, self._open)
+        QShortcut(QKeySequence("Ctrl+R"), self, self._open_receive)
         QShortcut(QKeySequence("Return"),  self, self._open)
         QShortcut(QKeySequence("Enter"),   self, self._open)
 

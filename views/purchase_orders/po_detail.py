@@ -589,8 +589,8 @@ class PODetail(QWidget):
         pack_qty, pack_unit = self._line_pack_info[row]
 
         try:
-            if col == 5:
-                # col 5 displays total units — convert back to cartons for storage
+            if col == 6:
+                # col 6 displays total units — convert back to cartons for storage
                 total_units = max(1, int(float(item.text())))
                 cartons = max(1, math.ceil(total_units / pack_qty))
                 # Snap display to exact carton multiple
@@ -607,18 +607,18 @@ class PODetail(QWidget):
                 item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {snapped_units} units total")
 
                 self.rec_banner.setText("")
-            elif col == 6:
+            elif col == 7:
                 cost = max(0.0, float(item.text().replace("$", "").strip()))
-                # col 5 shows total units — convert to cartons for storage
-                total_units_col = int(float(self.table.item(row, 5).text()))
+                # col 6 shows total units — convert to cartons for storage
+                total_units_col = int(float(self.table.item(row, 6).text()))
                 cartons = max(1, math.ceil(total_units_col / pack_qty))
                 lines_model.update(line_id, ordered_qty=cartons, unit_cost=cost,
                                    notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text()))
 
-            # Refresh line total — col 5 now shows total units directly
+            # Refresh line total — col 6 now shows total units directly
             try:
-                total_units_now = int(float(self.table.item(row, 5).text()))
-                cost_now        = float(self.table.item(row, 6).text().replace("$","").strip())
+                total_units_now = int(float(self.table.item(row, 6).text()))
+                cost_now        = float(self.table.item(row, 7).text().replace("$","").strip())
                 line_total      = total_units_now * cost_now
                 lt_item = self.table.item(row, 8)
                 if lt_item and not lt_item.text().startswith("—"):
