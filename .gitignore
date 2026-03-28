@@ -43,3 +43,7 @@ Thumbs.db
 # Import scripts with personal data
 import_products.py
 LittleRedApple_Merged.csv
+__pycache__/
+*.pyc
+*.pyo
+*.bak

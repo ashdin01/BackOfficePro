@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
     QFileDialog, QMessageBox, QCheckBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, QEvent
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.keyboard_mixin import KeyboardMixin
 import models.stock_on_hand as soh_model
@@ -20,11 +20,39 @@ class NumericTableWidgetItem(QTableWidgetItem):
             return super().__lt__(other)
 
 
+class _SearchEscapeFilter(QObject):
+    """
+    Installed on the search QLineEdit.
+    Escape → clear search, call on_escape callback (returns to main nav).
+    All other keys pass through normally.
+    """
+    def __init__(self, search_input, on_escape, parent=None):
+        super().__init__(parent)
+        self._search    = search_input
+        self._on_escape = on_escape
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self._search.clear()   # triggers _search("") → full reload
+                if self._on_escape:
+                    self._on_escape()
+                return True            # swallow Escape
+        return False
+
+
 class ProductList(KeyboardMixin, QWidget):
-    def __init__(self):
+    def __init__(self, on_escape=None):
         super().__init__()
+        self._on_escape = on_escape
         self._build_ui()
         self._load()
+
+    def showEvent(self, event):
+        """Auto-focus search bar every time this screen becomes visible."""
+        super().showEvent(event)
+        self.search_input.setFocus()
+        self.search_input.selectAll()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -35,6 +63,11 @@ class ProductList(KeyboardMixin, QWidget):
         self.search_input.setPlaceholderText("Search by barcode, PLU, description, brand, supplier or department…")
         self.search_input.textChanged.connect(self._search)
         self.search_input.returnPressed.connect(self._focus_table)
+
+        # Escape key: clear search, return to main nav
+        self._esc_filter = _SearchEscapeFilter(self.search_input, self._on_escape)
+        self.search_input.installEventFilter(self._esc_filter)
+
         search_row.addWidget(self.search_input)
 
         # ── Show Inactive checkbox ────────────────────────────────────
@@ -73,16 +106,16 @@ class ProductList(KeyboardMixin, QWidget):
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0,  140)  # Barcode
-        self.table.setColumnWidth(1,   65)  # PLU
-        self.table.setColumnWidth(3,  100)  # Brand
-        self.table.setColumnWidth(4,   95)  # Department
-        self.table.setColumnWidth(5,  100)  # Supplier
-        self.table.setColumnWidth(6,   45)  # Unit
-        self.table.setColumnWidth(7,   80)  # Sell Price
-        self.table.setColumnWidth(8,   80)  # Cost Price
-        self.table.setColumnWidth(9,   65)  # On Hand
-        self.table.setColumnWidth(10,  70)  # Status
+        self.table.setColumnWidth(0,  140)
+        self.table.setColumnWidth(1,   65)
+        self.table.setColumnWidth(3,  100)
+        self.table.setColumnWidth(4,   95)
+        self.table.setColumnWidth(5,  100)
+        self.table.setColumnWidth(6,   45)
+        self.table.setColumnWidth(7,   80)
+        self.table.setColumnWidth(8,   80)
+        self.table.setColumnWidth(9,   65)
+        self.table.setColumnWidth(10,  70)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setMinimumSectionSize(45)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -125,34 +158,26 @@ class ProductList(KeyboardMixin, QWidget):
                     active_only=True,
                     include_nonzero_inactive=True
                 )
-
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
-
         inactive_with_stock = 0
-
         for row in rows:
             r = self.table.rowCount()
             self.table.insertRow(r)
-
             is_active   = bool(row['active'])
             soh         = soh_model.get_by_barcode(row["barcode"])
             soh_qty     = int(soh["quantity"]) if soh else 0
-            is_warning  = not is_active and soh_qty != 0  # inactive but has stock
+            is_warning  = not is_active and soh_qty != 0
             is_temp     = str(row['barcode']).startswith('TEMP-')
-
             if is_warning:
                 inactive_with_stock += 1
-
-            # Row background for inactive items
             row_color = None
             if is_temp:
-                row_color = QColor('#1a2a1a')   # dark green — temp barcode
+                row_color = QColor('#1a2a1a')
             elif is_warning:
-                row_color = QColor('#3a2800')   # dark orange — needs attention
+                row_color = QColor('#3a2800')
             elif not is_active:
-                row_color = QColor('#1a1a1a')   # dark grey — inactive, no stock
-
+                row_color = QColor('#1a1a1a')
             bc_item = QTableWidgetItem(row['barcode'])
             if is_temp:
                 bc_item.setForeground(QColor('#69f0ae'))
@@ -166,8 +191,6 @@ class ProductList(KeyboardMixin, QWidget):
             self.table.setItem(r, 6,  QTableWidgetItem(row['unit'] or ''))
             self.table.setItem(r, 7,  NumericTableWidgetItem(f"${row['sell_price']:.2f}"))
             self.table.setItem(r, 8,  NumericTableWidgetItem(f"${row['cost_price']:.2f}"))
-
-            # On Hand
             soh_item = NumericTableWidgetItem(str(soh_qty))
             soh_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if is_warning:
@@ -179,8 +202,6 @@ class ProductList(KeyboardMixin, QWidget):
             else:
                 soh_item.setForeground(QColor('#f44336'))
             self.table.setItem(r, 9, soh_item)
-
-            # Status column
             status_text = "Active" if is_active else "INACTIVE"
             status_item = QTableWidgetItem(status_text)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -191,36 +212,26 @@ class ProductList(KeyboardMixin, QWidget):
             else:
                 status_item.setForeground(QColor('#4CAF50'))
             self.table.setItem(r, 10, status_item)
-
-            # Apply row background
             if row_color:
                 for col in range(self.table.columnCount()):
                     item = self.table.item(r, col)
                     if item:
                         item.setBackground(row_color)
-
         self.table.setSortingEnabled(True)
-
         active_count   = sum(1 for r in range(self.table.rowCount())
                              if self.table.item(r, 10)
                              and self.table.item(r, 10).text() == "Active")
         inactive_count = self.table.rowCount() - active_count
-
         status_parts = [f"{self.table.rowCount()} products"]
         if inactive_with_stock > 0:
-            status_parts.append(
-                f"⚠ {inactive_with_stock} inactive with stock"
-            )
+            status_parts.append(f"⚠ {inactive_with_stock} inactive with stock")
         if self._show_inactive() and inactive_count > 0:
             status_parts.append(f"{inactive_count} inactive shown")
         self.status.setText("  ·  ".join(status_parts))
 
     def _search(self, term):
         if term.strip():
-            rows = product_model.search(
-                term,
-                active_only=not self._show_inactive()
-            )
+            rows = product_model.search(term, active_only=not self._show_inactive())
             self._load(rows)
         else:
             self._load()
@@ -228,10 +239,7 @@ class ProductList(KeyboardMixin, QWidget):
     def _reload_with_search(self):
         term = self.search_input.text().strip()
         if term:
-            rows = product_model.search(
-                term,
-                active_only=not self._show_inactive()
-            )
+            rows = product_model.search(term, active_only=not self._show_inactive())
             self._load(rows)
         else:
             self._load()
