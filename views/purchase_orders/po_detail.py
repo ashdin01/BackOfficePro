@@ -407,6 +407,7 @@ class PODetail(QWidget):
         self.setWindowTitle(f"PO: {po['po_number']}")
         from models.supplier import get_by_id as get_supplier
         supplier = get_supplier(po['supplier_id'])
+        self._supplier = supplier   # stored for CSV export
         self._order_minimum = float(supplier['order_minimum']) if supplier and 'order_minimum' in supplier.keys() and supplier['order_minimum'] else 0
         min_str = f"  |  Order Min: <b>${self._order_minimum:.2f}</b>" if self._order_minimum else ""
         self.header.setText(
