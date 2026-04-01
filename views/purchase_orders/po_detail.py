@@ -344,9 +344,13 @@ class PODetail(QWidget):
         if self.table.rowCount() == 0:
             QMessageBox.information(self, 'Export', 'No lines to export.')
             return
+        po       = self._po
+        supplier = getattr(self, '_supplier', None)
+        sup_name  = po['supplier_name'] or ''
+        sup_email = (supplier['email'] or '') if supplier and supplier['email'] else ''
+        sup_notes = (supplier['notes'] or '') if supplier and supplier['notes'] else ''
 
-        po = self._po
-        default_name = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.csv"
+        default_name = f"{po['po_number']}_{sup_name.replace(' ', '_')}.csv"
         default_path = os.path.join(os.path.expanduser("~/Downloads"), default_name)
         path, _ = QFileDialog.getSaveFileName(
             self, 'Export PO to CSV', default_path,
@@ -354,32 +358,50 @@ class PODetail(QWidget):
         )
         if not path:
             return
-
         try:
-            # Read directly from database — single source of truth
-            from database.connection import get_connection
-            conn = get_connection()
             lines = lines_model.get_by_po(self.po_id)
-            rows_written = 0
-            order_total  = 0.0
+            fixed_total = 0.0
+            gst_total   = 0.0
 
             with open(path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
+
+                # Header block
+                writer.writerow(['Supplier',      sup_name])
+                writer.writerow(['Email',         sup_email])
+                writer.writerow(['PO Number',     po['po_number']])
+                writer.writerow(['Status',        po['status']])
+                writer.writerow(['Delivery Date', po['delivery_date'] or ''])
+                writer.writerow([])
+
+                # Column headers
                 writer.writerow([
                     'Barcode', 'Description', 'Supplier SKU',
                     'Order Qty (Cartons)', 'Units per Carton',
-                    'Total Units', 'Unit Cost', 'Line Total'
+                    'Total Units', 'On Hand', 'Unit Cost', 'Line Total'
                 ])
+
+                # Line rows
+                rows_written = 0
                 for line in lines:
-                    product  = product_model.get_by_barcode(line['barcode'])
-                    pack_qty  = int(product['pack_qty']) if product and product['pack_qty'] else 1
+                    product   = product_model.get_by_barcode(line['barcode'])
+                    pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
                     pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
                     sup_sku   = (product['supplier_sku'] or '') if product else ''
+                    tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
+
+                    soh     = stock_model.get_by_barcode(line['barcode'])
+                    on_hand = int(soh['quantity']) if soh else 0
+
                     cartons     = int(line['ordered_qty'])
                     total_units = cartons * pack_qty
                     unit_cost   = float(line['unit_cost'])
                     line_total  = total_units * unit_cost
-                    order_total += line_total
+
+                    fixed_total += line_total
+                    if tax_rate > 0:
+                        gst_total += line_total - (line_total / (1 + tax_rate / 100))
+
                     writer.writerow([
                         line['barcode'],
                         line['description'],
@@ -387,20 +409,31 @@ class PODetail(QWidget):
                         cartons,
                         f'{pack_qty} x {pack_unit}',
                         total_units,
-                        f'{unit_cost:.2f}',
+                        on_hand,
+                        f'{unit_cost:.4f}',
                         f'{line_total:.2f}',
                     ])
                     rows_written += 1
+
+                # Totals
+                subtotal = round(fixed_total - gst_total, 2)
+                gst      = round(gst_total, 2)
                 writer.writerow([])
-                writer.writerow(['', '', '', '', '', '', 'ORDER TOTAL', f'{order_total:.2f}'])
-            conn.close()
+                writer.writerow(['', '', '', '', '', '', '', 'Subtotal (ex GST)', f'{subtotal:.2f}'])
+                writer.writerow(['', '', '', '', '', '', '', 'GST',               f'{gst:.2f}'])
+                writer.writerow(['', '', '', '', '', '', '', 'Order Total',       f'{fixed_total:.2f}'])
+
+                # Supplier notes footer
+                if sup_notes:
+                    writer.writerow([])
+                    writer.writerow(['Supplier Notes', sup_notes])
+
             QMessageBox.information(
                 self, 'Export Complete',
                 f'Exported {rows_written} lines to:\n{path}'
             )
         except Exception as e:
             QMessageBox.critical(self, 'Export Failed', str(e))
-
     def _load(self):
         po = po_model.get_by_id(self.po_id)
         self._po = po

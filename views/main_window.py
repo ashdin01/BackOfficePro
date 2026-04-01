@@ -21,8 +21,9 @@ def _do_backup(dest_path):
         return False, str(e)
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, current_user=None):
         super().__init__()
+        self.current_user = current_user or {"username": "admin", "role": "ADMIN", "full_name": "Administrator"}
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1400, 850)
         self._build_ui()
@@ -59,10 +60,19 @@ class MainWindow(QMainWindow):
             ("Stock &Adjust",    7),
             ("&Sales",           8),
         ]
+        is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
+        # STAFF can only see: Home, Products, Reports, Sales
+        staff_allowed = {0, 1, 5, 8}
+
         for label, index in nav_items:
             btn = QPushButton(label)
             btn.setCheckable(True)
-            btn.clicked.connect(lambda _, i=index: self._switch(i))
+            if not is_admin and index not in staff_allowed:
+                btn.setEnabled(False)
+                btn.setToolTip("Admin access required")
+                btn.setStyleSheet("color: #444; border-color: #2a3a4a;")
+            else:
+                btn.clicked.connect(lambda _, i=index: self._switch(i))
             sidebar_layout.addWidget(btn)
             self.nav_buttons.append(btn)
 
@@ -113,6 +123,25 @@ class MainWindow(QMainWindow):
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: grey; font-size: 10px;")
         sidebar_layout.addWidget(hint)
+
+        # Logged-in user display
+        sidebar_layout.addSpacing(8)
+        user_name = self.current_user.get("full_name") or self.current_user.get("username", "")
+        user_role = self.current_user.get("role", "")
+        user_lbl = QLabel(f"👤 {user_name}\n{user_role}")
+        user_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        user_lbl.setStyleSheet("color: #4CAF50; font-size: 10px;")
+        sidebar_layout.addWidget(user_lbl)
+
+        logout_btn = QPushButton("🔒 Lock")
+        logout_btn.setFixedHeight(28)
+        logout_btn.setStyleSheet(
+            "QPushButton{background:#1a2332;color:#8b949e;border:1px solid #2a3a4a;"
+            "border-radius:4px;font-size:10px;}"
+            "QPushButton:hover{color:#e6edf3;border-color:#8b949e;}")
+        logout_btn.clicked.connect(self._lock)
+        sidebar_layout.addWidget(logout_btn)
+
         main_layout.addWidget(sidebar)
 
         # ── Main stack ────────────────────────────────────────────────
@@ -137,7 +166,7 @@ class MainWindow(QMainWindow):
             POList(),                                # index 4
             StockOnHandReport(),                     # index 5
             StocktakeList(),                         # index 6
-            StockAdjustView(),                       # index 7
+            StockAdjustView(current_user=self.current_user),  # index 7
             SalesReportView(),                       # index 8
         ]
         for screen in self.screens:
@@ -155,6 +184,22 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("L"),      self, lambda: self._switch(8))
 
         self._switch(0)
+
+    def _lock(self):
+        """Lock the app and return to login screen."""
+        import models.user as user_model
+        from views.login_screen import LoginScreen
+        self.hide()
+
+        def on_relogin(user):
+            login_win.hide()
+            self.current_user = user
+            # Rebuild UI to apply new user's role
+            self._build_ui()
+            self.show()
+
+        login_win = LoginScreen(on_login=on_relogin)
+        login_win.show()
 
     def _switch(self, index):
         self.stack.setCurrentIndex(index)

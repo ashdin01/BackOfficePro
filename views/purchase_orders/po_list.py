@@ -59,8 +59,11 @@ class POList(QWidget):
         self.btn_new     = self._btn("＋ New PO  [Ctrl+N]",     "#1565c0", self._create)
         self.btn_open    = self._btn("📋 Open PO  [Ctrl+O]",    "#37474f", self._open)
         self.btn_receive = self._btn("📦 Receive PO  [Ctrl+R]", "#2e7d32", self._open_receive)
-        self.btn_cancel  = self._btn("✕ Cancel PO",        "#7f1d1d", self._cancel_po)
-        for b in [self.btn_new, self.btn_open, self.btn_receive, self.btn_cancel]:
+        self.btn_close_po = self._btn("✓ Close PO",             "#5d4037", self._close_po)
+        self.btn_close_po.setToolTip("Close a PARTIAL PO — marks remaining lines as not supplied")
+        self.btn_cancel  = self._btn("✕ Cancel PO",             "#7f1d1d", self._cancel_po)
+        for b in [self.btn_new, self.btn_open, self.btn_receive,
+                  self.btn_close_po, self.btn_cancel]:
             active_btns.addWidget(b)
         active_btns.addStretch()
         active_layout.addLayout(active_btns)
@@ -285,6 +288,118 @@ class POList(QWidget):
             if self.active_table.currentRow() < 0:
                 self.active_table.selectRow(0)
 
+
+    def _close_po(self):
+        po_id, status = self._get_selected()
+        if not po_id:
+            QMessageBox.information(self, "Close PO", "Select a PO first.")
+            return
+        if status != 'PARTIAL':
+            QMessageBox.warning(self, "Close PO",
+                "Only PARTIAL orders can be closed this way.\n"
+                "SENT orders must be received first.")
+            return
+
+        from database.connection import get_connection
+        from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit,
+                                      QHBoxLayout, QFrame, QPushButton)
+        from PyQt6.QtGui import QKeySequence, QShortcut
+
+        conn = get_connection()
+        po = conn.execute(
+            "SELECT p.po_number, s.name as supplier_name "
+            "FROM purchase_orders p JOIN suppliers s ON p.supplier_id=s.id WHERE p.id=?",
+            (po_id,)
+        ).fetchone()
+        unreceived = conn.execute(
+            "SELECT id, description, ordered_qty, received_qty FROM po_lines "
+            "WHERE po_id=? AND received_qty < ordered_qty",
+            (po_id,)
+        ).fetchall()
+        conn.close()
+
+        if not unreceived:
+            import models.purchase_order as po_model
+            po_model.update_status(po_id, 'RECEIVED')
+            self._load()
+            return
+
+        lines_text = "\n".join(
+            f"  • {r['description']} "
+            f"(ordered {int(r['ordered_qty'])}, received {int(r['received_qty'])})"
+            for r in unreceived
+        )
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Close PO — Unreceived Lines")
+        dlg.setModal(True)
+        dlg.setMinimumWidth(480)
+        dlg.setStyleSheet(
+            "QDialog{background:#1a2332;color:#e6edf3;}"
+            "QLabel{color:#e6edf3;background:transparent;}"
+            "QLineEdit{background:#1e2a38;color:#e6edf3;"
+            "border:1px solid #2a3a4a;border-radius:4px;padding:6px;}"
+            "QPushButton{border-radius:4px;padding:8px 18px;font-weight:bold;}"
+        )
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(12)
+        lay.addWidget(QLabel(f"<b>{po['po_number']}</b> — {po['supplier_name']}"))
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color:#2a3a4a;"); lay.addWidget(sep)
+        lay.addWidget(QLabel(f"<b>{len(unreceived)}</b> unreceived line(s) will be closed:"))
+        detail = QLabel(lines_text)
+        detail.setStyleSheet("color:#8b949e; font-size:11px;")
+        lay.addWidget(detail)
+        sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color:#2a3a4a;"); lay.addWidget(sep2)
+        lay.addWidget(QLabel("Reason (applied to all unreceived lines):"))
+        reason_input = QLineEdit()
+        reason_input.setPlaceholderText("e.g. Out of stock, Discontinued, Short supply…")
+        reason_input.setFixedHeight(36)
+        lay.addWidget(reason_input)
+        btn_row = QHBoxLayout(); btn_row.setSpacing(10)
+        btn_ok = QPushButton("✓  Close PO")
+        btn_ok.setStyleSheet(
+            "QPushButton{background:#5d4037;color:white;border:1px solid #795548;}"
+            "QPushButton:hover{background:#795548;}")
+        btn_no = QPushButton("Cancel  [Esc]")
+        btn_no.setStyleSheet(
+            "QPushButton{background:transparent;color:#8b949e;border:1px solid #2a3a4a;}"
+            "QPushButton:hover{background:#1e2a38;color:#e6edf3;}")
+        btn_ok.clicked.connect(dlg.accept)
+        btn_no.clicked.connect(dlg.reject)
+        btn_row.addWidget(btn_ok); btn_row.addStretch(); btn_row.addWidget(btn_no)
+        lay.addLayout(btn_row)
+        reason_input.setFocus()
+        reason_input.returnPressed.connect(dlg.accept)
+        QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        reason = reason_input.text().strip() or "Not supplied — PO closed"
+
+        conn = get_connection()
+        try:
+            for r in unreceived:
+                conn.execute(
+                    "UPDATE po_lines SET notes=? WHERE id=?",
+                    (f"NOT SUPPLIED: {reason}", r['id'])
+                )
+            conn.execute(
+                "UPDATE purchase_orders SET status='RECEIVED', "
+                "received_at=CURRENT_TIMESTAMP WHERE id=?",
+                (po_id,)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        QMessageBox.information(self, "PO Closed",
+            f"PO closed.\n{len(unreceived)} unreceived line(s) marked:\n\"{reason}\"")
+        self._load()
+
     def _show_context_menu(self, pos):
         row = self.active_table.rowAt(pos.y())
         if row < 0:
@@ -309,6 +424,11 @@ class POList(QWidget):
             act_recv = QAction("📦  Receive Stock", self)
             act_recv.triggered.connect(self._open_receive)
             menu.addAction(act_recv)
+
+        if status == 'PARTIAL':
+            act_close = QAction("✓  Close PO (not fully received)", self)
+            act_close.triggered.connect(self._close_po)
+            menu.addAction(act_close)
 
         menu.addSeparator()
 
