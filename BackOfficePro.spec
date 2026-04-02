@@ -3,7 +3,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets'), ('version.py', '.')],
+    datas=[('assets', 'assets'), ('version.py', '.'), ('scripts', 'scripts')],
     hiddenimports=['pdfplumber', 'PIL'],
     hookspath=[],
     runtime_hooks=[],

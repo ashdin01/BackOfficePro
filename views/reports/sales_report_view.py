@@ -1207,7 +1207,12 @@ class SalesReportView(QWidget):
             self, "Select Daily PLU Sales PDF(s)",
             os.path.expanduser("~/Downloads"), "PDF Files (*.pdf)")
         if not paths: return
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../scripts/import_sales.py")
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            script = os.path.join(_sys._MEIPASS, "scripts", "import_sales.py")
+        else:
+            script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "scripts", "import_sales.py")
+        script = os.path.normpath(script)
         script = os.path.normpath(script)
         if not os.path.exists(script):
             QMessageBox.critical(self, "Error",

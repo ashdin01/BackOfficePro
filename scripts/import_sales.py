@@ -4,7 +4,15 @@ Uses pdfplumber table extraction for accurate column separation.
 After import, creates negative stock movements for all matched products.
 """
 import sys, os, re
-sys.path.insert(0, os.path.expanduser("~/BackOfficePro"))
+
+# Resolve base path for both dev and PyInstaller exe environments
+if getattr(sys, "frozen", False):
+    _BASE = sys._MEIPASS
+else:
+    _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+if _BASE not in sys.path:
+    sys.path.insert(0, _BASE)
 
 try:
     import pdfplumber
