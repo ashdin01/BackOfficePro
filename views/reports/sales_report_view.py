@@ -305,6 +305,9 @@ class _AddProductDialog(QDialog):
         form.addRow(opt("Brand"), self.f_brand)
 
         self.f_plu = QLineEdit(pf.get("plu",""))
+        self.f_plu.setPlaceholderText("PLU number (optional)")
+        form.addRow(opt("PLU"), self.f_plu)
+        self.f_sku = QLineEdit(pf.get("base_sku",""))
         self.f_sku.setPlaceholderText("Internal SKU (optional)")
         form.addRow(opt("SKU"), self.f_sku)
 
