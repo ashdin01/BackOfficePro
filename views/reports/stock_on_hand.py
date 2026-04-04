@@ -5,6 +5,7 @@ from views.reports.stock_valuation import StockValuationReport
 from views.reports.reorder_report import ReorderReport
 from views.reports.movement_history import MovementHistoryReport
 from views.reports.gp_report import GPReport
+from views.reports.supplier_sales_report import SupplierSalesReport
 
 
 class StockOnHandReport(QWidget):
@@ -19,5 +20,6 @@ class StockOnHandReport(QWidget):
         tabs.addTab(StockValuationReport(),   "💰 Stock Valuation")
         tabs.addTab(GPReport(),               "📊 Gross Profit")
         tabs.addTab(MovementHistoryReport(),  "📋 Movement History")
+        tabs.addTab(SupplierSalesReport(),    "📊 Supplier Sales")
 
         layout.addWidget(tabs)

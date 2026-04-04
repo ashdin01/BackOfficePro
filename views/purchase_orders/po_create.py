@@ -41,24 +41,53 @@ class POCreate(QWidget):
         layout.addLayout(form)
 
         layout.addSpacing(10)
+        # PO type hint
+        hint = QLabel("Choose how to start this order:")
+        hint.setStyleSheet("color: #8b949e; font-size: 11px;")
+        layout.addWidget(hint)
+
         btns = QHBoxLayout()
-        save_btn = QPushButton("Create PO  [Ctrl+S]")
-        save_btn.setFixedHeight(35)
-        save_btn.setDefault(False)
-        save_btn.setAutoDefault(False)
-        save_btn.clicked.connect(self._save)
+        btns.setSpacing(8)
+
+        rec_btn = QPushButton("📋  Recommended PO  [Ctrl+R]")
+        rec_btn.setFixedHeight(38)
+        rec_btn.setDefault(False)
+        rec_btn.setAutoDefault(False)
+        rec_btn.setToolTip("Create PO pre-filled with products below reorder point")
+        rec_btn.setStyleSheet(
+            "QPushButton{background:#1565c0;color:white;border:none;"
+            "border-radius:4px;font-weight:bold;padding:0 12px;}"
+            "QPushButton:hover{background:#1976d2;}")
+        rec_btn.clicked.connect(lambda: self._save(blank=False))
+
+        blank_btn = QPushButton("➕  Blank PO  [Ctrl+B]")
+        blank_btn.setFixedHeight(38)
+        blank_btn.setDefault(False)
+        blank_btn.setAutoDefault(False)
+        blank_btn.setToolTip("Create an empty PO — add lines manually")
+        blank_btn.setStyleSheet(
+            "QPushButton{background:#2e7d32;color:white;border:none;"
+            "border-radius:4px;font-weight:bold;padding:0 12px;}"
+            "QPushButton:hover{background:#388e3c;}")
+        blank_btn.clicked.connect(lambda: self._save(blank=True))
+
         cancel_btn = QPushButton("Cancel  [Esc]")
-        cancel_btn.setFixedHeight(35)
+        cancel_btn.setFixedHeight(38)
         cancel_btn.setDefault(False)
         cancel_btn.setAutoDefault(False)
         cancel_btn.clicked.connect(self.close)
-        QShortcut(QKeySequence("Ctrl+S"), self, self._save)
+
+        QShortcut(QKeySequence("Ctrl+R"), self, lambda: self._save(blank=False))
+        QShortcut(QKeySequence("Ctrl+B"), self, lambda: self._save(blank=True))
         QShortcut(QKeySequence("Escape"), self, self.close)
-        btns.addWidget(save_btn)
+
+        btns.addWidget(rec_btn)
+        btns.addWidget(blank_btn)
+        btns.addStretch()
         btns.addWidget(cancel_btn)
         layout.addLayout(btns)
 
-    def _save(self):
+    def _save(self, blank=False):
         supplier_id = self.supplier.currentData()
         if not supplier_id:
             QMessageBox.warning(self, "Validation", "Please select a supplier.")
@@ -71,9 +100,8 @@ class POCreate(QWidget):
             )
             if self.on_save:
                 self.on_save()
-            # Open the PO detail straight away
             from views.purchase_orders.po_detail import PODetail
-            self.detail_win = PODetail(po_id=po_id, on_save=self.on_save)
+            self.detail_win = PODetail(po_id=po_id, on_save=self.on_save, blank=blank)
             self.detail_win.show()
             self.close()
         except Exception as e:
