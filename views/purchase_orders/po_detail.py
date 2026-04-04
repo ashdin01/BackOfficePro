@@ -225,10 +225,11 @@ def _get_sales_for_barcode(barcode):
 
 
 class PODetail(QWidget):
-    def __init__(self, po_id, on_save=None):
+    def __init__(self, po_id, on_save=None, blank=False):
         super().__init__()
         self.po_id = po_id
         self.on_save = on_save
+        self._blank = blank
         self.setMinimumSize(1400, 800)
         self._build_ui()
         self._load()
@@ -304,6 +305,15 @@ class PODetail(QWidget):
         btn_export.setFixedHeight(35)
         btn_export.clicked.connect(self._export_csv)
 
+        btn_pdf = QPushButton("📄 Export PDF")
+        btn_pdf.setFixedHeight(35)
+        btn_pdf.setStyleSheet(
+            "QPushButton{background:#6a1b9a;color:white;border:none;"
+            "border-radius:4px;padding:0 10px;font-weight:bold;}"
+            "QPushButton:hover{background:#7b1fa2;}"
+        )
+        btn_pdf.clicked.connect(self._export_pdf)
+
         btn_send = QPushButton("&Mark as Sent ✓  [M]")
         btn_send.setFixedHeight(35)
         btn_send.clicked.connect(self._mark_sent)
@@ -326,6 +336,7 @@ class PODetail(QWidget):
         btns.addWidget(btn_reload)
         btns.addWidget(btn_cancel)
         btns.addWidget(btn_export)
+        btns.addWidget(btn_pdf)
         btns.addStretch()
         btns.addWidget(btn_send)
         btns.addWidget(btn_close)
@@ -339,6 +350,25 @@ class PODetail(QWidget):
         QShortcut(QKeySequence("Delete"),     self, self._remove_line)
         QShortcut(QKeySequence("Backspace"),  self, self._remove_line)
         QShortcut(QKeySequence("Escape"),     self, self.close)
+
+    def _export_pdf(self):
+        import os
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        po = self._po
+        default_name = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
+        default_path = os.path.join(os.path.expanduser("~/Downloads"), default_name)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PO to PDF", default_path,
+            "PDF Files (*.pdf);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            from utils.po_pdf import generate_po_pdf
+            generate_po_pdf(self.po_id, path)
+            QMessageBox.information(self, "PDF Exported", f"Saved to:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Export Failed", str(e))
 
     def _export_csv(self):
         if self.table.rowCount() == 0:
@@ -450,9 +480,12 @@ class PODetail(QWidget):
         )
         lines = lines_model.get_by_po(self.po_id)
 
-        if len(lines) == 0:
+        if len(lines) == 0 and not getattr(self, '_blank', False):
             self._auto_load_recommendations()
             lines = lines_model.get_by_po(self.po_id)
+        elif len(lines) == 0 and getattr(self, '_blank', False):
+            self.rec_banner.setText(
+                "Blank PO — use Add Line [A] or F2 lookup to add products.")
 
         self._populate_table(lines)
 
