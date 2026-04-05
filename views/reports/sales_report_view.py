@@ -1210,26 +1210,47 @@ class SalesReportView(QWidget):
             self, "Select Daily PLU Sales PDF(s)",
             os.path.expanduser("~/Downloads"), "PDF Files (*.pdf)")
         if not paths: return
+
+        # Import the script as a module directly — works in both dev and
+        # PyInstaller exe environments without needing subprocess/sys.executable
         import sys as _sys
+        import importlib.util
+
         if getattr(_sys, "frozen", False):
             script = os.path.join(_sys._MEIPASS, "scripts", "import_sales.py")
         else:
-            script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "scripts", "import_sales.py")
-        script = os.path.normpath(script)
-        script = os.path.normpath(script)
+            script = os.path.normpath(os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "..", "scripts", "import_sales.py"))
+
         if not os.path.exists(script):
             QMessageBox.critical(self, "Error",
                 f"import_sales.py not found at:\n{script}")
             return
-        bop = os.path.expanduser("~/BackOfficePro")
-        for path in paths:
-            result = subprocess.run(
-                [sys.executable, script, path],
-                cwd=bop, capture_output=True, text=True)
-            print(result.stdout)
-            if result.stderr: print(result.stderr)
-        QMessageBox.information(self, "Import Complete",
-            f"Imported {len(paths)} file(s).\nDashboard will now refresh.")
+
+        try:
+            spec   = importlib.util.spec_from_file_location("import_sales", script)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.ensure_tables()
+
+            errors = []
+            for pdf_path in paths:
+                try:
+                    module.import_pdf(pdf_path)
+                except Exception as e:
+                    errors.append(f"{os.path.basename(pdf_path)}: {e}")
+
+            if errors:
+                QMessageBox.warning(self, "Import Warnings",
+                    "Some files had errors:\n" + "\n".join(errors))
+            else:
+                QMessageBox.information(self, "Import Complete",
+                    f"Imported {len(paths)} file(s).\nDashboard will now refresh.")
+        except Exception as e:
+            QMessageBox.critical(self, "Import Failed", str(e))
+            return
+
         self._load()
 
     def _export(self):
