@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
     QFileDialog, QMessageBox, QCheckBox
 )
-from PyQt6.QtCore import Qt, QObject, QEvent
+from PyQt6.QtCore import Qt, QObject, QEvent, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.keyboard_mixin import KeyboardMixin
 import models.stock_on_hand as soh_model
@@ -61,7 +61,11 @@ class ProductList(KeyboardMixin, QWidget):
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by barcode, PLU, description, brand, supplier or department…")
-        self.search_input.textChanged.connect(self._search)
+        self._search_timer = QTimer()
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(400)
+        self._search_timer.timeout.connect(lambda: self._search(self.search_input.text()))
+        self.search_input.textChanged.connect(lambda: self._search_timer.start())
         self.search_input.returnPressed.connect(self._focus_table)
 
         # Escape key: clear search, return to main nav
