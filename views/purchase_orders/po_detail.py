@@ -938,6 +938,20 @@ class AddLineDialog(QDialog):
         barcode = self.barcode.text().strip()
         if not barcode:
             return
+        # ── Duplicate line check ─────────────────────────────────────
+        existing_lines = lines_model.get_by_po(self.po_id)
+        for line_num, existing in enumerate(existing_lines, start=1):
+            if existing['barcode'] == barcode:
+                QMessageBox.warning(
+                    self, "Item Already on PO",
+                    f"This item is already on this PO at line {line_num}:\n\n"
+                    f"{existing['description']}\n\n"
+                    f"Edit the existing line instead."
+                )
+                self.barcode.clear()
+                self.barcode.setFocus()
+                return
+        # ─────────────────────────────────────────────────────────────
         product = product_model.get_by_barcode(barcode)
         if product:
             # Check supplier matches PO supplier

@@ -46,6 +46,8 @@ class POList(QWidget):
 
         self.active_table = self._make_table()
         self.active_table.doubleClicked.connect(self._open)
+        self.active_table.selectionModel().selectionChanged.connect(
+            self._on_selection_changed)
         self.active_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.active_table.customContextMenuRequested.connect(self._show_context_menu)
         active_layout.addWidget(self.active_table)
@@ -62,8 +64,12 @@ class POList(QWidget):
         self.btn_close_po = self._btn("✓ Close PO",             "#5d4037", self._close_po)
         self.btn_close_po.setToolTip("Close a PARTIAL PO — marks remaining lines as not supplied")
         self.btn_cancel  = self._btn("✕ Cancel PO",             "#7f1d1d", self._cancel_po)
+        self.btn_update_po = self._btn("✔ Update PO  [Ctrl+U]", "#5d4037", self._update_po)
+        self.btn_update_po.setToolTip(
+            "Mark a PARTIAL PO as fully RECEIVED — only available when at least one item has been received")
+        self.btn_update_po.setEnabled(False)
         for b in [self.btn_new, self.btn_open, self.btn_receive,
-                  self.btn_close_po, self.btn_cancel]:
+                  self.btn_close_po, self.btn_cancel, self.btn_update_po]:
             active_btns.addWidget(b)
         active_btns.addStretch()
         active_layout.addLayout(active_btns)
@@ -111,6 +117,7 @@ class POList(QWidget):
         QShortcut(QKeySequence("Ctrl+N"), self, self._create)
         QShortcut(QKeySequence("Ctrl+O"), self, self._open)
         QShortcut(QKeySequence("Ctrl+R"), self, self._open_receive)
+        QShortcut(QKeySequence("Ctrl+U"), self, self._update_po)
         QShortcut(QKeySequence("Return"),  self, self._open)
         QShortcut(QKeySequence("Enter"),   self, self._open)
 
@@ -144,6 +151,21 @@ class POList(QWidget):
         """)
         b.clicked.connect(slot)
         return b
+
+    def _on_selection_changed(self):
+        """Enable/disable Update PO button based on current selection."""
+        po_id, status = self._get_selected()
+        if po_id is None or status != "PARTIAL":
+            self.btn_update_po.setEnabled(False)
+            return
+        from database.connection import get_connection
+        conn = get_connection()
+        received_count = conn.execute(
+            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_qty > 0",
+            (po_id,)
+        ).fetchone()[0]
+        conn.close()
+        self.btn_update_po.setEnabled(received_count > 0)
 
     def _on_tab_changed(self, idx):
         if idx == 1:
@@ -258,6 +280,56 @@ class POList(QWidget):
         from views.purchase_orders.po_receive import POReceive
         self.receive_win = POReceive(po_id=po_id, on_save=self._load)
         self.receive_win.show()
+
+    def _update_po(self):
+        """Force a PARTIAL PO to RECEIVED status after confirming with user."""
+        po_id, status = self._get_selected()
+        if po_id is None:
+            QMessageBox.information(self, "No Selection", "Select a PO first.")
+            return
+        if status != "PARTIAL":
+            QMessageBox.information(
+                self, "Cannot Update",
+                "Only PARTIAL orders can be updated to Received."
+            )
+            return
+        # Check at least one line has been received
+        from database.connection import get_connection
+        conn = get_connection()
+        po = conn.execute(
+            "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
+            "JOIN suppliers s ON s.id = po.supplier_id WHERE po.id=?",
+            (po_id,)
+        ).fetchone()
+        received_count = conn.execute(
+            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_qty > 0",
+            (po_id,)
+        ).fetchone()[0]
+        conn.close()
+        if received_count == 0:
+            QMessageBox.warning(
+                self, "Cannot Update",
+                "No items have been received on this PO yet.\n\n"
+                "Receive at least one item before updating the PO status."
+            )
+            return
+        reply = QMessageBox.question(
+            self, "Confirm Update",
+            f"Are you sure you want to update {po['po_number']} "
+            f"from {po['supplier_name']} to Received?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from config.constants import PO_STATUS_RECEIVED
+        import models.purchase_order as po_model
+        po_model.update_status(po_id, PO_STATUS_RECEIVED)
+        self._load()
+        QMessageBox.information(
+            self, "Updated",
+            f"{po['po_number']} has been marked as Received."
+        )
 
     def _cancel_po(self):
         po_id, status = self._get_selected()

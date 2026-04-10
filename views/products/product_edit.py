@@ -18,7 +18,7 @@ class ProductEdit(KeyboardMixin, QWidget):
     def __init__(self, barcode, on_save=None):
         super().__init__()
         self.setWindowTitle("Product Detail")
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(720)
         self.setMinimumHeight(750)
         self.barcode = barcode
         self.on_save = on_save
@@ -59,7 +59,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         def ro_row(value, on_edit):
             row = QHBoxLayout()
             lbl = QLabel(str(value))
-            lbl.setMinimumWidth(300)
+            lbl.setMinimumWidth(400)
             btn = QPushButton("✎")
             btn.setFixedSize(28, 28)
             btn.clicked.connect(on_edit)
@@ -126,6 +126,35 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         r, self.lbl_active = ro_row("Yes" if self._active else "No", self._edit_active)
         form.addRow("Active", r)
+
+        # ── Stock info (read-only, no edit button) ────────────────
+        from models.stock_on_hand import get_by_barcode as _get_soh
+        from database.connection import get_connection as _get_conn
+        soh = _get_soh(self.barcode)
+        soh_qty = int(soh["quantity"]) if soh else 0
+        soh_color = "#4CAF50" if soh_qty > 0 else "#FF9800" if soh_qty == 0 else "#f44336"
+        self.lbl_soh = QLabel(f'<span style="color:{soh_color};font-weight:bold;">{soh_qty}</span>')
+        self.lbl_soh.setTextFormat(Qt.TextFormat.RichText)
+        form.addRow("Stock on Hand", self.lbl_soh)
+
+        # Stock on order — sum of outstanding units across open POs
+        _conn = _get_conn()
+        on_order_row = _conn.execute(
+            "SELECT COALESCE(SUM((pl.ordered_qty - pl.received_qty) * "
+            "COALESCE(p.pack_qty, 1)), 0) "
+            "FROM po_lines pl "
+            "JOIN purchase_orders po ON po.id = pl.po_id "
+            "JOIN products p ON p.barcode = pl.barcode "
+            "WHERE pl.barcode=? AND po.status IN ('DRAFT','SENT','PARTIAL') "
+            "AND (pl.ordered_qty - pl.received_qty) > 0",
+            (self.barcode,)
+        ).fetchone()
+        _conn.close()
+        on_order = int(on_order_row[0]) if on_order_row else 0
+        on_order_color = "#2196F3" if on_order > 0 else "#8b949e"
+        self.lbl_on_order = QLabel(f'<span style="color:{on_order_color};font-weight:bold;">{on_order}</span>')
+        self.lbl_on_order.setTextFormat(Qt.TextFormat.RichText)
+        form.addRow("Stock on Order", self.lbl_on_order)
 
         layout.addLayout(form)
 

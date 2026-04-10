@@ -333,6 +333,15 @@ class POReceive(QWidget):
         layout.addWidget(self.total_label)
 
         btns = QHBoxLayout()
+        btn_receive_all = QPushButton("Receive All")
+        btn_receive_all.setFixedHeight(35)
+        btn_receive_all.setToolTip("Set all Receiving Now quantities to their full remaining amounts")
+        btn_receive_all.setStyleSheet(
+            "QPushButton{background:#1565c0;color:white;font-weight:bold;"
+            "border:none;border-radius:4px;padding:0 16px;}"
+            "QPushButton:hover{background:#1976d2;}"
+        )
+        btn_receive_all.clicked.connect(self._receive_all)
         btn_receive = QPushButton("Confirm Receipt")
         btn_receive.setFixedHeight(35)
         btn_receive.setStyleSheet(
@@ -345,6 +354,7 @@ class POReceive(QWidget):
         btn_close.setFixedHeight(35)
         btn_close.clicked.connect(self.close)
         btns.addStretch()
+        btns.addWidget(btn_receive_all)
         btns.addWidget(btn_receive)
         btns.addWidget(btn_close)
         layout.addLayout(btns)
@@ -398,7 +408,7 @@ class POReceive(QWidget):
             qty_input.setMinimum(0)
             qty_input.setMaximum(99999)
             qty_input.setSingleStep(pack_qty)
-            qty_input.setValue(remaining_units)
+            qty_input.setValue(0)
             self.table.setCellWidget(r, 5, qty_input)
 
             # Item Cost $ spinner
@@ -456,7 +466,7 @@ class POReceive(QWidget):
                 )
             )
 
-            self._inputs.append((line, pack_qty, qty_input, cost_input, promo_cb, lt_item))
+            self._inputs.append((line, pack_qty, qty_input, cost_input, promo_cb, lt_item, remaining_units))
             self._refresh_line(r)
 
         self._update_total()
@@ -494,7 +504,7 @@ class POReceive(QWidget):
     def _refresh_line(self, row):
         if row >= len(self._inputs):
             return
-        line, pack_qty, qty_input, cost_input, promo_cb, lt_item = self._inputs[row]
+        line, pack_qty, qty_input, cost_input, promo_cb, lt_item, remaining_units = self._inputs[row]
         qty  = qty_input.value()
         cost = cost_input.value()
         lt_item.setText(f"${qty * cost:.2f}")
@@ -504,7 +514,7 @@ class POReceive(QWidget):
     def _update_total(self):
         total = 0.0
         promo_total = 0.0
-        for idx, (line, pack_qty, qty_input, cost_input, promo_cb, lt_item) in enumerate(self._inputs):
+        for idx, (line, pack_qty, qty_input, cost_input, promo_cb, lt_item, remaining_units) in enumerate(self._inputs):
             try:
                 val = float(lt_item.text().replace("$", "").replace(",", ""))
                 total += val
@@ -522,9 +532,14 @@ class POReceive(QWidget):
         else:
             self.total_label.setText(f"<b>Receipt Total: ${total:.2f}</b>")
 
+    def _receive_all(self):
+        """Fill all Receiving Now spinners with full remaining quantities."""
+        for line, pack_qty, qty_input, cost_input, promo_cb, lt_item, remaining_units in self._inputs:
+            qty_input.setValue(remaining_units)
+
     def _confirm(self):
         # Count how many promo lines will be skipped
-        promo_count = sum(1 for _, _, qi, _, cb, _ in self._inputs
+        promo_count = sum(1 for _, _, qi, _, cb, _, _ in self._inputs
                          if cb.isChecked() and qi.value() > 0)
 
         msg = "Receive stock and update cost prices?"
@@ -538,7 +553,7 @@ class POReceive(QWidget):
             return
 
         all_received = True
-        for line, pack_qty, qty_input, cost_input, promo_cb, lt_item in self._inputs:
+        for line, pack_qty, qty_input, cost_input, promo_cb, lt_item, remaining_units in self._inputs:
             qty       = qty_input.value()
             item_cost = cost_input.value()
             is_promo  = promo_cb.isChecked()
