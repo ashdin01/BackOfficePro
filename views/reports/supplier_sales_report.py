@@ -328,5 +328,11 @@ class SupplierSalesReport(QWidget):
         win.show()
         win.raise_()
         win.activateWindow()
-        self._edit_wins = [w for w in self._edit_wins if not w.isHidden()]
+        def _is_alive(w):
+            try:
+                w.isHidden()
+                return True
+            except RuntimeError:
+                return False
+        self._edit_wins = [w for w in self._edit_wins if _is_alive(w)]
         self._edit_wins.append(win)
