@@ -1,38 +1,52 @@
+import logging
 from database.connection import get_connection
 
 
 def apply_migrations():
+    logging.info("apply_migrations() starting")
     conn = get_connection()
-    version = conn.execute(
-        "SELECT value FROM settings WHERE key='schema_version'"
-    ).fetchone()
-    current = int(version['value']) if version else 1
+    try:
+        version = conn.execute(
+            "SELECT value FROM settings WHERE key='schema_version'"
+        ).fetchone()
+        current = int(version['value']) if version else 1
+        logging.info(f"Current schema version: {current}")
+    except Exception as e:
+        logging.critical(f"Failed to read schema_version: {e}")
+        conn.close()
+        raise
 
-    if current < 2:
-        migrate_v2(conn)
-        print("Migration v2 applied: barcode_aliases")
+    try:
+        if current < 2:
+            migrate_v2(conn)
+            logging.info("Migration v2 applied: barcode_aliases")
 
-    if current < 3:
-        migrate_v3(conn)
-        print("Migration v3 applied: brand column")
+        if current < 3:
+            migrate_v3(conn)
+            logging.info("Migration v3 applied: brand column")
 
-    if current < 4:
-        migrate_v4(conn)
-        print("Migration v4 applied: sku, supplier_sku columns")
+        if current < 4:
+            migrate_v4(conn)
+            logging.info("Migration v4 applied: sku, supplier_sku columns")
 
-    if current < 5:
-        migrate_v5(conn)
-        print("Migration v5 applied: supplier abn, rep_name, rep_phone, order_minimum")
+        if current < 5:
+            migrate_v5(conn)
+            logging.info("Migration v5 applied: supplier abn, rep_name, rep_phone, order_minimum")
 
-    if current < 6:
-        migrate_v6(conn)
-        print("Migration v6 applied: product_groups table + group_id on products")
+        if current < 6:
+            migrate_v6(conn)
+            logging.info("Migration v6 applied: product_groups table + group_id on products")
 
-    if current < 7:
-        migrate_v7(conn)
-        print("Migration v7 applied: sales_daily, plu_barcode_map")
+        if current < 7:
+            migrate_v7(conn)
+            logging.info("Migration v7 applied: sales_daily, plu_barcode_map")
 
-    conn.close()
+        logging.info("apply_migrations() complete")
+    except Exception as e:
+        logging.critical(f"Migration failed: {e}", exc_info=True)
+        raise
+    finally:
+        conn.close()
 
 
 def migrate_v2(conn):
