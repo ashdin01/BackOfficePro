@@ -28,6 +28,10 @@ def apply_migrations():
         migrate_v6(conn)
         print("Migration v6 applied: product_groups table + group_id on products")
 
+    if current < 7:
+        migrate_v7(conn)
+        print("Migration v7 applied: sales_daily, plu_barcode_map")
+
     conn.close()
 
 
@@ -41,8 +45,47 @@ def migrate_v2(conn):
             created_at TEXT DEFAULT (datetime('now'))
         )
     """)
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('schema_version', '2')")
-    conn.execute("UPDATE settings SET value = '2' WHERE key = 'schema_version'")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')")
+    conn.commit()
+
+
+def migrate_v3(conn):
+    """Add brand column to products table."""
+    try:
+        conn.execute("ALTER TABLE products ADD COLUMN brand TEXT DEFAULT ''")
+    except Exception:
+        pass
+    conn.execute("UPDATE settings SET value = '3' WHERE key = 'schema_version'")
+    conn.commit()
+
+
+def migrate_v4(conn):
+    """Add sku and supplier_sku columns to products table."""
+    try:
+        conn.execute("ALTER TABLE products ADD COLUMN sku TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE products ADD COLUMN supplier_sku TEXT DEFAULT ''")
+    except Exception:
+        pass
+    conn.execute("UPDATE settings SET value = '4' WHERE key = 'schema_version'")
+    conn.commit()
+
+
+def migrate_v5(conn):
+    """Add abn, rep_name, rep_phone, order_minimum to suppliers table."""
+    for col, typedef in [
+        ("abn",           "TEXT DEFAULT ''"),
+        ("rep_name",      "TEXT DEFAULT ''"),
+        ("rep_phone",     "TEXT DEFAULT ''"),
+        ("order_minimum", "REAL DEFAULT 0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE suppliers ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass
+    conn.execute("UPDATE settings SET value = '5' WHERE key = 'schema_version'")
     conn.commit()
 
 
@@ -63,53 +106,12 @@ def migrate_v6(conn):
         conn.execute("ALTER TABLE products ADD COLUMN group_id INTEGER REFERENCES product_groups(id)")
     except Exception:
         pass
-    conn.execute("UPDATE settings SET value = '6' WHERE key = 'schema_version'")
-    conn.commit()
-
-
-def migrate_v5(conn):
-    """Add abn, rep_name, rep_phone, order_minimum to suppliers table."""
-    for col, typedef in [
-        ("abn",           "TEXT DEFAULT ''"),
-        ("rep_name",      "TEXT DEFAULT ''"),
-        ("rep_phone",     "TEXT DEFAULT ''"),
-        ("order_minimum", "REAL DEFAULT 0"),
-    ]:
-        try:
-            conn.execute(f"ALTER TABLE suppliers ADD COLUMN {col} {typedef}")
-        except Exception:
-            pass
-    conn.execute("UPDATE settings SET value = '5' WHERE key = 'schema_version'")
-    conn.commit()
-
-
-def migrate_v4(conn):
-    """Add sku and supplier_sku columns to products table."""
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN sku TEXT DEFAULT ''")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN supplier_sku TEXT DEFAULT ''")
-    except Exception:
-        pass
-    conn.execute("UPDATE settings SET value = '4' WHERE key = 'schema_version'")
-    conn.commit()
-
-
-def migrate_v3(conn):
-    """Add brand column to products table."""
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN brand TEXT DEFAULT ''")
-    except Exception:
-        pass  # column may already exist
-    conn.execute("UPDATE settings SET value = '3' WHERE key = 'schema_version'")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '6')")
     conn.commit()
 
 
 def migrate_v7(conn):
     """Add all columns added during development session."""
-    # products table additions
     for col, typedef in [
         ("pack_qty",    "INTEGER DEFAULT 1"),
         ("pack_unit",   "TEXT DEFAULT 'EA'"),
@@ -121,7 +123,6 @@ def migrate_v7(conn):
         except Exception:
             pass
 
-    # po_lines table additions
     for col, typedef in [
         ("actual_cost", "REAL DEFAULT 0"),
     ]:
@@ -130,7 +131,6 @@ def migrate_v7(conn):
         except Exception:
             pass
 
-    # plu_barcode_map table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS plu_barcode_map (
             plu       INTEGER PRIMARY KEY,
@@ -139,7 +139,6 @@ def migrate_v7(conn):
         )
     """)
 
-    # sales_daily table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sales_daily (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,8 +158,7 @@ def migrate_v7(conn):
         )
     """)
 
-    # Migrate sku and base_sku into plu
     conn.execute("UPDATE products SET plu = sku WHERE sku IS NOT NULL AND sku != '' AND (plu IS NULL OR plu = '')")
     conn.execute("UPDATE products SET plu = base_sku WHERE base_sku IS NOT NULL AND base_sku != '' AND (plu IS NULL OR plu = '')")
-    conn.execute("UPDATE settings SET value = '7' WHERE key = 'schema_version'")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '7')")
     conn.commit()
