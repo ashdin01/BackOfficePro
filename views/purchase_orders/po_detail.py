@@ -355,6 +355,19 @@ class PODetail(QWidget):
         import os
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
         po = self._po
+
+        # ── Auto-save as DRAFT before exporting PDF ──────────────────
+        # This ensures the PO always exists in the database even if the
+        # user closes the app after exporting without explicitly saving.
+        if po['status'] == 'DRAFT':
+            try:
+                po_model.update_status(self.po_id, 'DRAFT')
+                import logging
+                logging.info(f"Auto-saved {po['po_number']} as DRAFT before PDF export")
+            except Exception as e:
+                import logging
+                logging.warning(f"Auto-save before PDF export failed: {e}")
+
         default_name = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
         default_path = os.path.join(os.path.expanduser("~/Downloads"), default_name)
         path, _ = QFileDialog.getSaveFileName(
@@ -366,6 +379,8 @@ class PODetail(QWidget):
         try:
             from utils.po_pdf import generate_po_pdf
             generate_po_pdf(self.po_id, path)
+            if self.on_save:
+                self.on_save()
             QMessageBox.information(self, "PDF Exported", f"Saved to:\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "PDF Export Failed", str(e))
