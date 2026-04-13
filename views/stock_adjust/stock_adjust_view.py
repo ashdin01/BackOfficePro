@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QMessageBox, QDialog,
     QAbstractItemView, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer, QObject, QEvent
+from PyQt6.QtCore import Qt, QTimer, QObject, QEvent, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 import models.stock_on_hand as soh_model
 from database.connection import get_connection
@@ -262,6 +262,8 @@ class _SearchEnterFilter(QObject):
 
 
 class StockAdjustView(QWidget):
+    stock_changed = pyqtSignal()
+
     def __init__(self, current_user=None):
         super().__init__()
         self._current_user = current_user or {}
@@ -502,6 +504,7 @@ class StockAdjustView(QWidget):
             self._clear_selection()
             self._load_history()
             self._do_search()
+            self.stock_changed.emit()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 

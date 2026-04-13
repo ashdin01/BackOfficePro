@@ -203,6 +203,10 @@ class MainWindow(QMainWindow):
         for screen in self.screens:
             self.stack.addWidget(screen)
 
+        # ── Connect stock_changed signal to refresh all affected screens ──
+        stock_adjust = self.screens[7]
+        stock_adjust.stock_changed.connect(self._on_stock_changed)
+
         QShortcut(QKeySequence("H"),      self, lambda: self._switch(0))
         QShortcut(QKeySequence("Escape"), self, lambda: self._switch(0))
         QShortcut(QKeySequence("P"),      self, lambda: self._switch(1))
@@ -236,6 +240,37 @@ class MainWindow(QMainWindow):
 
         login_win = LoginScreen(on_login=on_relogin)
         login_win.show()
+
+    def _on_stock_changed(self):
+        """Refresh all screens that display stock on hand."""
+        import logging
+        logging.info("stock_changed signal received — refreshing screens")
+        # HomeScreen
+        try:
+            self.screens[0]._refresh()
+        except Exception as e:
+            logging.warning(f"HomeScreen refresh failed: {e}")
+        # ProductList
+        try:
+            self.screens[1]._load()
+        except Exception as e:
+            logging.warning(f"ProductList refresh failed: {e}")
+        # StockOnHandReport (index 5) — has showEvent, trigger via _load if exists
+        try:
+            s = self.screens[5]
+            if hasattr(s, '_load'):
+                s._load()
+            elif hasattr(s, 'refresh'):
+                s.refresh()
+        except Exception as e:
+            logging.warning(f"StockOnHandReport refresh failed: {e}")
+        # ReorderReport — inside Reports, refresh if visible
+        try:
+            s = self.screens[5]
+            if hasattr(s, 'reorder_report') and hasattr(s.reorder_report, '_load'):
+                s.reorder_report._load()
+        except Exception as e:
+            logging.warning(f"ReorderReport refresh failed: {e}")
 
     def _switch(self, index):
         self.stack.setCurrentIndex(index)
