@@ -173,7 +173,8 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('gst_rate',       '10.0',           'Default GST rate percentage'),
     ('currency',       'AUD',            'Currency code'),
     ('po_prefix',      'PO',             'Purchase order number prefix'),
-    ('po_next_number', '1',              'Next PO sequence number');
+    ('po_next_number', '1',              'Next PO sequence number'),
+    ('po_pdf_path',    '',               'Folder path for exported PO PDFs');
 """
 
 BARCODE_ALIASES_TABLE = """

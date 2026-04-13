@@ -353,36 +353,48 @@ class PODetail(QWidget):
 
     def _export_pdf(self):
         import os
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        import logging
+        from PyQt6.QtWidgets import QMessageBox
+        from database.connection import get_connection
         po = self._po
 
         # ── Auto-save as DRAFT before exporting PDF ──────────────────
-        # This ensures the PO always exists in the database even if the
-        # user closes the app after exporting without explicitly saving.
         if po['status'] == 'DRAFT':
             try:
                 po_model.update_status(self.po_id, 'DRAFT')
-                import logging
                 logging.info(f"Auto-saved {po['po_number']} as DRAFT before PDF export")
             except Exception as e:
-                import logging
                 logging.warning(f"Auto-save before PDF export failed: {e}")
 
-        default_name = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
-        default_path = os.path.join(os.path.expanduser("~/Downloads"), default_name)
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export PO to PDF", default_path,
-            "PDF Files (*.pdf);;All Files (*)"
-        )
-        if not path:
-            return
+        # ── Resolve output folder from settings ───────────────────────
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='po_pdf_path'"
+        ).fetchone()
+        conn.close()
+        pdf_folder = (row[0] or "").strip() if row else ""
+        if not pdf_folder:
+            pdf_folder = os.path.join(
+                os.path.expanduser("~"), "Documents", "BackOfficePro", "PurchaseOrders"
+            )
+        os.makedirs(pdf_folder, exist_ok=True)
+
+        # ── Save directly to folder ───────────────────────────────────
+        filename = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
+        path = os.path.join(pdf_folder, filename)
+
         try:
             from utils.po_pdf import generate_po_pdf
             generate_po_pdf(self.po_id, path)
             if self.on_save:
                 self.on_save()
-            QMessageBox.information(self, "PDF Exported", f"Saved to:\n{path}")
+            logging.info(f"PDF exported: {path}")
+            QMessageBox.information(
+                self, "PDF Exported",
+                f"✓ Saved to:\n{path}"
+            )
         except Exception as e:
+            logging.critical(f"PDF export failed: {e}", exc_info=True)
             QMessageBox.critical(self, "PDF Export Failed", str(e))
 
     def _export_csv(self):

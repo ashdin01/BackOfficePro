@@ -41,6 +41,10 @@ def apply_migrations():
             migrate_v7(conn)
             logging.info("Migration v7 applied: sales_daily, plu_barcode_map")
 
+        if current < 8:
+            migrate_v8(conn)
+            logging.info("Migration v8 applied: po_pdf_path setting")
+
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -175,4 +179,14 @@ def migrate_v7(conn):
     conn.execute("UPDATE products SET plu = sku WHERE sku IS NOT NULL AND sku != '' AND (plu IS NULL OR plu = '')")
     conn.execute("UPDATE products SET plu = base_sku WHERE base_sku IS NOT NULL AND base_sku != '' AND (plu IS NULL OR plu = '')")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '7')")
+    conn.commit()
+
+
+def migrate_v8(conn):
+    """Add po_pdf_path setting for PO PDF export folder."""
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value, description) "
+        "VALUES ('po_pdf_path', '', 'Folder path for exported PO PDFs')"
+    )
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '8')")
     conn.commit()
