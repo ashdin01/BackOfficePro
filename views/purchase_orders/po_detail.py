@@ -270,6 +270,8 @@ class PODetail(QWidget):
         self.table.setColumnWidth(12, 85)   # Year to Date
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._on_item_changed)
+        self.table.doubleClicked.connect(self._open_product)
+        self.table.setToolTip("Double-click any row to open product details")
         layout.addWidget(self.table)
 
         totals_row = QHBoxLayout()
@@ -768,6 +770,26 @@ class PODetail(QWidget):
         else:
             self.total_label.setText(f"Order Total: ${fixed_total:.2f}")
 
+
+    def _open_product(self, index):
+        """Double-click a PO line to open the product edit screen."""
+        row = index.row()
+        if row < 0 or row >= self.table.rowCount():
+            return
+        barcode_item = self.table.item(row, 0)
+        if not barcode_item:
+            return
+        barcode = barcode_item.text().strip()
+        if not barcode:
+            return
+        from views.products.product_edit import ProductEdit
+        self._product_edit_win = ProductEdit(
+            barcode=barcode,
+            on_save=lambda: self._load()
+        )
+        self._product_edit_win.show()
+        self._product_edit_win.raise_()
+        self._product_edit_win.activateWindow()
 
     def _add_line(self):
         po = po_model.get_by_id(self.po_id)
