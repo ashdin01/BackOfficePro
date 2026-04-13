@@ -16,9 +16,13 @@ BARCODE_ROLE = Qt.ItemDataRole.UserRole
 
 
 def _week_bounds(offset=0):
+    """
+    offset=0 → last week (Mon-Sun)
+    offset=1 → two weeks ago (Mon-Sun)
+    """
     today = date.today()
     mon   = today - timedelta(days=today.weekday())
-    start = mon - timedelta(weeks=(1 - offset))
+    start = mon - timedelta(weeks=(1 + offset))
     return start, start + timedelta(days=6)
 
 def _fy_bounds(year=None):
