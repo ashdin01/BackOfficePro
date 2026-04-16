@@ -19,9 +19,12 @@ def _week_bounds(offset=0):
     """
     offset=0 → last week (Mon-Sun)
     offset=1 → two weeks ago (Mon-Sun)
+    offset=-1 → current week (Mon-today)
     """
     today = date.today()
     mon   = today - timedelta(days=today.weekday())
+    if offset == -1:
+        return mon, today
     start = mon - timedelta(weeks=(1 + offset))
     return start, start + timedelta(days=6)
 
@@ -158,14 +161,14 @@ class SupplierSalesReport(QWidget):
             hdr.setSectionResizeMode(c, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(0, 130)
         self.table.setColumnWidth(1, 110)
-        self.table.setColumnWidth(3,  75)
-        self.table.setColumnWidth(4,  75)
-        self.table.setColumnWidth(5,  75)
-        self.table.setColumnWidth(6,  90)
-        self.table.setColumnWidth(7,  90)
-        self.table.setColumnWidth(8,  80)
-        self.table.setColumnWidth(9,  80)
-        self.table.setColumnWidth(10, 80)
+        self.table.setColumnWidth(3, 75)   # This Week
+        self.table.setColumnWidth(4, 75)   # Last Week
+        self.table.setColumnWidth(5, 75)   # 2 Wks Ago
+        self.table.setColumnWidth(6, 90)   # This Month
+        self.table.setColumnWidth(7, 90)   # Last Month
+        self.table.setColumnWidth(8, 80)   # This FY
+        self.table.setColumnWidth(9, 80)   # Last FY
+        self.table.setColumnWidth(10, 80)  # All Time
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
@@ -215,37 +218,50 @@ class SupplierSalesReport(QWidget):
         self.date_to.setDate(QDate(d_to.year, d_to.month, d_to.day))
 
     def _set_this_week(self):
-        t = date.today(); self._set_dates(t - timedelta(days=t.weekday()), t); self._load()
+        s, e = _week_bounds(-1)
+        self._set_dates(s, e)
+        self._load()
     def _set_last_week(self):
-        s, e = _week_bounds(0); self._set_dates(s, e); self._load()
+        s, e = _week_bounds(0)
+        self._set_dates(s, e)
+        self._load()
     def _set_this_month(self):
-        t = date.today(); self._set_dates(t.replace(day=1), t); self._load()
+        t = date.today()
+        self._set_dates(t.replace(day=1), t)
+        self._load()
     def _set_last_month(self):
-        t = date.today(); fe = t.replace(day=1) - timedelta(days=1)
-        self._set_dates(fe.replace(day=1), fe); self._load()
+        t = date.today()
+        fe = t.replace(day=1) - timedelta(days=1)
+        self._set_dates(fe.replace(day=1), fe)
+        self._load()
     def _set_this_fy(self):
-        s, e = _fy_bounds(); self._set_dates(s, min(e, date.today())); self._load()
+        s, e = _fy_bounds()
+        self._set_dates(s, min(e, date.today()))
+        self._load()
     def _set_last_fy(self):
         t = date.today()
         y = t.year if t.month >= 7 else t.year - 1
-        s, e = _fy_bounds(y - 1); self._set_dates(s, e); self._load()
+        s, e = _fy_bounds(y - 1)
+        self._set_dates(s, e)
+        self._load()
     def _set_all_time(self):
-        self._set_dates(date(2000, 1, 1), date.today()); self._load()
+        self._set_dates(date(2000, 1, 1), date.today())
+        self._load()
 
     def _load(self):
         conn = get_connection()
         supplier_id = self.supplier_combo.currentData()
         today       = date.today()
 
-        lw_s, lw_e   = _week_bounds(0)
-        tw_s, tw_e   = _week_bounds(1)
-        thisw_s      = today - timedelta(days=today.weekday())
-        thisw_e      = today
-        tm_s         = today.replace(day=1)
-        lm_e         = tm_s - timedelta(days=1)
-        lm_s         = lm_e.replace(day=1)
-        fy_s, fy_e   = _fy_bounds()
-        pfy_s, pfy_e = _fy_bounds((today.year if today.month >= 7 else today.year - 1) - 1)
+        # Date ranges for columns
+        this_week_s, this_week_e = _week_bounds(-1)  # This week (Mon-today)
+        lw_s, lw_e   = _week_bounds(0)               # Last week
+        tw_s, tw_e   = _week_bounds(1)               # Two weeks ago
+        tm_s         = today.replace(day=1)          # This month start
+        lm_e         = tm_s - timedelta(days=1)      # Last month end
+        lm_s         = lm_e.replace(day=1)           # Last month start
+        fy_s, fy_e   = _fy_bounds()                  # This financial year
+        pfy_s, pfy_e = _fy_bounds((today.year if today.month >= 7 else today.year - 1) - 1)  # Last FY
 
         def qty(plu, d1, d2):
             r = conn.execute("""
@@ -271,7 +287,7 @@ class SupplierSalesReport(QWidget):
             ORDER BY s.name, p.description
         """, sup_params).fetchall()
         computed = []
-        totals   = [0] * 8
+        totals   = [0] * 8  # 8 time periods
 
         for row in db_rows:
             barcode     = row[0]
@@ -280,14 +296,14 @@ class SupplierSalesReport(QWidget):
             plu         = str(row[3]) if row[3] else None
 
             vals = [
-                qty(plu, thisw_s, thisw_e),
-                qty(plu, lw_s,  lw_e),
-                qty(plu, tw_s,  tw_e),
-                qty(plu, tm_s,  today),
-                qty(plu, lm_s,  lm_e),
-                qty(plu, fy_s,  fy_e),
-                qty(plu, pfy_s, pfy_e),
-                qty(plu, date(2000, 1, 1), today),
+                qty(plu, this_week_s, this_week_e),  # This Week
+                qty(plu, lw_s,        lw_e),         # Last Week
+                qty(plu, tw_s,        tw_e),         # 2 Wks Ago
+                qty(plu, tm_s,        today),        # This Month
+                qty(plu, lm_s,        lm_e),         # Last Month
+                qty(plu, fy_s,        fy_e),         # This FY
+                qty(plu, pfy_s,       pfy_e),        # Last FY
+                qty(plu, date(2000, 1, 1), today),  # All Time
             ] if plu else [0] * 8
 
             for i, v in enumerate(vals):
