@@ -1,7 +1,6 @@
 import logging
 from database.connection import get_connection
 
-
 def apply_migrations():
     logging.info("apply_migrations() starting")
     conn = get_connection()
@@ -15,43 +14,37 @@ def apply_migrations():
         logging.critical(f"Failed to read schema_version: {e}")
         conn.close()
         raise
-
     try:
         if current < 2:
             migrate_v2(conn)
             logging.info("Migration v2 applied: barcode_aliases")
-
         if current < 3:
             migrate_v3(conn)
             logging.info("Migration v3 applied: brand column")
-
         if current < 4:
             migrate_v4(conn)
             logging.info("Migration v4 applied: sku, supplier_sku columns")
-
         if current < 5:
             migrate_v5(conn)
             logging.info("Migration v5 applied: supplier abn, rep_name, rep_phone, order_minimum")
-
         if current < 6:
             migrate_v6(conn)
             logging.info("Migration v6 applied: product_groups table + group_id on products")
-
         if current < 7:
             migrate_v7(conn)
             logging.info("Migration v7 applied: sales_daily, plu_barcode_map")
-
         if current < 8:
             migrate_v8(conn)
             logging.info("Migration v8 applied: po_pdf_path setting")
-
+        if current < 9:
+            migrate_v9(conn)
+            logging.info("Migration v9 applied: supplier email_orders, email_admin, email_accounts, email_rep")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
         raise
     finally:
         conn.close()
-
 
 def migrate_v2(conn):
     conn.execute("""
@@ -66,7 +59,6 @@ def migrate_v2(conn):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')")
     conn.commit()
 
-
 def migrate_v3(conn):
     """Add brand column to products table."""
     try:
@@ -75,7 +67,6 @@ def migrate_v3(conn):
         pass
     conn.execute("UPDATE settings SET value = '3' WHERE key = 'schema_version'")
     conn.commit()
-
 
 def migrate_v4(conn):
     """Add sku and supplier_sku columns to products table."""
@@ -89,7 +80,6 @@ def migrate_v4(conn):
         pass
     conn.execute("UPDATE settings SET value = '4' WHERE key = 'schema_version'")
     conn.commit()
-
 
 def migrate_v5(conn):
     """Add abn, rep_name, rep_phone, order_minimum to suppliers table."""
@@ -105,7 +95,6 @@ def migrate_v5(conn):
             pass
     conn.execute("UPDATE settings SET value = '5' WHERE key = 'schema_version'")
     conn.commit()
-
 
 def migrate_v6(conn):
     """Add product_groups table and group_id to products."""
@@ -127,7 +116,6 @@ def migrate_v6(conn):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '6')")
     conn.commit()
 
-
 def migrate_v7(conn):
     """Add all columns added during development session."""
     for col, typedef in [
@@ -140,7 +128,6 @@ def migrate_v7(conn):
             conn.execute(f"ALTER TABLE products ADD COLUMN {col} {typedef}")
         except Exception:
             pass
-
     for col, typedef in [
         ("actual_cost", "REAL DEFAULT 0"),
     ]:
@@ -148,7 +135,6 @@ def migrate_v7(conn):
             conn.execute(f"ALTER TABLE po_lines ADD COLUMN {col} {typedef}")
         except Exception:
             pass
-
     conn.execute("""
         CREATE TABLE IF NOT EXISTS plu_barcode_map (
             plu       INTEGER PRIMARY KEY,
@@ -156,7 +142,6 @@ def migrate_v7(conn):
             mapped_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sales_daily (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,12 +160,10 @@ def migrate_v7(conn):
             UNIQUE(sale_date, plu)
         )
     """)
-
     conn.execute("UPDATE products SET plu = sku WHERE sku IS NOT NULL AND sku != '' AND (plu IS NULL OR plu = '')")
     conn.execute("UPDATE products SET plu = base_sku WHERE base_sku IS NOT NULL AND base_sku != '' AND (plu IS NULL OR plu = '')")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '7')")
     conn.commit()
-
 
 def migrate_v8(conn):
     """Add po_pdf_path setting for PO PDF export folder."""
@@ -189,4 +172,25 @@ def migrate_v8(conn):
         "VALUES ('po_pdf_path', '', 'Folder path for exported PO PDFs')"
     )
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '8')")
+    conn.commit()
+
+def migrate_v9(conn):
+    """Add separate email fields to suppliers table.
+    Replaces the single 'email' catch-all with four specific addresses:
+    email_orders, email_admin, email_accounts, email_rep.
+    The original 'email' column is retained for backwards compatibility.
+    """
+    for col in ["email_orders", "email_admin", "email_accounts", "email_rep"]:
+        try:
+            conn.execute(f"ALTER TABLE suppliers ADD COLUMN {col} TEXT DEFAULT ''")
+        except Exception:
+            pass
+    # Migrate existing email value into email_orders as a sensible default
+    conn.execute("""
+        UPDATE suppliers
+        SET email_orders = email
+        WHERE (email IS NOT NULL AND email != '')
+          AND (email_orders IS NULL OR email_orders = '')
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '9')")
     conn.commit()

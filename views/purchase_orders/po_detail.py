@@ -39,19 +39,13 @@ def get_recommendations(supplier_id):
 
 
 def _cartons_needed(reorder_qty, pack_qty):
-    """Convert unit reorder qty to number of cartons, rounding up."""
     pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
-    import math
     return max(1, math.ceil(reorder_qty / pack_qty))
 
 
 def _calc_order_units(reorder_max, reorder_qty, on_hand):
-    """
-    If reorder_max > 0: order = max - on_hand (min 1 unit).
-    Otherwise fall back to reorder_qty (legacy).
-    """
     reorder_max = reorder_max or 0
-    on_hand     = on_hand or 0
+    on_hand = on_hand or 0
     if reorder_max > 0:
         needed = reorder_max - on_hand
         return max(1, int(needed))
@@ -59,16 +53,11 @@ def _calc_order_units(reorder_max, reorder_qty, on_hand):
 
 
 def _carton_note(pack_qty, pack_unit, barcode):
-    """Build the per-line note string."""
     pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
     return f"{pack_qty} × {pack_unit}  |  barcode: {barcode}"
 
 
 class ItemLookupDialog(QDialog):
-    """
-    Modal item lookup — all products sorted by supplier name then description.
-    Double-click or OK to select; populates AddLineDialog barcode field.
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Item Lookup")
@@ -79,16 +68,14 @@ class ItemLookupDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        # Search bar
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Search:"))
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Filter by supplier, barcode or description…")
+        self.search_input.setPlaceholderText("Filter by supplier, barcode or description...")
         self.search_input.textChanged.connect(self._filter)
         search_row.addWidget(self.search_input)
         layout.addLayout(search_row)
 
-        # Table
         self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
@@ -104,7 +91,6 @@ class ItemLookupDialog(QDialog):
         self.table.doubleClicked.connect(self._on_accept)
         layout.addWidget(self.table)
 
-        # Buttons
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -163,44 +149,34 @@ class ItemLookupDialog(QDialog):
             QMessageBox.warning(self, "No selection", "Please select an item first.")
             return
         self.selected = {
-            "barcode":    self.table.item(row, 1).text(),
+            "barcode": self.table.item(row, 1).text(),
             "cost_price": float(self.table.item(row, 4).text().replace("$", "") or 0),
         }
         self.accept()
 
 
-
 def _get_sales_for_barcode(barcode):
-    """
-    Return sales quantities for a barcode across key periods.
-    Joins via plu_barcode_map to find the PLU for this barcode.
-    Returns dict with keys: last_week, two_weeks, this_month, ytd
-    """
     from datetime import date, timedelta
     today = date.today()
 
-    # Week boundaries (Mon-Sun)
     days_since_monday = today.weekday()
-    this_week_start   = today - timedelta(days=days_since_monday)
-    last_week_start   = this_week_start - timedelta(days=7)
-    last_week_end     = this_week_start - timedelta(days=1)
-    two_weeks_start   = last_week_start - timedelta(days=7)
-    two_weeks_end     = last_week_start - timedelta(days=1)
-    month_start       = today.replace(day=1)
-    year_start        = today.replace(month=1, day=1)
+    this_week_start = today - timedelta(days=days_since_monday)
+    last_week_start = this_week_start - timedelta(days=7)
+    last_week_end = this_week_start - timedelta(days=1)
+    two_weeks_start = last_week_start - timedelta(days=7)
+    two_weeks_end = last_week_start - timedelta(days=1)
+    month_start = today.replace(day=1)
+    year_start = today.replace(month=1, day=1)
 
     try:
-        from database.connection import get_connection
         conn = get_connection()
-
-        # Find PLU for this barcode via plu_barcode_map
         plu_row = conn.execute(
             "SELECT plu FROM plu_barcode_map WHERE barcode=?", (barcode,)
         ).fetchone()
 
         if not plu_row:
             conn.close()
-            return None   # Not matched — show "—"
+            return None
 
         plu = str(plu_row[0])
 
@@ -213,10 +189,10 @@ def _get_sales_for_barcode(barcode):
             return int(row[0]) if row else 0
 
         result = {
-            "last_week":  qty(last_week_start,  last_week_end),
-            "two_weeks":  qty(two_weeks_start,  two_weeks_end),
-            "this_month": qty(month_start,       today),
-            "ytd":        qty(year_start,        today),
+            "last_week": qty(last_week_start, last_week_end),
+            "two_weeks": qty(two_weeks_start, two_weeks_end),
+            "this_month": qty(month_start, today),
+            "ytd": qty(year_start, today),
         }
         conn.close()
         return result
@@ -230,6 +206,9 @@ class PODetail(QWidget):
         self.po_id = po_id
         self.on_save = on_save
         self._blank = blank
+        self._line_ids = []
+        self._line_pack_info = []
+        self._line_tax_rates = []
         self.setMinimumSize(1400, 800)
         self._build_ui()
         self._load()
@@ -255,19 +234,18 @@ class PODetail(QWidget):
         for _ci in range(13):
             hdr.setSectionResizeMode(_ci, QHeaderView.ResizeMode.Interactive)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 110)   # Barcode
-        # col 1 Description stretches
-        self.table.setColumnWidth(2, 110)   # Supplier Ctn Qty
-        self.table.setColumnWidth(3, 110)   # Supplier SKU
-        self.table.setColumnWidth(4, 75)    # On Hand
-        self.table.setColumnWidth(5, 80)    # Reorder Pt
-        self.table.setColumnWidth(6, 90)    # Order Qty
-        self.table.setColumnWidth(7, 85)    # Unit Cost $
-        self.table.setColumnWidth(8, 95)    # Line Total $
-        self.table.setColumnWidth(9, 80)    # Last Week
-        self.table.setColumnWidth(10, 95)   # Two Weeks Ago
-        self.table.setColumnWidth(11, 85)   # This Month
-        self.table.setColumnWidth(12, 85)   # Year to Date
+        self.table.setColumnWidth(0, 110)
+        self.table.setColumnWidth(2, 110)
+        self.table.setColumnWidth(3, 110)
+        self.table.setColumnWidth(4, 75)
+        self.table.setColumnWidth(5, 80)
+        self.table.setColumnWidth(6, 90)
+        self.table.setColumnWidth(7, 85)
+        self.table.setColumnWidth(8, 95)
+        self.table.setColumnWidth(9, 80)
+        self.table.setColumnWidth(10, 95)
+        self.table.setColumnWidth(11, 85)
+        self.table.setColumnWidth(12, 85)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._on_item_changed)
         self.table.doubleClicked.connect(self._open_product)
@@ -316,6 +294,15 @@ class PODetail(QWidget):
         )
         btn_pdf.clicked.connect(self._export_pdf)
 
+        btn_email = QPushButton("📧 Email PO")
+        btn_email.setFixedHeight(35)
+        btn_email.setStyleSheet(
+            "QPushButton{background:#1565c0;color:white;border:none;"
+            "border-radius:4px;padding:0 10px;font-weight:bold;}"
+            "QPushButton:hover{background:#1976d2;}"
+        )
+        btn_email.clicked.connect(self._email_po)
+
         btn_send = QPushButton("&Mark as Sent ✓  [M]")
         btn_send.setFixedHeight(35)
         btn_send.clicked.connect(self._mark_sent)
@@ -339,28 +326,45 @@ class PODetail(QWidget):
         btns.addWidget(btn_cancel)
         btns.addWidget(btn_export)
         btns.addWidget(btn_pdf)
+        btns.addWidget(btn_email)
         btns.addStretch()
         btns.addWidget(btn_send)
         btns.addWidget(btn_close)
         layout.addLayout(btns)
 
-        QShortcut(QKeySequence("A"),          self, self._add_line)
-        QShortcut(QKeySequence("M"),          self, self._mark_sent)
-        QShortcut(QKeySequence("C"),          self, self._cancel_po)
-        QShortcut(QKeySequence("R"),          self, self._reload_recommendations)
-        QShortcut(QKeySequence("E"),          self, self._export_csv)
-        QShortcut(QKeySequence("Delete"),     self, self._remove_line)
-        QShortcut(QKeySequence("Backspace"),  self, self._remove_line)
-        QShortcut(QKeySequence("Escape"),     self, self.close)
+        QShortcut(QKeySequence("A"), self, self._add_line)
+        QShortcut(QKeySequence("M"), self, self._mark_sent)
+        QShortcut(QKeySequence("C"), self, self._cancel_po)
+        QShortcut(QKeySequence("R"), self, self._reload_recommendations)
+        QShortcut(QKeySequence("E"), self, self._export_csv)
+        QShortcut(QKeySequence("Delete"), self, self._remove_line)
+        QShortcut(QKeySequence("Backspace"), self, self._remove_line)
+        QShortcut(QKeySequence("Escape"), self, self.close)
+
+    def _open_product(self, index):
+        row = index.row()
+        if row < 0 or row >= self.table.rowCount():
+            return
+        barcode_item = self.table.item(row, 0)
+        if not barcode_item:
+            return
+        barcode = barcode_item.text().strip()
+        if not barcode:
+            return
+        from views.products.product_edit import ProductEdit
+        self._product_edit_win = ProductEdit(
+            barcode=barcode,
+            on_save=lambda: self._load()
+        )
+        self._product_edit_win.show()
+        self._product_edit_win.raise_()
+        self._product_edit_win.activateWindow()
 
     def _export_pdf(self):
         import os
         import logging
-        from PyQt6.QtWidgets import QMessageBox
-        from database.connection import get_connection
         po = self._po
 
-        # ── Auto-save as DRAFT before exporting PDF ──────────────────
         if po['status'] == 'DRAFT':
             try:
                 po_model.update_status(self.po_id, 'DRAFT')
@@ -368,7 +372,6 @@ class PODetail(QWidget):
             except Exception as e:
                 logging.warning(f"Auto-save before PDF export failed: {e}")
 
-        # ── Resolve output folder from settings ───────────────────────
         conn = get_connection()
         row = conn.execute(
             "SELECT value FROM settings WHERE key='po_pdf_path'"
@@ -381,7 +384,6 @@ class PODetail(QWidget):
             )
         os.makedirs(pdf_folder, exist_ok=True)
 
-        # ── Save directly to folder ───────────────────────────────────
         filename = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
         path = os.path.join(pdf_folder, filename)
 
@@ -391,116 +393,148 @@ class PODetail(QWidget):
             if self.on_save:
                 self.on_save()
             logging.info(f"PDF exported: {path}")
-            QMessageBox.information(
-                self, "PDF Exported",
-                f"✓ Saved to:\n{path}"
-            )
+            QMessageBox.information(self, "PDF Exported", f"✓ Saved to:\n{path}")
         except Exception as e:
             logging.critical(f"PDF export failed: {e}", exc_info=True)
             QMessageBox.critical(self, "PDF Export Failed", str(e))
+
+    def _email_po(self):
+        import os
+        import logging
+        from PyQt6.QtWidgets import QInputDialog
+
+        po = self._po
+        supplier = getattr(self, '_supplier', None)
+
+        if self.table.rowCount() == 0:
+            QMessageBox.warning(self, "Cannot Send", "Add at least one line before emailing the PO.")
+            return
+
+        supplier_email = (supplier['email_orders'] or '').strip() if supplier else ''
+        if not supplier_email:
+            email, ok = QInputDialog.getText(
+                self, "Supplier Email",
+                f"No email address found for {po['supplier_name']}.\nEnter supplier email address:"
+            )
+            if not ok or not email.strip():
+                return
+            supplier_email = email.strip()
+
+        reply = QMessageBox.question(
+            self, "Confirm Email",
+            f"Email Purchase Order {po['po_number']} to:\n\n{po['supplier_name']}\n{supplier_email}"
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            conn = get_connection()
+            row = conn.execute("SELECT value FROM settings WHERE key='po_pdf_path'").fetchone()
+            conn.close()
+
+            pdf_folder = (row[0] or '').strip() if row else ''
+            if not pdf_folder:
+                pdf_folder = os.path.join(os.path.expanduser('~'), 'Documents', 'BackOfficePro', 'PurchaseOrders')
+            os.makedirs(pdf_folder, exist_ok=True)
+
+            filename = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
+            pdf_path = os.path.join(pdf_folder, filename)
+
+            from utils.po_pdf import generate_po_pdf
+            generate_po_pdf(self.po_id, pdf_path)
+
+            from utils.email_graph import send_purchase_order
+            send_purchase_order(po_id=self.po_id, to_address=supplier_email, pdf_path=pdf_path)
+
+            po_model.update_status(self.po_id, PO_STATUS_SENT)
+            self._load()
+            if self.on_save:
+                self.on_save()
+
+            QMessageBox.information(self, "Email Sent", f"✓ Purchase Order {po['po_number']} sent to:\n{supplier_email}")
+        except Exception as e:
+            logging.error(f"Email send failed: {e}", exc_info=True)
+            QMessageBox.critical(self, "Email Failed", str(e))
 
     def _export_csv(self):
         if self.table.rowCount() == 0:
             QMessageBox.information(self, 'Export', 'No lines to export.')
             return
-        po       = self._po
+        po = self._po
         supplier = getattr(self, '_supplier', None)
-        sup_name  = po['supplier_name'] or ''
-        sup_email = (supplier['email'] or '') if supplier and supplier['email'] else ''
+        sup_name = po['supplier_name'] or ''
+        sup_email = (supplier['email_orders'] or '') if supplier and supplier['email_orders'] else ''
         sup_notes = (supplier['notes'] or '') if supplier and supplier['notes'] else ''
 
         default_name = f"{po['po_number']}_{sup_name.replace(' ', '_')}.csv"
         default_path = os.path.join(os.path.expanduser("~/Downloads"), default_name)
-        path, _ = QFileDialog.getSaveFileName(
-            self, 'Export PO to CSV', default_path,
-            'CSV Files (*.csv);;All Files (*)'
-        )
+        path, _ = QFileDialog.getSaveFileName(self, 'Export PO to CSV', default_path, 'CSV Files (*.csv)')
         if not path:
             return
         try:
             lines = lines_model.get_by_po(self.po_id)
             fixed_total = 0.0
-            gst_total   = 0.0
+            gst_total = 0.0
 
             with open(path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-
-                # Header block
-                writer.writerow(['Supplier',      sup_name])
-                writer.writerow(['Email',         sup_email])
-                writer.writerow(['PO Number',     po['po_number']])
-                writer.writerow(['Status',        po['status']])
+                writer.writerow(['Supplier', sup_name])
+                writer.writerow(['Email', sup_email])
+                writer.writerow(['PO Number', po['po_number']])
+                writer.writerow(['Status', po['status']])
                 writer.writerow(['Delivery Date', po['delivery_date'] or ''])
                 writer.writerow([])
+                writer.writerow(['Barcode', 'Description', 'Supplier SKU', 'Order Qty (Cartons)',
+                                'Units per Carton', 'Total Units', 'On Hand', 'Unit Cost', 'Line Total'])
 
-                # Column headers
-                writer.writerow([
-                    'Barcode', 'Description', 'Supplier SKU',
-                    'Order Qty (Cartons)', 'Units per Carton',
-                    'Total Units', 'On Hand', 'Unit Cost', 'Line Total'
-                ])
-
-                # Line rows
                 rows_written = 0
                 for line in lines:
-                    product   = product_model.get_by_barcode(line['barcode'])
-                    pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
+                    product = product_model.get_by_barcode(line['barcode'])
+                    pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
                     pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-                    sup_sku   = (product['supplier_sku'] or '') if product else ''
-                    tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
+                    sup_sku = (product['supplier_sku'] or '') if product else ''
+                    tax_rate = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
 
-                    soh     = stock_model.get_by_barcode(line['barcode'])
+                    soh = stock_model.get_by_barcode(line['barcode'])
                     on_hand = int(soh['quantity']) if soh else 0
 
-                    cartons     = int(line['ordered_qty'])
+                    cartons = int(line['ordered_qty'])
                     total_units = cartons * pack_qty
-                    unit_cost   = float(line['unit_cost'])
-                    line_total  = total_units * unit_cost
+                    unit_cost = float(line['unit_cost'])
+                    line_total = total_units * unit_cost
 
                     fixed_total += line_total
                     if tax_rate > 0:
                         gst_total += line_total - (line_total / (1 + tax_rate / 100))
 
-                    writer.writerow([
-                        line['barcode'],
-                        line['description'],
-                        sup_sku,
-                        cartons,
-                        f'{pack_qty} x {pack_unit}',
-                        total_units,
-                        on_hand,
-                        f'{unit_cost:.4f}',
-                        f'{line_total:.2f}',
-                    ])
+                    writer.writerow([line['barcode'], line['description'], sup_sku, cartons,
+                                    f'{pack_qty} x {pack_unit}', total_units, on_hand,
+                                    f'{unit_cost:.4f}', f'{line_total:.2f}'])
                     rows_written += 1
 
-                # Totals
                 subtotal = round(fixed_total - gst_total, 2)
-                gst      = round(gst_total, 2)
+                gst = round(gst_total, 2)
                 writer.writerow([])
                 writer.writerow(['', '', '', '', '', '', '', 'Subtotal (ex GST)', f'{subtotal:.2f}'])
-                writer.writerow(['', '', '', '', '', '', '', 'GST',               f'{gst:.2f}'])
-                writer.writerow(['', '', '', '', '', '', '', 'Order Total',       f'{fixed_total:.2f}'])
+                writer.writerow(['', '', '', '', '', '', '', 'GST', f'{gst:.2f}'])
+                writer.writerow(['', '', '', '', '', '', '', 'Order Total', f'{fixed_total:.2f}'])
 
-                # Supplier notes footer
                 if sup_notes:
                     writer.writerow([])
                     writer.writerow(['Supplier Notes', sup_notes])
 
-            QMessageBox.information(
-                self, 'Export Complete',
-                f'Exported {rows_written} lines to:\n{path}'
-            )
+            QMessageBox.information(self, 'Export Complete', f'Exported {rows_written} lines to:\n{path}')
         except Exception as e:
             QMessageBox.critical(self, 'Export Failed', str(e))
+
     def _load(self):
         po = po_model.get_by_id(self.po_id)
         self._po = po
         self.setWindowTitle(f"PO: {po['po_number']}")
         from models.supplier import get_by_id as get_supplier
         supplier = get_supplier(po['supplier_id'])
-        self._supplier = supplier   # stored for CSV export
-        self._order_minimum = float(supplier['order_minimum']) if supplier and 'order_minimum' in supplier.keys() and supplier['order_minimum'] else 0
+        self._supplier = supplier
+        self._order_minimum = float(supplier['order_minimum']) if supplier and supplier['order_minimum'] else 0
         min_str = f"  |  Order Min: <b>${self._order_minimum:.2f}</b>" if self._order_minimum else ""
         self.header.setText(
             f"<b>{po['po_number']}</b> — {po['supplier_name']} — "
@@ -509,12 +543,11 @@ class PODetail(QWidget):
         )
         lines = lines_model.get_by_po(self.po_id)
 
-        if len(lines) == 0 and not getattr(self, '_blank', False):
+        if len(lines) == 0 and not self._blank:
             self._auto_load_recommendations()
             lines = lines_model.get_by_po(self.po_id)
-        elif len(lines) == 0 and getattr(self, '_blank', False):
-            self.rec_banner.setText(
-                "Blank PO — use Add Line [A] or F2 lookup to add products.")
+        elif len(lines) == 0 and self._blank:
+            self.rec_banner.setText("Blank PO — use Add Line [A] or F2 lookup to add products.")
 
         self._populate_table(lines)
 
@@ -524,11 +557,11 @@ class PODetail(QWidget):
             self.rec_banner.setText("✓ All stock levels are above reorder points for this supplier.")
             return
         for r in recs:
-            pack_qty  = int(r['pack_qty']) if r['pack_qty'] else 1
+            pack_qty = int(r['pack_qty']) if r['pack_qty'] else 1
             pack_unit = r['pack_unit'] or 'EA'
             order_units = _calc_order_units(r['reorder_max'], 0, r['on_hand'])
-            cartons   = _cartons_needed(order_units, pack_qty)
-            note      = _carton_note(pack_qty, pack_unit, r['barcode'])
+            cartons = _cartons_needed(order_units, pack_qty)
+            note = _carton_note(pack_qty, pack_unit, r['barcode'])
             lines_model.add(
                 po_id=self.po_id,
                 barcode=r['barcode'],
@@ -537,29 +570,24 @@ class PODetail(QWidget):
                 unit_cost=r['cost_price'],
                 notes=note,
             )
-        self.rec_banner.setText(
-            f"💡 {len(recs)} line(s) auto-loaded from reorder points. "
-            f"Qty shown in cartons. Edit directly in the table."
-        )
+        self.rec_banner.setText(f"💡 {len(recs)} line(s) auto-loaded from reorder points.")
 
     def _reload_recommendations(self):
         recs = get_recommendations(self._po['supplier_id'])
         if not recs:
-            QMessageBox.information(self, "Recommendations",
-                "All products for this supplier are above reorder points.")
+            QMessageBox.information(self, "Recommendations", "All products are above reorder points.")
             return
         existing = {l['barcode'] for l in lines_model.get_by_po(self.po_id)}
         new_recs = [r for r in recs if r['barcode'] not in existing]
         if not new_recs:
-            QMessageBox.information(self, "Recommendations",
-                "All recommended products are already on this PO.")
+            QMessageBox.information(self, "Recommendations", "All recommended products are already on this PO.")
             return
         for r in new_recs:
-            pack_qty  = int(r['pack_qty']) if r['pack_qty'] else 1
+            pack_qty = int(r['pack_qty']) if r['pack_qty'] else 1
             pack_unit = r['pack_unit'] or 'EA'
             order_units = _calc_order_units(r['reorder_max'], 0, r['on_hand'])
-            cartons   = _cartons_needed(order_units, pack_qty)
-            note      = _carton_note(pack_qty, pack_unit, r['barcode'])
+            cartons = _cartons_needed(order_units, pack_qty)
+            note = _carton_note(pack_qty, pack_unit, r['barcode'])
             lines_model.add(
                 po_id=self.po_id,
                 barcode=r['barcode'],
@@ -587,9 +615,9 @@ class PODetail(QWidget):
             self._line_ids.append(line['id'])
 
             product = product_model.get_by_barcode(line['barcode'])
-            pack_qty  = int(product['pack_qty']) if product and product['pack_qty'] else 1
+            pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
             pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-            tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
+            tax_rate = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
             self._line_pack_info.append((pack_qty, pack_unit))
             self._line_tax_rates.append(tax_rate)
 
@@ -601,7 +629,6 @@ class PODetail(QWidget):
             desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(r, 1, desc_item)
 
-            # col 2 — Supplier Ctn Qty
             ctn_str = f"{pack_qty} × {pack_unit}"
             ctn_item = QTableWidgetItem(ctn_str)
             ctn_item.setFlags(ctn_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -626,7 +653,7 @@ class PODetail(QWidget):
             rp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(r, 5, rp_item)
 
-            cartons     = int(line['ordered_qty'])
+            cartons = int(line['ordered_qty'])
             total_units = cartons * pack_qty
             qty_item = QTableWidgetItem(str(total_units))
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -639,7 +666,7 @@ class PODetail(QWidget):
             self.table.setItem(r, 7, cost_item)
 
             product_vw = product_model.get_by_barcode(line['barcode'])
-            is_var_wt = product_vw and product_vw['variable_weight']
+            is_var_wt = product_vw and product_vw and product_vw['variable_weight']
             if is_var_wt:
                 total_item = QTableWidgetItem("— variable weight")
                 total_item.setForeground(QColor("#FFA500"))
@@ -650,7 +677,6 @@ class PODetail(QWidget):
             total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(r, 8, total_item)
 
-            # ── Sales history columns ─────────────────────────────────
             sales = _get_sales_for_barcode(line['barcode'])
             for col_idx, key in enumerate(['last_week', 'two_weeks', 'this_month', 'ytd'], start=9):
                 if sales is None:
@@ -666,7 +692,6 @@ class PODetail(QWidget):
                 cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, col_idx, cell)
-
 
         self.table.blockSignals(False)
         self._update_total()
@@ -686,10 +711,8 @@ class PODetail(QWidget):
 
         try:
             if col == 6:
-                # col 6 displays total units — convert back to cartons for storage
                 total_units = max(1, int(float(item.text())))
                 cartons = max(1, math.ceil(total_units / pack_qty))
-                # Snap display to exact carton multiple
                 snapped_units = cartons * pack_qty
                 self.table.blockSignals(True)
                 item.setText(str(snapped_units))
@@ -701,24 +724,25 @@ class PODetail(QWidget):
                     notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text()),
                 )
                 item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {snapped_units} units total")
-
                 self.rec_banner.setText("")
+
             elif col == 7:
                 cost = max(0.0, float(item.text().replace("$", "").strip()))
-                # col 6 shows total units — convert to cartons for storage
                 total_units_col = int(float(self.table.item(row, 6).text()))
                 cartons = max(1, math.ceil(total_units_col / pack_qty))
-                lines_model.update(line_id, ordered_qty=cartons, unit_cost=cost,
-                                   notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text()))
+                lines_model.update(
+                    line_id,
+                    ordered_qty=cartons,
+                    unit_cost=cost,
+                    notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text())
+                )
 
-            # Refresh line total — col 6 now shows total units directly
             try:
                 total_units_now = int(float(self.table.item(row, 6).text()))
-                cost_now        = float(self.table.item(row, 7).text().replace("$","").strip())
-                line_total      = total_units_now * cost_now
+                cost_now = float(self.table.item(row, 7).text().replace("$", "").strip())
+                line_total = total_units_now * cost_now
                 lt_item = self.table.item(row, 8)
                 if lt_item and not lt_item.text().startswith("—"):
-                    # Temporarily make editable to update text
                     lt_item.setFlags(lt_item.flags() | Qt.ItemFlag.ItemIsEditable)
                     self.table.blockSignals(True)
                     lt_item.setText(f"${line_total:.2f}")
@@ -726,6 +750,7 @@ class PODetail(QWidget):
                     lt_item.setFlags(lt_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             except (ValueError, AttributeError):
                 pass
+
         except (ValueError, TypeError):
             pass
 
@@ -733,8 +758,8 @@ class PODetail(QWidget):
 
     def _update_total(self):
         fixed_total = 0.0
-        gst_total   = 0.0
-        var_lines   = 0
+        gst_total = 0.0
+        var_lines = 0
         for r in range(self.table.rowCount()):
             if r >= len(self._line_ids) or self._line_ids[r] is None:
                 continue
@@ -745,9 +770,8 @@ class PODetail(QWidget):
                 if lt_item.text().startswith("—"):
                     var_lines += 1
                     continue
-                line_total = float(lt_item.text().replace("$","").replace(",","").strip())
+                line_total = float(lt_item.text().replace("$", "").replace(",", "").strip())
                 fixed_total += line_total
-                # Per-line GST using stored tax rate
                 tax_rate = 0.0
                 if r < len(self._line_tax_rates) and self._line_tax_rates[r] is not None:
                     tax_rate = float(self._line_tax_rates[r])
@@ -757,7 +781,7 @@ class PODetail(QWidget):
                 pass
 
         subtotal = round(fixed_total - gst_total, 2)
-        gst      = round(gst_total, 2)
+        gst = round(gst_total, 2)
 
         self.subtotal_label.setText(f"Subtotal (ex GST): ${subtotal:.2f}")
         self.gst_label.setText(f"GST: ${gst:.2f}")
@@ -770,29 +794,9 @@ class PODetail(QWidget):
         else:
             self.total_label.setText(f"Order Total: ${fixed_total:.2f}")
 
-
-    def _open_product(self, index):
-        """Double-click a PO line to open the product edit screen."""
-        row = index.row()
-        if row < 0 or row >= self.table.rowCount():
-            return
-        barcode_item = self.table.item(row, 0)
-        if not barcode_item:
-            return
-        barcode = barcode_item.text().strip()
-        if not barcode:
-            return
-        from views.products.product_edit import ProductEdit
-        self._product_edit_win = ProductEdit(
-            barcode=barcode,
-            on_save=lambda: self._load()
-        )
-        self._product_edit_win.show()
-        self._product_edit_win.raise_()
-        self._product_edit_win.activateWindow()
-
     def _add_line(self):
         po = po_model.get_by_id(self.po_id)
+        from views.purchase_orders.po_detail_add_line import AddLineDialog
         dlg = AddLineDialog(self.po_id, supplier_id=po["supplier_id"], parent=self)
         if dlg.exec():
             lines = lines_model.get_by_po(self.po_id)
@@ -805,7 +809,6 @@ class PODetail(QWidget):
         if row < 0:
             QMessageBox.information(self, "Remove Line", "Select a line first.")
             return
-        # Walk upward to find the nearest real line (skip note rows)
         while row >= 0 and (row >= len(self._line_ids) or self._line_ids[row] is None):
             row -= 1
         if row < 0 or self._line_ids[row] is None:
@@ -834,7 +837,7 @@ class PODetail(QWidget):
             if self._line_ids[r] is None:
                 continue
             try:
-                qty  = float(self.table.item(r, 6).text())
+                qty = float(self.table.item(r, 6).text())
                 cost = float(self.table.item(r, 7).text().replace("$", "").strip())
                 total += qty * cost
             except (ValueError, AttributeError):
@@ -865,215 +868,3 @@ class PODetail(QWidget):
             self.close()
 
 
-class AddLineDialog(QDialog):
-    def __init__(self, po_id, supplier_id=None, parent=None):
-        super().__init__(parent)
-        self.po_id = po_id
-        self.supplier_id = supplier_id
-        self.setWindowTitle("Add Line")
-        self.setMinimumWidth(440)
-        self._reorder_max = 0
-        self._pack_qty = 1
-        self._pack_unit = 'EA'
-        self._build_ui()
-
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setSpacing(10)
-
-        # Barcode row with Lookup button
-        barcode_row = QHBoxLayout()
-        self.barcode = QLineEdit()
-        self.barcode.setPlaceholderText("Scan or type barcode")
-        self.barcode.returnPressed.connect(self._on_barcode_enter)
-        lookup_btn = QPushButton("🔍 F2")
-        lookup_btn.setFixedWidth(70)
-        lookup_btn.setFixedHeight(28)
-        lookup_btn.setToolTip("Press F2 to open item lookup")
-        lookup_btn.setAutoDefault(False)
-        lookup_btn.setDefault(False)
-        lookup_btn.clicked.connect(self._open_lookup)
-        from PyQt6.QtGui import QShortcut, QKeySequence
-        f2 = QShortcut(QKeySequence("F2"), self)
-        f2.setContext(Qt.ShortcutContext.WindowShortcut)
-        f2.activated.connect(self._open_lookup)
-        barcode_row.addWidget(self.barcode)
-        barcode_row.addWidget(lookup_btn)
-
-        self.description = QLineEdit()
-        self.description.setPlaceholderText("Auto-filled on barcode lookup")
-
-        self.on_hand_label = QLabel("")
-        self.on_hand_label.setStyleSheet("color: grey;")
-
-        self.pack_label = QLabel("")
-        self.pack_label.setStyleSheet("color: steelblue; font-style: italic;")
-
-        self.qty = QDoubleSpinBox()
-        self.qty.setMinimum(1)
-        self.qty.setMaximum(99999)
-        self.qty.setDecimals(0)
-        self.qty.setValue(1)
-        self.qty.setSuffix(" carton(s)")
-        self.qty.valueChanged.connect(self._update_unit_preview)
-        self.qty.installEventFilter(self)
-
-        self.unit_preview = QLabel("")
-        self.unit_preview.setStyleSheet("color: #555; font-style: italic;")
-
-        self.unit_cost = QDoubleSpinBox()
-        self.unit_cost.setMaximum(99999)
-        self.unit_cost.setPrefix("$")
-        self.unit_cost.setDecimals(2)
-
-        self.notes = QLineEdit()
-        self.notes.setPlaceholderText("Optional")
-
-        form.addRow("Barcode *",       barcode_row)
-        form.addRow("Description",     self.description)
-        form.addRow("Stock on Hand",   self.on_hand_label)
-        form.addRow("Pack Size",       self.pack_label)
-        form.addRow("Qty (Cartons) *", self.qty)
-        form.addRow("",                self.unit_preview)
-        form.addRow("Unit Cost",       self.unit_cost)
-        form.addRow("Notes",           self.notes)
-        layout.addLayout(form)
-
-        layout.addSpacing(10)
-        btns = QHBoxLayout()
-        ok_btn = QPushButton("Add to PO")
-        ok_btn.setFixedHeight(35)
-        ok_btn.setDefault(False)
-        ok_btn.setAutoDefault(False)
-        ok_btn.clicked.connect(self._add)
-        cancel_btn = QPushButton("Cancel  [Esc]")
-        cancel_btn.setFixedHeight(35)
-        cancel_btn.setDefault(False)
-        cancel_btn.setAutoDefault(False)
-        cancel_btn.clicked.connect(self.reject)
-        btns.addWidget(ok_btn)
-        btns.addWidget(cancel_btn)
-        layout.addLayout(btns)
-
-        from PyQt6.QtGui import QShortcut, QKeySequence
-        QShortcut(QKeySequence("Escape"), self, self.reject)
-        QShortcut(QKeySequence("Ctrl+S"), self, self._add)
-
-    def eventFilter(self, obj, event):
-        from PyQt6.QtCore import QEvent
-        from PyQt6.QtGui import QKeyEvent
-        if obj == self.qty and event.type() == QEvent.Type.KeyPress:
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self._add()
-                return True
-        return super().eventFilter(obj, event)
-
-    def _on_barcode_enter(self):
-        """On Enter in barcode field: run lookup then move focus to qty."""
-        self._lookup()
-        self.qty.setFocus()
-        self.qty.selectAll()
-
-    def _open_lookup(self):
-        """Open the item lookup dialog sorted by supplier, fill barcode on selection."""
-        dlg = ItemLookupDialog(self)
-        if dlg.exec() and dlg.selected:
-            self.barcode.setText(dlg.selected["barcode"])
-            self.unit_cost.setValue(dlg.selected["cost_price"])
-            self._lookup()   # trigger the full product fill
-
-    def _lookup(self):
-        barcode = self.barcode.text().strip()
-        if not barcode:
-            return
-        # ── Duplicate line check ─────────────────────────────────────
-        existing_lines = lines_model.get_by_po(self.po_id)
-        for line_num, existing in enumerate(existing_lines, start=1):
-            if existing['barcode'] == barcode:
-                QMessageBox.warning(
-                    self, "Item Already on PO",
-                    f"This item is already on this PO at line {line_num}:\n\n"
-                    f"{existing['description']}\n\n"
-                    f"Edit the existing line instead."
-                )
-                self.barcode.clear()
-                self.barcode.setFocus()
-                return
-        # ─────────────────────────────────────────────────────────────
-        product = product_model.get_by_barcode(barcode)
-        if product:
-            # Check supplier matches PO supplier
-            if self.supplier_id and product['supplier_id'] != self.supplier_id:
-                from database.connection import get_connection
-                conn = get_connection()
-                po_sup = conn.execute(
-                    "SELECT name FROM suppliers WHERE id=?", (self.supplier_id,)
-                ).fetchone()
-                prod_sup = conn.execute(
-                    "SELECT name FROM suppliers WHERE id=?", (product['supplier_id'],)
-                ).fetchone() if product['supplier_id'] else None
-                conn.close()
-                po_name   = po_sup['name'] if po_sup else "Unknown"
-                prod_name = prod_sup['name'] if prod_sup else "No supplier set"
-                QMessageBox.warning(
-                    self, "Wrong Supplier",
-                    f"This product belongs to: {prod_name}\n"
-                    f"This PO is for: {po_name}\n\n"
-                    f"Only {po_name} products can be added to this order."
-                )
-                self.barcode.clear()
-                self.barcode.setFocus()
-                return
-            self.description.setText(product['description'])
-            self.unit_cost.setValue(product['cost_price'])
-            self._reorder_max = int(product['reorder_max']) if product['reorder_max'] else 0
-            self._pack_qty    = int(product['pack_qty']) if product['pack_qty'] else 1
-            self._pack_unit   = product['pack_unit'] or 'EA'
-
-            soh = stock_model.get_by_barcode(barcode)
-            on_hand   = int(soh['quantity']) if soh else 0
-            reorder   = int(product['reorder_point'])
-            color     = "red" if on_hand <= reorder else "green"
-            self.on_hand_label.setText(
-                f"<span style='color:{color}'>{on_hand}</span> "
-                f"(reorder at {reorder})"
-            )
-            self.pack_label.setText(
-                f"{self._pack_qty} × {self._pack_unit} per carton"
-            )
-            import math
-            soh_qty = int(soh['quantity']) if soh else 0
-            order_units = max(1, self._reorder_max - soh_qty) if self._reorder_max > 0 else self._pack_qty
-            suggested_cartons = max(1, math.ceil(order_units / self._pack_qty))
-            self.qty.setValue(suggested_cartons)
-            self._update_unit_preview()
-        else:
-            self.description.clear()
-            self.pack_label.setText("")
-            self.on_hand_label.setText("<span style='color:red'>Product not found</span>")
-
-    def _update_unit_preview(self):
-        cartons    = int(self.qty.value())
-        total_units = cartons * self._pack_qty
-        self.unit_preview.setText(
-            f"= {total_units} units  ({cartons} × {self._pack_qty} {self._pack_unit})"
-        )
-
-    def _add(self):
-        barcode     = self.barcode.text().strip()
-        description = self.description.text().strip()
-        if not barcode or not description:
-            QMessageBox.warning(self, "Validation", "Barcode and Description are required.")
-            return
-        cartons = int(self.qty.value())
-        note    = _carton_note(self._pack_qty, self._pack_unit, barcode)
-        lines_model.add(
-            po_id=self.po_id,
-            barcode=barcode,
-            description=description,
-            ordered_qty=cartons,
-            unit_cost=self.unit_cost.value(),
-            notes=note,
-        )
-        self.accept()

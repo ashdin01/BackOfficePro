@@ -1,6 +1,6 @@
 """
 Settings screen for BackOfficePro.
-Allows editing of store details, email addresses and SMTP configuration.
+Allows editing of store details, email addresses and Microsoft Graph API configuration.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from database.connection import get_connection
-
 
 SETTINGS_FIELDS = [
     # (db_key,              label,               placeholder)
@@ -30,11 +29,11 @@ PATHS_FIELDS = [
     ("po_pdf_path", "PO PDF Folder", "Leave blank to use Documents/BackOfficePro/PurchaseOrders"),
 ]
 
-SMTP_FIELDS = [
-    ("smtp_host",         "SMTP Host",           "e.g. smtp.gmail.com"),
-    ("smtp_port",         "SMTP Port",           "e.g. 587"),
-    ("smtp_user",         "SMTP Username",       "e.g. youraddress@gmail.com"),
-    ("smtp_password",     "SMTP Password",       "App password or SMTP password"),
+GRAPH_FIELDS = [
+    ("graph_client_id",      "Client ID",       "Azure App Registration Client ID"),
+    ("graph_tenant_id",      "Tenant ID",       "Azure Directory (Tenant) ID"),
+    ("graph_client_secret",  "Client Secret",   "Azure App Client Secret value"),
+    ("graph_from_address",   "From Address",    "Microsoft 365 email address to send from"),
 ]
 
 
@@ -117,49 +116,53 @@ class SettingsScreen(QWidget):
             self._fields[key] = edit
         scroll_layout.addWidget(email_group)
 
-        # ── SMTP Configuration ─────────────────────────────────────────
-        smtp_group = QGroupBox("SMTP Configuration  (for sending Purchase Orders by email)")
-        smtp_group.setStyleSheet("QGroupBox { font-weight: bold; }")
-        smtp_form = QFormLayout(smtp_group)
-        smtp_form.setContentsMargins(16, 16, 16, 16)
-        smtp_form.setSpacing(10)
-        smtp_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        for key, label, placeholder in SMTP_FIELDS:
+        # ── Microsoft Graph API Configuration ─────────────────────────
+        graph_group = QGroupBox("Email Configuration  (Microsoft 365 — for sending Purchase Orders)")
+        graph_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        graph_form = QFormLayout(graph_group)
+        graph_form.setContentsMargins(16, 16, 16, 16)
+        graph_form.setSpacing(10)
+        graph_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        for key, label, placeholder in GRAPH_FIELDS:
             edit = QLineEdit()
             edit.setPlaceholderText(placeholder)
             edit.setMinimumWidth(360)
-            if key == "smtp_password":
+            if key == "graph_client_secret":
                 edit.setEchoMode(QLineEdit.EchoMode.Password)
-            smtp_form.addRow(label, edit)
+            graph_form.addRow(label, edit)
             self._fields[key] = edit
 
         # Test connection button
-        btn_test = QPushButton("Test SMTP Connection")
+        btn_test = QPushButton("Test Connection")
         btn_test.setFixedHeight(30)
         btn_test.setStyleSheet(
             "QPushButton { background: #37474f; color: white; border: none; "
             "border-radius: 4px; padding: 0 12px; }"
             "QPushButton:hover { background: #455a64; }"
         )
-        btn_test.clicked.connect(self._test_smtp)
-        smtp_form.addRow("", btn_test)
+        btn_test.clicked.connect(self._test_graph)
+        graph_form.addRow("", btn_test)
 
         note = QLabel(
-            "💡 For Gmail: use smtp.gmail.com, port 587, and an App Password\n"
-            "    (Google Account → Security → 2-Step Verification → App Passwords)"
+            "💡 Requires an Azure App Registration with Mail.Send permission.\n"
+            "    Azure Portal → App registrations → Your App → Certificates & secrets"
         )
         note.setStyleSheet("color: grey; font-size: 8pt;")
         note.setWordWrap(True)
-        smtp_form.addRow("", note)
-        scroll_layout.addWidget(smtp_group)
+        graph_form.addRow("", note)
+
+        scroll_layout.addWidget(graph_group)
         scroll_layout.addStretch()
 
         # ── Buttons ────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.addStretch()
+
         btn_cancel = QPushButton("Cancel  [Esc]")
         btn_cancel.setFixedHeight(34)
         btn_cancel.clicked.connect(self.close)
+
         btn_save = QPushButton("Save  [Ctrl+S]")
         btn_save.setFixedHeight(34)
         btn_save.setStyleSheet(
@@ -168,6 +171,7 @@ class SettingsScreen(QWidget):
             "QPushButton:hover { background: #1976d2; }"
         )
         btn_save.clicked.connect(self._save)
+
         btn_row.addWidget(btn_cancel)
         btn_row.addSpacing(8)
         btn_row.addWidget(btn_save)
@@ -175,14 +179,6 @@ class SettingsScreen(QWidget):
 
         QShortcut(QKeySequence("Ctrl+S"), self, self._save)
         QShortcut(QKeySequence("Escape"), self, self.close)
-
-    def _browse_folder(self, edit: QLineEdit):
-        from PyQt6.QtWidgets import QFileDialog
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select Folder", edit.text() or ""
-        )
-        if folder:
-            edit.setText(folder)
 
     def _load(self):
         settings = _load_settings()
@@ -199,27 +195,16 @@ class SettingsScreen(QWidget):
         QMessageBox.information(self, "Saved", "Settings saved successfully.")
         self.close()
 
-    def _test_smtp(self):
-        host     = self._fields["smtp_host"].text().strip()
-        port     = self._fields["smtp_port"].text().strip()
-        user     = self._fields["smtp_user"].text().strip()
-        password = self._fields["smtp_password"].text().strip()
-
-        if not all([host, port, user, password]):
-            QMessageBox.warning(self, "Incomplete",
-                "Please fill in all SMTP fields before testing.")
-            return
-
+    def _test_graph(self):
+        # Save current field values first so the test uses what's on screen
+        for key, edit in self._fields.items():
+            _save_setting(key, edit.text().strip())
         try:
-            import smtplib
-            port_int = int(port)
-            with smtplib.SMTP(host, port_int, timeout=10) as server:
-                server.ehlo()
-                server.starttls()
-                server.login(user, password)
-            QMessageBox.information(self, "Success",
-                "✓ SMTP connection successful!\nYou can now send Purchase Orders by email.")
+            from utils.email_graph import test_graph_connection
+            success, message = test_graph_connection()
+            if success:
+                QMessageBox.information(self, "Connection Successful", message)
+            else:
+                QMessageBox.critical(self, "Connection Failed", message)
         except Exception as e:
-            QMessageBox.critical(self, "Connection Failed",
-                f"Could not connect to SMTP server:\n\n{str(e)}\n\n"
-                f"Check your host, port and credentials.")
+            QMessageBox.critical(self, "Error", str(e))
