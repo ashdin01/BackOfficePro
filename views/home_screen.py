@@ -115,11 +115,10 @@ class HomeScreen(QWidget):
 
         nav_row = QHBoxLayout(); nav_row.setSpacing(12)
         nav_items = [
-            ("Products  [P]",        0, "#1565c0"),
-            ("Suppliers  [S]",       1, "#37474f"),
-            ("Purchase Orders  [O]", 3, "#2e7d32"),
-            ("Reports  [R]",         4, "#6a1b9a"),
-            ("Sales  [L]",           7, "#1a5276"),
+            ("Products  [P]",        1, "#1565c0"),
+            ("Suppliers  [S]",       2, "#37474f"),
+            ("Purchase Orders  [O]", 4, "#2e7d32"),
+            ("Reports  [R]",         5, "#6a1b9a"),
         ]
         for label, idx, color in nav_items:
             btn = QPushButton(label)
