@@ -57,78 +57,94 @@ class ProductEdit(KeyboardMixin, QWidget):
         form = QFormLayout()
         form.setSpacing(10)
 
-        def ro_row(value, on_edit):
+        def ro_row(field_label, value, on_edit):
             row = QHBoxLayout()
-            lbl = QLabel(str(value))
-            lbl.setMinimumWidth(400)
             btn = QPushButton("✎")
             btn.setFixedSize(28, 28)
             btn.clicked.connect(on_edit)
-            row.addWidget(lbl)
+            key = QLabel(field_label)
+            key.setMinimumWidth(140)
+            key.setStyleSheet('color: #8b949e;')
+            lbl = QLabel(str(value))
+            lbl.setMinimumWidth(260)
             row.addWidget(btn)
+            row.addWidget(key)
+            row.addWidget(lbl)
             row.addStretch()
             return row, lbl
 
         # ── Field order per spec ──────────────────────────────────────
-        r, self.lbl_barcode = ro_row(self.product['barcode'], self._edit_barcode)
-        form.addRow("Barcode", r)
+        r, self.lbl_barcode = ro_row("Barcode", self.product['barcode'], self._edit_barcode)
+        form.addRow(r)
 
-        r, self.lbl_desc = ro_row(self._description, self._edit_description)
-        form.addRow("Description", r)
+        r, self.lbl_desc = ro_row("Description", self._description, self._edit_description)
+        form.addRow(r)
 
-        r, self.lbl_brand = ro_row(self._brand or "—", self._edit_brand)
-        form.addRow("Brand", r)
+        r, self.lbl_brand = ro_row("Brand", self._brand or "—", self._edit_brand)
+        form.addRow(r)
 
-        r, self.lbl_plu = ro_row(self._plu or "—", self._edit_plu)
-        form.addRow("SKU", r)
+        r, self.lbl_plu = ro_row("SKU", self._plu or "—", self._edit_plu)
+        form.addRow(r)
 
-        r, self.lbl_supplier = ro_row(self._supplier_name(), self._edit_supplier)
-        form.addRow("Supplier", r)
+        r, self.lbl_supplier = ro_row("Supplier", self._supplier_name(), self._edit_supplier)
+        form.addRow(r)
 
         # Supplier SKU + pack size on one row
-        r, self.lbl_supplier_sku = ro_row(self._supplier_sku_display(), self._edit_supplier_sku)
-        form.addRow("Supplier SKU", r)
+        r, self.lbl_supplier_sku = ro_row("Supplier SKU", self._supplier_sku_display(), self._edit_supplier_sku)
+        form.addRow(r)
 
-        r, self.lbl_dept = ro_row(self._dept_name(), self._edit_dept)
-        form.addRow("Department", r)
+        r, self.lbl_dept = ro_row("Department", self._dept_name(), self._edit_dept)
+        form.addRow(r)
 
-        r, self.lbl_group = ro_row(self._group_name(), self._edit_group)
-        form.addRow("Group", r)
+        r, self.lbl_group = ro_row("Group", self._group_name(), self._edit_group)
+        form.addRow(r)
 
-        r, self.lbl_unit = ro_row(self._unit, self._edit_unit)
-        form.addRow("Unit", r)
+        r, self.lbl_unit = ro_row("Unit", self._unit, self._edit_unit)
+        form.addRow(r)
 
-        r, self.lbl_cost = ro_row(f"${self._cost_price:.4f}", self._edit_cost)
-        form.addRow("Cost Price", r)
+        r, self.lbl_cost = ro_row("Cost Price", f"${self._cost_price:.4f}", self._edit_cost)
+        form.addRow(r)
 
-        r, self.lbl_sell = ro_row(f"${self._sell_price:.2f}", self._edit_sell)
-        form.addRow("Sell Price", r)
+        r, self.lbl_sell = ro_row("Sell Price", f"${self._sell_price:.2f}", self._edit_sell)
+        form.addRow(r)
 
         self.lbl_gp = QLabel()
         self.lbl_gp.setTextFormat(Qt.TextFormat.RichText)
         self._refresh_gp()
-        form.addRow("Gross Profit", self.lbl_gp)
+        _gp_row = QHBoxLayout()
+        _gp_btn = QPushButton()
+        _gp_btn.setFixedSize(28, 28)
+        _gp_btn.setEnabled(False)
+        _gp_btn.setStyleSheet("background: transparent; border: none;")
+        _gp_key = QLabel("Gross Profit")
+        _gp_key.setMinimumWidth(140)
+        _gp_key.setStyleSheet("color: #8b949e;")
+        _gp_row.addWidget(_gp_btn)
+        _gp_row.addWidget(_gp_key)
+        _gp_row.addWidget(self.lbl_gp)
+        _gp_row.addStretch()
+        form.addRow(_gp_row)
 
-        r, self.lbl_tax = ro_row(self._tax_label(), self._edit_tax)
-        form.addRow("Tax Rate", r)
+        r, self.lbl_tax = ro_row("Tax Rate", self._tax_label(), self._edit_tax)
+        form.addRow(r)
 
-        r, self.lbl_reorder_pt = ro_row(int(self._reorder_point), self._edit_reorder_point)
-        form.addRow("Reorder Point", r)
+        r, self.lbl_reorder_pt = ro_row("Reorder Point", int(self._reorder_point), self._edit_reorder_point)
+        form.addRow(r)
 
 
-        r, self.lbl_reorder_max = ro_row(int(self._reorder_max), self._edit_reorder_max)
-        form.addRow("Reorder Max", r)
+        r, self.lbl_reorder_max = ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
+        form.addRow(r)
 
-        r, self.lbl_vw = ro_row("Yes" if self._variable_wt else "No", self._edit_variable_wt)
-        form.addRow("Variable Weight", r)
+        r, self.lbl_vw = ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
+        form.addRow(r)
 
-        r, self.lbl_stocktake = ro_row("Yes" if self._in_stocktake else "No", self._edit_stocktake)
-        form.addRow("Include in Stocktake", r)
+        r, self.lbl_stocktake = ro_row("Include in Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
+        form.addRow(r)
 
-        r, self.lbl_active = ro_row("Yes" if self._active else "No", self._edit_active)
-        form.addRow("Active", r)
-        r, self.lbl_auto_reorder = ro_row("Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
-        form.addRow("On Reorder", r)
+        r, self.lbl_active = ro_row("Active", "Yes" if self._active else "No", self._edit_active)
+        form.addRow(r)
+        r, self.lbl_auto_reorder = ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
+        form.addRow(r)
 
         # ── Stock info (read-only, no edit button) ────────────────
         from models.stock_on_hand import get_by_barcode as _get_soh
@@ -234,7 +250,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         # Update barcode in database
         try:
             conn = get_connection()
-            # Update all related tables
+            conn.execute("PRAGMA foreign_keys = OFF")
             conn.execute("UPDATE stock_movements SET barcode=? WHERE barcode=?",
                         (new_bc, self.barcode))
             conn.execute("UPDATE stock_on_hand SET barcode=? WHERE barcode=?",
@@ -243,18 +259,24 @@ class ProductEdit(KeyboardMixin, QWidget):
                         (new_bc, self.barcode))
             conn.execute("UPDATE barcode_aliases SET master_barcode=? WHERE master_barcode=?",
                         (new_bc, self.barcode))
+            conn.execute("UPDATE barcode_aliases SET alias_barcode=? WHERE alias_barcode=?",
+                        (new_bc, self.barcode))
             conn.execute("UPDATE plu_barcode_map SET barcode=? WHERE barcode=?",
+                        (new_bc, self.barcode))
+            conn.execute("UPDATE stocktake_counts SET barcode=? WHERE barcode=?",
                         (new_bc, self.barcode))
             conn.execute("UPDATE products SET barcode=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
                         (new_bc, self.barcode))
+            conn.execute("PRAGMA foreign_keys = ON")
             conn.commit()
             conn.close()
             self.barcode = new_bc
             self.lbl_barcode.setText(new_bc)
             from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Updated",
-                f"Barcode updated to {new_bc!r}")
+            QMessageBox.information(self, "Updated", "Barcode updated to " + repr(new_bc))
         except Exception as e:
+            try: conn.close()
+            except: pass
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", str(e))
 
