@@ -125,20 +125,20 @@ def add(barcode, description, department_id, supplier_id=None, unit='EA',
 def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
            group_id, department_id, supplier_id, unit,
            sell_price, cost_price, tax_rate, reorder_point, reorder_max=0,
-           variable_weight=0, expected=1, active=1):
+           variable_weight=0, expected=1, active=1, auto_reorder=0):
     conn = get_connection()
     conn.execute("""
         UPDATE products
         SET description=?, brand=?, plu=?, supplier_sku=?, pack_qty=?, pack_unit=?,
             group_id=?, department_id=?, supplier_id=?, unit=?,
             sell_price=?, cost_price=?, tax_rate=?, reorder_point=?,
-            reorder_max=?, variable_weight=?, expected=?, active=?,
+            reorder_max=?, variable_weight=?, expected=?, active=?, auto_reorder=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE barcode=?
     """, (description, brand, plu, supplier_sku, pack_qty, pack_unit,
           group_id, department_id, supplier_id, unit, sell_price,
           cost_price, tax_rate, reorder_point, reorder_max,
-          variable_weight, expected, active, barcode))
+          variable_weight, expected, active, auto_reorder, barcode))
     conn.commit()
     conn.close()
 

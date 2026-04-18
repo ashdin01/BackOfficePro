@@ -39,6 +39,9 @@ def apply_migrations():
         if current < 9:
             migrate_v9(conn)
             logging.info("Migration v9 applied: supplier email_orders, email_admin, email_accounts, email_rep")
+        if current < 10:
+            migrate_v10(conn)
+            logging.info("Migration v10 applied: auto_reorder column on products")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -193,4 +196,13 @@ def migrate_v9(conn):
           AND (email_orders IS NULL OR email_orders = '')
     """)
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '9')")
+    conn.commit()
+
+def migrate_v10(conn):
+    """Add auto_reorder flag to products table."""
+    try:
+        conn.execute("ALTER TABLE products ADD COLUMN auto_reorder INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '10')")
     conn.commit()

@@ -570,7 +570,38 @@ class PODetail(QWidget):
                 unit_cost=r['cost_price'],
                 notes=note,
             )
-        self.rec_banner.setText(f"💡 {len(recs)} line(s) auto-loaded from reorder points.")
+        # ── Also add any auto_reorder products not already on PO ─────
+        from database.connection import get_connection as _gc
+        _conn = _gc()
+        auto_rows = _conn.execute("""
+            SELECT p.barcode, p.description, p.cost_price,
+                   COALESCE(p.pack_qty, 1) as pack_qty,
+                   COALESCE(p.pack_unit, 'EA') as pack_unit
+            FROM products p
+            WHERE p.supplier_id = ?
+              AND p.auto_reorder = 1
+              AND p.active = 1
+        """, (self._po['supplier_id'],)).fetchall()
+        _conn.close()
+        existing_barcodes = {l['barcode'] for l in lines_model.get_by_po(self.po_id)}
+        auto_added = 0
+        for ar in auto_rows:
+            if ar['barcode'] in existing_barcodes:
+                continue
+            note = _carton_note(ar['pack_qty'], ar['pack_unit'], ar['barcode'])
+            lines_model.add(
+                po_id=self.po_id,
+                barcode=ar['barcode'],
+                description=ar['description'],
+                ordered_qty=1,
+                unit_cost=ar['cost_price'],
+                notes=note,
+            )
+            auto_added += 1
+        _banner = f"💡 {len(recs)} line(s) auto-loaded from reorder points."
+        if auto_added:
+            _banner += f"  |  {auto_added} on-reorder item(s) added at 1 carton."
+        self.rec_banner.setText(_banner)
 
     def _reload_recommendations(self):
         recs = get_recommendations(self._po['supplier_id'])

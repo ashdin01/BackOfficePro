@@ -50,6 +50,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._variable_wt   = bool(p['variable_weight'])
         self._in_stocktake  = bool(p['expected'])
         self._active        = bool(p['active'])
+        self._auto_reorder  = bool(p['auto_reorder']) if 'auto_reorder' in p.keys() else False
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -126,6 +127,8 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         r, self.lbl_active = ro_row("Yes" if self._active else "No", self._edit_active)
         form.addRow("Active", r)
+        r, self.lbl_auto_reorder = ro_row("Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
+        form.addRow("On Reorder", r)
 
         # ── Stock info (read-only, no edit button) ────────────────
         from models.stock_on_hand import get_by_barcode as _get_soh
@@ -377,6 +380,14 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._active = (val == "Yes")
             self.lbl_active.setText(val)
 
+    def _edit_auto_reorder(self):
+        val = _choice_popup("On Reorder", "Always include on next PO for this supplier?",
+                            ["No", "Yes"],
+                            "Yes" if self._auto_reorder else "No", self)
+        if val is not None:
+            self._auto_reorder = (val == "Yes")
+            self.lbl_auto_reorder.setText(val)
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     def _dept_name(self):
@@ -573,6 +584,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 variable_weight=int(self._variable_wt),
                 expected=int(self._in_stocktake),
                 active=int(self._active),
+                auto_reorder=int(self._auto_reorder),
             )
             if self.on_save:
                 self.on_save()
