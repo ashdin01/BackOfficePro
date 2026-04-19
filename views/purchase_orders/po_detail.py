@@ -899,9 +899,10 @@ class PODetail(QWidget):
 
 
 class AddLineDialog(QDialog):
-    def __init__(self, po_id, parent=None):
+    def __init__(self, po_id, supplier_id=None, parent=None):
         super().__init__(parent)
         self.po_id = po_id
+        self.supplier_id = supplier_id
         self.setWindowTitle("Add Line")
         self.setMinimumWidth(420)
         self._reorder_qty = 0
@@ -915,6 +916,16 @@ class AddLineDialog(QDialog):
         self.barcode = QLineEdit()
         self.barcode.setPlaceholderText("Scan or type barcode")
         self.barcode.editingFinished.connect(self._lookup)
+
+        lookup_btn = QPushButton("🔍")
+        lookup_btn.setFixedSize(32, 28)
+        lookup_btn.setToolTip("Browse all products (Item Lookup)  [F2]")
+        lookup_btn.clicked.connect(self._open_lookup)
+
+        barcode_row = QHBoxLayout()
+        barcode_row.setSpacing(4)
+        barcode_row.addWidget(self.barcode)
+        barcode_row.addWidget(lookup_btn)
 
         self.description = QLineEdit()
         self.description.setPlaceholderText("Auto-filled on barcode lookup")
@@ -940,7 +951,7 @@ class AddLineDialog(QDialog):
         self.notes = QLineEdit()
         self.notes.setPlaceholderText("Optional")
 
-        form.addRow("Barcode *", self.barcode)
+        form.addRow("Barcode *", barcode_row)
         form.addRow("Description", self.description)
         form.addRow("Stock on Hand", self.on_hand_label)
         form.addRow("Qty *", self.qty)
@@ -964,6 +975,14 @@ class AddLineDialog(QDialog):
         from PyQt6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Escape"), self, self.reject)
         QShortcut(QKeySequence("Ctrl+S"), self, self._add)
+        QShortcut(QKeySequence("F2"), self, self._open_lookup)
+
+    def _open_lookup(self):
+        dlg = ItemLookupDialog(parent=self)
+        if dlg.exec() and dlg.selected:
+            self.barcode.setText(dlg.selected["barcode"])
+            self.unit_cost.setValue(dlg.selected["cost_price"])
+            self._lookup()
 
     def _lookup(self):
         barcode = self.barcode.text().strip()
