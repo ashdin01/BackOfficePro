@@ -58,11 +58,10 @@ class MainWindow(QMainWindow):
             ("&Reports",         5),
             ("Stockta&ke",       6),
             ("Stock &Adjust",    7),
-            ("&Sales",           8),
         ]
         is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
         # STAFF can only see: Home, Products, Reports, Sales
-        staff_allowed = {0, 1, 5, 8}
+        staff_allowed = {0, 1, 5}
 
         for label, index in nav_items:
             btn = QPushButton(label)
@@ -175,7 +174,6 @@ class MainWindow(QMainWindow):
         from views.reports.stock_on_hand import StockOnHandReport
         from views.stocktake.stocktake_list import StocktakeList
         from views.stock_adjust.stock_adjust_view import StockAdjustView
-        from views.reports.sales_report_view import SalesReportView
 
         screen_classes = [
             ("HomeScreen",        lambda: HomeScreen(on_navigate=self._switch)),
@@ -186,7 +184,6 @@ class MainWindow(QMainWindow):
             ("StockOnHandReport", lambda: StockOnHandReport()),
             ("StocktakeList",     lambda: StocktakeList()),
             ("StockAdjustView",   lambda: StockAdjustView(current_user=self.current_user)),
-            ("SalesReportView",   lambda: SalesReportView()),
         ]
 
         self.screens = []
@@ -216,7 +213,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("R"),      self, lambda: self._switch(5))
         QShortcut(QKeySequence("K"),      self, lambda: self._switch(6))
         QShortcut(QKeySequence("A"),      self, lambda: self._switch(7))
-        QShortcut(QKeySequence("L"),      self, lambda: self._switch(8))
 
         self._switch(0)
 

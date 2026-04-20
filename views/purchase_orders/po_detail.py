@@ -58,9 +58,10 @@ def _carton_note(pack_qty, pack_unit, barcode):
 
 
 class ItemLookupDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, supplier_id=None):
         super().__init__(parent)
-        self.setWindowTitle("Item Lookup")
+        self.supplier_id = supplier_id
+        self.setWindowTitle("Item Lookup — This Supplier" if supplier_id else "Item Lookup")
         self.setMinimumSize(860, 540)
         self.selected = None
 
@@ -102,23 +103,38 @@ class ItemLookupDialog(QDialog):
 
     def _load_products(self):
         conn = get_connection()
-        rows = conn.execute("""
-            SELECT
-                COALESCE(s.name, '') AS supplier_name,
-                p.barcode,
-                p.description,
-                COALESCE(p.pack_qty, 1) AS pack_qty,
-                COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                COALESCE(p.cost_price, 0.0) AS cost_price
-            FROM products p
-            LEFT JOIN suppliers s ON p.supplier_id = s.id
-            WHERE p.active = 1
-            ORDER BY supplier_name ASC, p.description ASC
-        """).fetchall()
+        if self.supplier_id:
+            rows = conn.execute("""
+                SELECT
+                    COALESCE(s.name, '') AS supplier_name,
+                    p.barcode,
+                    p.description,
+                    COALESCE(p.pack_qty, 1) AS pack_qty,
+                    COALESCE(p.pack_unit, 'EA') AS pack_unit,
+                    COALESCE(p.cost_price, 0.0) AS cost_price
+                FROM products p
+                LEFT JOIN suppliers s ON p.supplier_id = s.id
+                WHERE p.active = 1
+                  AND p.supplier_id = ?
+                ORDER BY p.description ASC
+            """, (self.supplier_id,)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT
+                    COALESCE(s.name, '') AS supplier_name,
+                    p.barcode,
+                    p.description,
+                    COALESCE(p.pack_qty, 1) AS pack_qty,
+                    COALESCE(p.pack_unit, 'EA') AS pack_unit,
+                    COALESCE(p.cost_price, 0.0) AS cost_price
+                FROM products p
+                LEFT JOIN suppliers s ON p.supplier_id = s.id
+                WHERE p.active = 1
+                ORDER BY supplier_name ASC, p.description ASC
+            """).fetchall()
         conn.close()
         self._all_rows = [dict(r) for r in rows]
         self._populate(self._all_rows)
-
     def _populate(self, rows):
         self.table.setRowCount(0)
         for r in rows:
@@ -978,7 +994,7 @@ class AddLineDialog(QDialog):
         QShortcut(QKeySequence("F2"), self, self._open_lookup)
 
     def _open_lookup(self):
-        dlg = ItemLookupDialog(parent=self)
+        dlg = ItemLookupDialog(parent=self, supplier_id=self.supplier_id)
         if dlg.exec() and dlg.selected:
             self.barcode.setText(dlg.selected["barcode"])
             self.unit_cost.setValue(dlg.selected["cost_price"])
