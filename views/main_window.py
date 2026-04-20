@@ -27,6 +27,23 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1400, 850)
         self._build_ui()
+        self._run_auto_plu_map()
+
+    def _run_auto_plu_map(self):
+        """Silently auto-map any PLUs that exist in products but are missing from plu_barcode_map."""
+        import logging
+        try:
+            from utils.auto_plu_map import auto_map_plu_barcodes
+            result = auto_map_plu_barcodes()
+            mapped = result.get("mapped", [])
+            if mapped:
+                logging.info(f"[startup] Auto-mapped {len(mapped)} PLU(s) to barcodes.")
+                try:
+                    self.screens[0]._refresh()
+                except Exception:
+                    pass
+        except Exception as e:
+            logging.warning(f"[startup] auto_plu_map failed: {e}")
 
     def _build_ui(self):
         central = QWidget()
