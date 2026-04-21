@@ -576,6 +576,7 @@ class POReceive(QWidget):
             qty_input.setValue(remaining_units)
 
     def _confirm(self):
+        po_number = po_model.get_by_id(self.po_id)['po_number']
         promo_count = sum(
             1 for entry in self._inputs
             if entry[4].isChecked() and entry[2].value() > 0
@@ -621,7 +622,7 @@ class POReceive(QWidget):
                     barcode=line['barcode'],
                     quantity=qty,
                     movement_type=MOVE_RECEIPT,
-                    reference=f"PO-{self.po_id}",
+                    reference=po_number,
                 )
 
                 # Update product cost price (unless promo)
