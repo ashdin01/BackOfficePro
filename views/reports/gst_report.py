@@ -264,7 +264,7 @@ class GSTReport(QWidget):
         bas_layout.setContentsMargins(16, 16, 16, 16)
         bas_layout.setSpacing(12)
         self.bas_table = self._make_summary_table()
-        self.bas_table.setMinimumHeight(400)
+        self.bas_table.setMinimumHeight(500)
         bas_layout.addWidget(self.bas_table)
         bas_layout.addStretch()
         self.tabs.addTab(self.bas_widget, "📋 BAS Summary")
