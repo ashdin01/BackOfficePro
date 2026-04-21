@@ -30,6 +30,76 @@ class MainWindow(QMainWindow):
         self._run_auto_plu_map()
 
     def _run_auto_plu_map(self):
+        import logging
+        try:
+            from utils.auto_plu_map import auto_map_plu_barcodes
+            result = auto_map_plu_barcodes()
+            mapped   = result.get('mapped', [])
+            skipped  = result.get('skipped', [])
+            unmapped = result.get('unmapped', [])
+            if mapped:
+                try:
+                    self.screens[0]._refresh()
+                except Exception:
+                    pass
+            lines = []
+            if mapped:
+                lines.append(f'✅ {len(mapped)} PLU(s) auto-mapped to barcodes.')
+            if unmapped:
+                plu_list = ', '.join(str(p) for p in unmapped[:10])
+                if len(unmapped) > 10:
+                    plu_list += f' and {len(unmapped) - 10} more'
+                lines.append(f'⚠ {len(unmapped)} PLU(s) have sales data but no matching product:\nPLUs: {plu_list}\nGo to Reports > Sales, right-click a row to match.')
+            if skipped:
+                plu_list = ', '.join(str(p) for p, _ in skipped[:5])
+                lines.append(f'⚠ {len(skipped)} PLU(s) skipped - multiple products share the same PLU:\nPLUs: {plu_list}\nManual match required in Reports > Sales.')
+            if lines:
+                from PyQt6.QtWidgets import QMessageBox
+                msg = QMessageBox(self)
+                msg.setWindowTitle('PLU Mapping - Startup Check')
+                msg.setText('\n\n'.join(lines))
+                msg.setIcon(QMessageBox.Icon.Warning if (unmapped or skipped) else QMessageBox.Icon.Information)
+                msg.exec()
+        except Exception as e:
+            logging.warning(f'[startup] auto_plu_map failed: {e}')
+        self._run_auto_plu_map()
+
+    def _run_auto_plu_map(self):
+        import logging
+        try:
+            from utils.auto_plu_map import auto_map_plu_barcodes
+            result = auto_map_plu_barcodes()
+            mapped   = result.get('mapped', [])
+            skipped  = result.get('skipped', [])
+            unmapped = result.get('unmapped', [])
+            if mapped:
+                try:
+                    self.screens[0]._refresh()
+                except Exception:
+                    pass
+            lines = []
+            if mapped:
+                lines.append(f'✅ {len(mapped)} PLU(s) auto-mapped to barcodes.')
+            if unmapped:
+                plu_list = ', '.join(str(p) for p in unmapped[:10])
+                if len(unmapped) > 10:
+                    plu_list += f' and {len(unmapped) - 10} more'
+                lines.append(f'⚠ {len(unmapped)} PLU(s) have sales data but no matching product:\nPLUs: {plu_list}\nGo to Reports > Sales, right-click a row to match.')
+            if skipped:
+                plu_list = ', '.join(str(p) for p, _ in skipped[:5])
+                lines.append(f'⚠ {len(skipped)} PLU(s) skipped - multiple products share the same PLU:\nPLUs: {plu_list}\nManual match required in Reports > Sales.')
+            if lines:
+                from PyQt6.QtWidgets import QMessageBox
+                msg = QMessageBox(self)
+                msg.setWindowTitle('PLU Mapping - Startup Check')
+                msg.setText('\n\n'.join(lines))
+                msg.setIcon(QMessageBox.Icon.Warning if (unmapped or skipped) else QMessageBox.Icon.Information)
+                msg.exec()
+        except Exception as e:
+            logging.warning(f'[startup] auto_plu_map failed: {e}')
+        self._run_auto_plu_map()
+
+    def _run_auto_plu_map(self):
         """Silently auto-map any PLUs that exist in products but are missing from plu_barcode_map."""
         import logging
         try:
