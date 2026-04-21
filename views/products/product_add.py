@@ -82,6 +82,10 @@ class ProductAdd(KeyboardMixin, QWidget):
         self.cost_price.setPrefix("$")
         self.cost_price.setDecimals(2)
         self.cost_price.valueChanged.connect(self._update_gp)
+        self.cost_price.valueChanged.connect(self._update_cost_inc)
+
+        self.cost_inc_label = QLabel("<b style='color:grey'>--</b>")
+        self.cost_inc_label.setTextFormat(Qt.TextFormat.RichText)
 
         self.sell_price = QDoubleSpinBox()
         self.sell_price.setMaximum(99999)
@@ -96,6 +100,7 @@ class ProductAdd(KeyboardMixin, QWidget):
         self.tax_rate.addItem("GST Free (0%)", 0.0)
         self.tax_rate.addItem("GST (10%)", 10.0)
         self.tax_rate.setCurrentIndex(1)
+        self.tax_rate.currentIndexChanged.connect(self._update_cost_inc)
 
         self.reorder_point = QDoubleSpinBox()
         self.reorder_point.setMaximum(99999)
@@ -122,8 +127,9 @@ class ProductAdd(KeyboardMixin, QWidget):
         form.addRow("Department *",     self.dept)
         form.addRow("Group",            self.group)
         form.addRow("Unit",             self.unit)
-        form.addRow("Cost Price",       self.cost_price)
-        form.addRow("Sell Price",       self.sell_price)
+        form.addRow("Cost Price (ex GST)", self.cost_price)
+        form.addRow("Cost Price (inc GST)", self.cost_inc_label)
+        form.addRow("Sell Price (inc GST)", self.sell_price)
         form.addRow("Gross Profit",     self.gp_label)
         form.addRow("Tax Rate",         self.tax_rate)
         form.addRow("Reorder Point (Min)", self.reorder_point)
@@ -161,6 +167,13 @@ class ProductAdd(KeyboardMixin, QWidget):
             self.gp_label.setText(f"<b style='color:{color}'>{gp:.1f}%</b>")
         else:
             self.gp_label.setText("<b style='color:grey'>--</b>")
+
+    def _update_cost_inc(self):
+        cost = self.cost_price.value()
+        rate = self.tax_rate.currentData() or 0.0
+        inc = cost * (1 + rate / 100)
+        color = '#4CAF50' if rate > 0 else 'grey'
+        self.cost_inc_label.setText(f"<b style='color:{color}'>${inc:.2f}</b>")
 
     def _save(self):
         barcode = self.barcode.text().strip()

@@ -102,10 +102,16 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_unit = ro_row("Unit", self._unit, self._edit_unit)
         form.addRow(r)
 
-        r, self.lbl_cost = ro_row("Cost Price", f"${self._cost_price:.4f}", self._edit_cost)
+        r, self.lbl_cost = ro_row("Cost Price (ex GST)", f"${self._cost_price:.4f}", self._edit_cost)
+        tax = self._tax_rate or 0.0
+        inc = self._cost_price * (1 + tax / 100)
+        color = "#4CAF50" if tax > 0 else "grey"
+        self.lbl_cost_inc = QLabel(f"<b style='color:{color}'>${inc:.2f}</b>")
+        self.lbl_cost_inc.setTextFormat(Qt.TextFormat.RichText)
+        form.addRow("Cost Price (inc GST)", self.lbl_cost_inc)
         form.addRow(r)
 
-        r, self.lbl_sell = ro_row("Sell Price", f"${self._sell_price:.2f}", self._edit_sell)
+        r, self.lbl_sell = ro_row("Sell Price (inc GST)", f"${self._sell_price:.2f}", self._edit_sell)
         form.addRow(r)
 
         self.lbl_gp = QLabel()
