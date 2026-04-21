@@ -265,7 +265,6 @@ class GSTReport(QWidget):
         bas_layout.setSpacing(12)
         self.bas_table = self._make_summary_table()
         bas_layout.addWidget(self.bas_table)
-        bas_layout.addStretch()
         self.tabs.addTab(self.bas_widget, "📋 BAS Summary")
 
         # GST Collected tab
@@ -412,6 +411,12 @@ class GSTReport(QWidget):
             self.bas_table.setItem(r, 0, _text_item(label, bold=bold))
             self.bas_table.setItem(r, 1, _money_item(value, color=color_val, bold=bold))
 
+        self.bas_table.resizeRowsToContents()
+        total_h = self.bas_table.horizontalHeader().height() + 4
+        for r in range(self.bas_table.rowCount()):
+            total_h += self.bas_table.rowHeight(r)
+        self.bas_table.setMinimumHeight(total_h)
+        self.bas_table.setMaximumHeight(total_h)
         # ── GST Collected detail ──────────────────────────────────────
         col_rows = [
             ("Total sales (inc GST)",         sales['total_sales'],      False),
