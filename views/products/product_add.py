@@ -79,7 +79,6 @@ class ProductAdd(KeyboardMixin, QWidget):
 
         self.cost_price = QDoubleSpinBox()
         self.cost_price.setMaximum(99999)
-        self.cost_price.setPrefix("$")
         self.cost_price.setDecimals(2)
         self.cost_price.valueChanged.connect(self._update_gp)
         self.cost_price.valueChanged.connect(self._update_cost_inc)
@@ -89,7 +88,6 @@ class ProductAdd(KeyboardMixin, QWidget):
 
         self.sell_price = QDoubleSpinBox()
         self.sell_price.setMaximum(99999)
-        self.sell_price.setPrefix("$")
         self.sell_price.setDecimals(2)
         self.sell_price.valueChanged.connect(self._update_gp)
 
@@ -127,9 +125,23 @@ class ProductAdd(KeyboardMixin, QWidget):
         form.addRow("Department *",     self.dept)
         form.addRow("Group",            self.group)
         form.addRow("Unit",             self.unit)
-        form.addRow("Cost Price (ex GST)", self.cost_price)
+        cost_row = QHBoxLayout()
+        cost_row.setSpacing(4)
+        cost_row.setContentsMargins(0, 0, 0, 0)
+        cost_row.addWidget(QLabel("$"))
+        self.cost_price.setMinimumWidth(160)
+        cost_row.addWidget(self.cost_price)
+        cost_row.addStretch()
+        form.addRow("Cost Price (ex GST)", cost_row)
         form.addRow("Cost Price (inc GST)", self.cost_inc_label)
-        form.addRow("Sell Price (inc GST)", self.sell_price)
+        sell_row = QHBoxLayout()
+        sell_row.setSpacing(4)
+        sell_row.setContentsMargins(0, 0, 0, 0)
+        sell_row.addWidget(QLabel("$"))
+        self.sell_price.setMinimumWidth(160)
+        sell_row.addWidget(self.sell_price)
+        sell_row.addStretch()
+        form.addRow("Sell Price (inc GST)", sell_row)
         form.addRow("Gross Profit",     self.gp_label)
         form.addRow("Tax Rate",         self.tax_rate)
         form.addRow("Reorder Point (Min)", self.reorder_point)
@@ -160,7 +172,8 @@ class ProductAdd(KeyboardMixin, QWidget):
 
     def _update_gp(self):
         sell = self.sell_price.value()
-        cost = self.cost_price.value()
+        rate = self.tax_rate.currentData() or 0.0
+        cost = self.cost_price.value() * (1 + rate / 100)
         if sell > 0:
             gp = (1 - (cost / sell)) * 100
             color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"

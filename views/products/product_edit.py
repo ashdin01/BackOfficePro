@@ -103,13 +103,25 @@ class ProductEdit(KeyboardMixin, QWidget):
         form.addRow(r)
 
         r, self.lbl_cost = ro_row("Cost Price (ex GST)", f"${self._cost_price:.4f}", self._edit_cost)
+        form.addRow(r)
         tax = self._tax_rate or 0.0
         inc = self._cost_price * (1 + tax / 100)
         color = "#4CAF50" if tax > 0 else "grey"
         self.lbl_cost_inc = QLabel(f"<b style='color:{color}'>${inc:.2f}</b>")
         self.lbl_cost_inc.setTextFormat(Qt.TextFormat.RichText)
-        form.addRow("Cost Price (inc GST)", self.lbl_cost_inc)
-        form.addRow(r)
+        _inc_row = QHBoxLayout()
+        _inc_btn = QPushButton()
+        _inc_btn.setFixedSize(28, 28)
+        _inc_btn.setEnabled(False)
+        _inc_btn.setStyleSheet("background: transparent; border: none;")
+        _inc_key = QLabel("Cost Price (inc GST)")
+        _inc_key.setMinimumWidth(140)
+        _inc_key.setStyleSheet("color: #8b949e;")
+        _inc_row.addWidget(_inc_btn)
+        _inc_row.addWidget(_inc_key)
+        _inc_row.addWidget(self.lbl_cost_inc)
+        _inc_row.addStretch()
+        form.addRow(_inc_row)
 
         r, self.lbl_sell = ro_row("Sell Price (inc GST)", f"${self._sell_price:.2f}", self._edit_sell)
         form.addRow(r)
@@ -434,7 +446,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         return "GST (10%)" if self._tax_rate == 10.0 else "GST Free (0%)"
 
     def _refresh_gp(self):
-        sell, cost = self._sell_price, self._cost_price
+        sell = self._sell_price
+        tax = self._tax_rate or 0.0
+        cost = self._cost_price * (1 + tax / 100)
         if sell > 0:
             gp = (1 - cost / sell) * 100
             color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"
@@ -774,10 +788,12 @@ def _price_popup(title, label, current, parent=None):
     form = QFormLayout()
     inp = QDoubleSpinBox()
     inp.setMaximum(99999)
-    inp.setPrefix("$")
     inp.setDecimals(4)
     inp.setValue(float(current))
-    form.addRow(label, inp)
+    price_row = QHBoxLayout()
+    price_row.addWidget(QLabel("$"))
+    price_row.addWidget(inp)
+    form.addRow(label, price_row)
     layout.addLayout(form)
     btns = QHBoxLayout()
     ok = QPushButton("Save  [Ctrl+S]")
