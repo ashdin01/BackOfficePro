@@ -20,6 +20,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.setWindowTitle("Product Detail")
         self.setMinimumWidth(720)
         self.setMinimumHeight(750)
+        self.resize(720, 900)
         self.barcode = barcode
         self.on_save = on_save
         self._depts = dept_model.get_all()
