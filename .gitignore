@@ -2,6 +2,9 @@
 data/*.db
 data/*.db-shm
 data/*.db-wal
+*.db
+*.db-shm
+*.db-wal
 
 # Backups
 backups/
@@ -13,14 +16,12 @@ __pycache__/
 *.pyd
 .Python
 *.egg-info/
-dist/
-build/
-*.spec
-!BackOfficePro.spec
 
 # PyInstaller output
 dist/
 build/
+*.spec
+!BackOfficePro.spec
 
 # Environment
 .env
@@ -40,12 +41,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Backup files
+*.bak
+
 # Import scripts with personal data
 import_products.py
 LittleRedApple_Merged.csv
-__pycache__/
-*.pyc
-*.pyo
-*.bak
-*.bak
-*.bak
