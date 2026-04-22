@@ -914,14 +914,17 @@ class PODetail(QWidget):
             self.close()
 
 
+
 class AddLineDialog(QDialog):
     def __init__(self, po_id, supplier_id=None, parent=None):
         super().__init__(parent)
         self.po_id = po_id
         self.supplier_id = supplier_id
         self.setWindowTitle("Add Line")
-        self.setMinimumWidth(420)
-        self._reorder_qty = 0
+        self.setMinimumWidth(440)
+        self._reorder_max = 0
+        self._pack_qty = 1
+        self._pack_unit = 'EA'
         self._build_ui()
 
     def _build_ui(self):
@@ -929,17 +932,21 @@ class AddLineDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(10)
 
+        barcode_row = QHBoxLayout()
         self.barcode = QLineEdit()
         self.barcode.setPlaceholderText("Scan or type barcode")
-        self.barcode.editingFinished.connect(self._lookup)
-
-        lookup_btn = QPushButton("🔍")
-        lookup_btn.setFixedSize(32, 28)
-        lookup_btn.setToolTip("Browse all products (Item Lookup)  [F2]")
+        self.barcode.returnPressed.connect(self._on_barcode_enter)
+        lookup_btn = QPushButton("🔍 F2")
+        lookup_btn.setFixedWidth(70)
+        lookup_btn.setFixedHeight(28)
+        lookup_btn.setToolTip("Press F2 to open item lookup")
+        lookup_btn.setAutoDefault(False)
+        lookup_btn.setDefault(False)
         lookup_btn.clicked.connect(self._open_lookup)
-
-        barcode_row = QHBoxLayout()
-        barcode_row.setSpacing(4)
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        f2 = QShortcut(QKeySequence("F2"), self)
+        f2.setContext(Qt.ShortcutContext.WindowShortcut)
+        f2.activated.connect(self._open_lookup)
         barcode_row.addWidget(self.barcode)
         barcode_row.addWidget(lookup_btn)
 
@@ -949,40 +956,51 @@ class AddLineDialog(QDialog):
         self.on_hand_label = QLabel("")
         self.on_hand_label.setStyleSheet("color: grey;")
 
+        self.pack_label = QLabel("")
+        self.pack_label.setStyleSheet("color: steelblue; font-style: italic;")
+
         self.qty = QDoubleSpinBox()
         self.qty.setMinimum(1)
         self.qty.setMaximum(99999)
         self.qty.setDecimals(0)
         self.qty.setValue(1)
-        self.qty.valueChanged.connect(self._check_moq)
+        self.qty.setSuffix(" carton(s)")
+        self.qty.valueChanged.connect(self._update_unit_preview)
+        self.qty.installEventFilter(self)
 
-        self.moq_label = QLabel("")
-        self.moq_label.setStyleSheet("color: orange;")
+        self.unit_preview = QLabel("")
+        self.unit_preview.setStyleSheet("color: #555; font-style: italic;")
 
         self.unit_cost = QDoubleSpinBox()
         self.unit_cost.setMaximum(99999)
         self.unit_cost.setPrefix("$")
         self.unit_cost.setDecimals(2)
+        self.unit_cost.installEventFilter(self)
 
         self.notes = QLineEdit()
         self.notes.setPlaceholderText("Optional")
 
-        form.addRow("Barcode *", barcode_row)
-        form.addRow("Description", self.description)
-        form.addRow("Stock on Hand", self.on_hand_label)
-        form.addRow("Qty *", self.qty)
-        form.addRow("", self.moq_label)
-        form.addRow("Unit Cost", self.unit_cost)
-        form.addRow("Notes", self.notes)
+        form.addRow("Barcode *",       barcode_row)
+        form.addRow("Description",     self.description)
+        form.addRow("Stock on Hand",   self.on_hand_label)
+        form.addRow("Pack Size",       self.pack_label)
+        form.addRow("Qty (Cartons) *", self.qty)
+        form.addRow("",                self.unit_preview)
+        form.addRow("Unit Cost",       self.unit_cost)
+        form.addRow("Notes",           self.notes)
         layout.addLayout(form)
 
         layout.addSpacing(10)
         btns = QHBoxLayout()
         ok_btn = QPushButton("Add to PO")
         ok_btn.setFixedHeight(35)
+        ok_btn.setDefault(False)
+        ok_btn.setAutoDefault(False)
         ok_btn.clicked.connect(self._add)
         cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(35)
+        cancel_btn.setDefault(False)
+        cancel_btn.setAutoDefault(False)
         cancel_btn.clicked.connect(self.reject)
         btns.addWidget(ok_btn)
         btns.addWidget(cancel_btn)
@@ -991,7 +1009,24 @@ class AddLineDialog(QDialog):
         from PyQt6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Escape"), self, self.reject)
         QShortcut(QKeySequence("Ctrl+S"), self, self._add)
-        QShortcut(QKeySequence("F2"), self, self._open_lookup)
+
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if obj == self.qty:
+                    self.unit_cost.setFocus()
+                    self.unit_cost.selectAll()
+                    return True
+                elif obj == self.unit_cost:
+                    self._add()
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _on_barcode_enter(self):
+        self._lookup()
+        self.qty.setFocus()
+        self.qty.selectAll()
 
     def _open_lookup(self):
         dlg = ItemLookupDialog(parent=self, supplier_id=self.supplier_id)
@@ -1004,57 +1039,86 @@ class AddLineDialog(QDialog):
         barcode = self.barcode.text().strip()
         if not barcode:
             return
+        existing_lines = lines_model.get_by_po(self.po_id)
+        for line_num, existing in enumerate(existing_lines, start=1):
+            if existing['barcode'] == barcode:
+                QMessageBox.warning(
+                    self, "Item Already on PO",
+                    f"This item is already on this PO at line {line_num}:\n\n"
+                    f"{existing['description']}\n\n"
+                    f"Edit the existing line instead."
+                )
+                self.barcode.clear()
+                self.barcode.setFocus()
+                return
         product = product_model.get_by_barcode(barcode)
         if product:
+            if self.supplier_id and product['supplier_id'] != self.supplier_id:
+                from database.connection import get_connection
+                conn = get_connection()
+                po_sup = conn.execute(
+                    "SELECT name FROM suppliers WHERE id=?", (self.supplier_id,)
+                ).fetchone()
+                prod_sup = conn.execute(
+                    "SELECT name FROM suppliers WHERE id=?", (product['supplier_id'],)
+                ).fetchone() if product['supplier_id'] else None
+                conn.close()
+                po_name   = po_sup['name'] if po_sup else "Unknown"
+                prod_name = prod_sup['name'] if prod_sup else "No supplier set"
+                QMessageBox.warning(
+                    self, "Wrong Supplier",
+                    f"This product belongs to: {prod_name}\n"
+                    f"This PO is for: {po_name}\n\n"
+                    f"Only {po_name} products can be added to this order."
+                )
+                self.barcode.clear()
+                self.barcode.setFocus()
+                return
             self.description.setText(product['description'])
             self.unit_cost.setValue(product['cost_price'])
-            self._reorder_qty = int(product['reorder_qty']) if product['reorder_qty'] else 0
+            self._reorder_max = int(product['reorder_max']) if product['reorder_max'] else 0
+            self._pack_qty    = int(product['pack_qty']) if product['pack_qty'] else 1
+            self._pack_unit   = product['pack_unit'] or 'EA'
             soh = stock_model.get_by_barcode(barcode)
             on_hand = int(soh['quantity']) if soh else 0
             reorder = int(product['reorder_point'])
-            color = "red" if on_hand <= reorder else "green"
+            color   = "red" if on_hand <= reorder else "green"
             self.on_hand_label.setText(
                 f"<span style='color:{color}'>{on_hand}</span> "
-                f"(reorder at {reorder}, suggest {self._reorder_qty})"
+                f"(reorder at {reorder})"
             )
-            self.qty.setValue(self._reorder_qty if self._reorder_qty > 0 else 1)
-            self._check_moq()
+            self.pack_label.setText(f"{self._pack_qty} × {self._pack_unit} per carton")
+            soh_qty = int(soh['quantity']) if soh else 0
+            order_units = max(1, self._reorder_max - soh_qty) if self._reorder_max > 0 else self._pack_qty
+            suggested_cartons = max(1, math.ceil(order_units / self._pack_qty))
+            self.qty.setValue(suggested_cartons)
+            self._update_unit_preview()
         else:
             self.description.clear()
+            self.pack_label.setText("")
             self.on_hand_label.setText("<span style='color:red'>Product not found</span>")
 
-    def _check_moq(self):
-        if self._reorder_qty > 0:
-            qty = int(self.qty.value())
-            if qty % self._reorder_qty != 0:
-                self.moq_label.setText(
-                    f"⚠ MOQ is {self._reorder_qty} — order in multiples of {self._reorder_qty}"
-                )
-            else:
-                self.moq_label.setText("")
+    def _update_unit_preview(self):
+        cartons     = int(self.qty.value())
+        total_units = cartons * self._pack_qty
+        self.unit_preview.setText(
+            f"= {total_units} units  ({cartons} × {self._pack_qty} {self._pack_unit})"
+        )
 
     def _add(self):
-        barcode = self.barcode.text().strip()
+        barcode     = self.barcode.text().strip()
         description = self.description.text().strip()
         if not barcode or not description:
             QMessageBox.warning(self, "Validation", "Barcode and Description are required.")
             return
-        qty = int(self.qty.value())
-        if self._reorder_qty > 0 and qty % self._reorder_qty != 0:
-            reply = QMessageBox.warning(
-                self, "MOQ Warning",
-                f"Minimum order quantity is {self._reorder_qty}.\n"
-                f"You entered {qty}. Continue anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                return
+        cartons = int(self.qty.value())
+        note    = _carton_note(self._pack_qty, self._pack_unit, barcode)
         lines_model.add(
             po_id=self.po_id,
             barcode=barcode,
             description=description,
-            ordered_qty=qty,
+            ordered_qty=cartons,
             unit_cost=self.unit_cost.value(),
-            notes=self.notes.text(),
+            notes=note,
         )
         self.accept()
