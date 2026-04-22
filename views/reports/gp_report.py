@@ -28,9 +28,9 @@ def get_gp_data(dept_id=None, gp_filter="all"):
         SELECT p.barcode, p.description, d.name as dept_name,
                p.sell_price, p.cost_price,
                CASE WHEN p.sell_price > 0
-                    THEN ROUND((1.0 - p.cost_price / p.sell_price) * 100, 1)
+                    THEN ROUND((1.0 - (p.cost_price * (1 + p.tax_rate / 100.0)) / p.sell_price) * 100, 1)
                     ELSE 0 END as gp_pct,
-               p.sell_price - p.cost_price as gp_dollars
+               p.sell_price - (p.cost_price * (1 + p.tax_rate / 100.0)) as gp_dollars
         FROM products p
         LEFT JOIN departments d ON p.department_id = d.id
         WHERE p.active = 1 AND p.sell_price > 0
@@ -135,6 +135,8 @@ class GPReport(QWidget):
         self.detail_table.horizontalHeader().setSectionsClickable(True)
         self.detail_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.detail_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.detail_table.doubleClicked.connect(self._open_product)
+        self.detail_table.setToolTip('Double-click a row to open product detail')
         layout.addWidget(self.detail_table)
 
         # Summary table
@@ -155,6 +157,19 @@ class GPReport(QWidget):
         self.status_label.setTextFormat(Qt.TextFormat.RichText)
         footer.addWidget(self.status_label)
         layout.addLayout(footer)
+
+    def _open_product(self, index):
+        row = index.row()
+        barcode_item = self.detail_table.item(row, 0)
+        if not barcode_item:
+            return
+        barcode = barcode_item.text().strip()
+        if not barcode:
+            return
+        from views.products.product_edit import ProductEdit
+        self._product_win = ProductEdit(barcode=barcode, on_save=self._load)
+        self._product_win.show()
+        self._product_win.raise_()
 
     def _load(self):
         dept_id = self.dept_filter.currentData()
