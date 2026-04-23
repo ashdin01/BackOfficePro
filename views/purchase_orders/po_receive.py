@@ -297,17 +297,17 @@ class POReceive(QWidget):
             "QTableWidget { alternate-background-color: #1e2a38; background: #1a2332; }"
         )
         # 10 columns — weight column (col 6) is hidden for non-weighed items
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(12)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "Description", "Pack Size",
             "Ordered (Units)", "Already Received",
             "Receiving Now",
             "Weight (kg)",       # col 6 — weighed items only
-            "Cost ($/kg or unit)", "Promo?", "Line Total $"
+            "Cost ($/kg or unit) ex. GST", "Cost inc. Tax", "Promo?", "Line Total ex. GST", "Line Total inc. Tax"
         ])
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for ci in [0, 2, 3, 4, 5, 6, 7, 8, 9]:
+        for ci in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
             hdr.setSectionResizeMode(ci, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(0, 120)
         self.table.setColumnWidth(2,  80)
@@ -316,8 +316,10 @@ class POReceive(QWidget):
         self.table.setColumnWidth(5, 110)
         self.table.setColumnWidth(6, 100)   # Weight (kg)
         self.table.setColumnWidth(7, 120)   # Cost
-        self.table.setColumnWidth(8,  70)   # Promo
-        self.table.setColumnWidth(9, 110)   # Line Total
+        self.table.setColumnWidth(8, 110)   # Cost inc. Tax
+        self.table.setColumnWidth(9,  70)   # Promo
+        self.table.setColumnWidth(10, 110)  # Line Total ex. GST
+        self.table.setColumnWidth(11, 120)  # Line Total inc. Tax
         layout.addWidget(self.table)
 
         self.total_label = QLabel()
@@ -355,6 +357,19 @@ class POReceive(QWidget):
         btns.addWidget(btn_close)
         layout.addLayout(btns)
 
+    def _open_product(self, index):
+        row = index.row()
+        barcode_item = self.table.item(row, 0)
+        if not barcode_item:
+            return
+        barcode = barcode_item.text().strip()
+        if not barcode:
+            return
+        from views.products.product_edit import ProductEdit
+        self._product_win = ProductEdit(barcode=barcode, on_save=self._load)
+        self._product_win.show()
+        self._product_win.raise_()
+
     def _load(self):
         po = po_model.get_by_id(self.po_id)
         self.setWindowTitle(f"Receive: {po['po_number']}")
@@ -379,6 +394,7 @@ class POReceive(QWidget):
             pack_unit    = (product['pack_unit'] or 'EA') if product else 'EA'
             current_cost = float(product['cost_price']) if product else 0.0
             is_vw        = bool(product['variable_weight']) if product else False
+            tax_rate     = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
 
             ordered_cartons  = int(line['ordered_qty'])
             ordered_units    = ordered_cartons * pack_qty
@@ -453,12 +469,21 @@ class POReceive(QWidget):
             cb_lay.addWidget(promo_cb)
             cb_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
             cb_lay.setContentsMargins(0, 0, 0, 0)
-            self.table.setCellWidget(r, 8, cb_container)
+            self.table.setCellWidget(r, 9, cb_container)
             promo_cb.stateChanged.connect(lambda _, row=r: self._refresh_promo_colour(row))
 
-            # ── Col 9: Line Total $ — read only ──────────────────────
+            # ── Col 10: Line Total ex. GST — read only ─────────────────
             lt_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(r, 9, lt_item)
+            self.table.setItem(r, 10, lt_item)
+            # ── Col 11: Line Total inc. Tax — read only ──────────────────
+            lt_inc_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            lt_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#4CAF50') if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
+            self.table.setItem(r, 11, lt_inc_item)
+            # ── Col 10: Cost inc. GST — read only ────────────────────
+            cost_inc = current_cost * (1 + tax_rate / 100)
+            cost_inc_item = self._cell(f"${cost_inc:.4f}", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            cost_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#4CAF50') if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
+            self.table.setItem(r, 8, cost_inc_item)
 
             # ── Signal connections ────────────────────────────────────
             qty_input.valueChanged.connect(lambda _, row=r: self._refresh_line(row))
@@ -494,7 +519,7 @@ class POReceive(QWidget):
 
             self._inputs.append((
                 line, pack_qty, qty_input, cost_input, promo_cb,
-                lt_item, remaining_units, is_vw, weight_input
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item
             ))
             self._refresh_line(r)
 
@@ -508,7 +533,7 @@ class POReceive(QWidget):
             first_qty.selectAll()
 
     def _get_promo_cb(self, row):
-        container = self.table.cellWidget(row, 8)
+        container = self.table.cellWidget(row, 9)
         if container:
             for child in container.children():
                 if isinstance(child, QCheckBox):
@@ -518,7 +543,7 @@ class POReceive(QWidget):
     def _refresh_promo_colour(self, row):
         cb = self._get_promo_cb(row)
         is_promo = cb and cb.isChecked()
-        for col in [0, 1, 2, 3, 4, 9]:
+        for col in [0, 1, 2, 3, 4, 10, 11]:
             item = self.table.item(row, col)
             if item:
                 if is_promo:
@@ -532,7 +557,7 @@ class POReceive(QWidget):
         if row >= len(self._inputs):
             return
         line, pack_qty, qty_input, cost_input, promo_cb, lt_item, \
-            remaining_units, is_vw, weight_input = self._inputs[row]
+            remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = self._inputs[row]
 
         cost = cost_input.value()
 
@@ -544,35 +569,53 @@ class POReceive(QWidget):
             line_total = qty * cost
 
         lt_item.setText(f"${line_total:.2f}")
+        line_total_inc = line_total * (1 + tax_rate / 100)
+        lt_inc_item.setText(f"${line_total_inc:.2f}")
+        from PyQt6.QtGui import QColor
+        lt_inc_item.setForeground(QColor('#4CAF50') if tax_rate > 0 else QColor('#aaaaaa'))
+        cost_inc = cost * (1 + tax_rate / 100)
+        cost_inc_item = self.table.item(row, 8)
+        if cost_inc_item:
+            cost_inc_item.setText(f"${cost_inc:.4f}")
+            cost_inc_item.setForeground(QColor('#4CAF50') if tax_rate > 0 else QColor('#aaaaaa'))
         self._refresh_promo_colour(row)
         self._update_total()
 
     def _update_total(self):
-        total = 0.0
+        total_inc = 0.0
+        gst_total = 0.0
         promo_total = 0.0
         for entry in self._inputs:
-            _, _, _, _, promo_cb, lt_item, _, _, _ = entry
+            tax_rate = entry[9] if len(entry) > 9 else 0.0
+            lt_inc_item = entry[10] if len(entry) > 10 else None
+            _, _, _, _, promo_cb, lt_item = entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]
             try:
-                val = float(lt_item.text().replace("$", "").replace(",", ""))
-                total += val
+                ex_val = float(lt_item.text().replace("$", "").replace(",", ""))
+                inc_val = float(lt_inc_item.text().replace("$", "").replace(",", "")) if lt_inc_item else ex_val
+                total_inc += inc_val
+                gst_total += inc_val - ex_val
                 if promo_cb.isChecked():
-                    promo_total += val
+                    promo_total += inc_val
             except (ValueError, AttributeError):
                 pass
+        subtotal = round(total_inc - gst_total, 2)
+        gst = round(gst_total, 2)
+        total_inc = round(total_inc, 2)
+        promo_str = ""
         if promo_total > 0:
-            self.total_label.setText(
-                f"<b>Receipt Total: ${total:.2f}</b>"
-                f"&nbsp;&nbsp;&nbsp;<span style='color:#FFB300;font-size:11px;'>"
-                f"(includes <b>${promo_total:.2f}</b> promo — cost price NOT updated)</span>"
-            )
-        else:
-            self.total_label.setText(f"<b>Receipt Total: ${total:.2f}</b>")
+            promo_str = f"&nbsp;&nbsp;&nbsp;<span style='color:#FFB300;font-size:11px;'>(includes <b>${promo_total:.2f}</b> promo — cost price NOT updated)</span>"
+        self.total_label.setText(
+            f"Subtotal ex. GST: <b>${subtotal:.2f}</b>"
+            f"&nbsp;&nbsp;&nbsp;GST: <b>${gst:.2f}</b>"
+            f"&nbsp;&nbsp;&nbsp;Invoice Total inc. GST: <b style='color:#4CAF50'>${total_inc:.2f}</b>"
+            f"{promo_str}"
+        )
 
     def _receive_all(self):
         """Fill all Receiving Now spinners with full remaining quantities."""
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
-                lt_item, remaining_units, is_vw, weight_input = entry
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
             qty_input.setValue(remaining_units)
 
     def _confirm(self):
