@@ -47,3 +47,4 @@ Thumbs.db
 # Import scripts with personal data
 import_products.py
 LittleRedApple_Merged.csv
+views/purchase_orders/po_receive.py.backup
