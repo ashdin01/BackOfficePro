@@ -231,6 +231,7 @@ class POReceive(QWidget):
         self.setWindowTitle("Receive Stock")
         self.setMinimumSize(1340, 560)
         _ensure_promo_column()
+        self.charges_table = None
         self._build_ui()
         self._load()
 
@@ -327,6 +328,37 @@ class POReceive(QWidget):
         self.total_label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(self.total_label)
 
+        # ── Additional Charges ────────────────────────────────────
+        charges_header = QHBoxLayout()
+        charges_lbl = QLabel("Additional Charges  (freight, fuel levy, surcharges etc.)")
+        charges_lbl.setStyleSheet("color: #8b949e; font-size: 11px; font-weight: bold;")
+        charges_header.addWidget(charges_lbl)
+        charges_header.addStretch()
+        btn_add_charge = QPushButton("+ Add Charge")
+        btn_add_charge.setFixedHeight(28)
+        btn_add_charge.setFixedWidth(110)
+        btn_add_charge.clicked.connect(self._add_charge)
+        btn_remove_charge = QPushButton("Remove")
+        btn_remove_charge.setFixedHeight(28)
+        btn_remove_charge.setFixedWidth(80)
+        btn_remove_charge.clicked.connect(self._remove_charge)
+        charges_header.addWidget(btn_add_charge)
+        charges_header.addWidget(btn_remove_charge)
+        layout.addLayout(charges_header)
+
+        self.charges_table = QTableWidget()
+        self.charges_table.setColumnCount(3)
+        self.charges_table.setHorizontalHeaderLabels(["Description", "Tax Type", "Amount inc. Tax"])
+        self.charges_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.charges_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.charges_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.charges_table.setColumnWidth(1, 130)
+        self.charges_table.setColumnWidth(2, 150)
+        self.charges_table.setFixedHeight(110)
+        self.charges_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.charges_table.itemChanged.connect(self._update_total)
+        layout.addWidget(self.charges_table)
+
         btns = QHBoxLayout()
         btn_receive_all = QPushButton("Receive All")
         btn_receive_all.setFixedHeight(35)
@@ -356,6 +388,29 @@ class POReceive(QWidget):
         btns.addWidget(btn_receive)
         btns.addWidget(btn_close)
         layout.addLayout(btns)
+
+    def _add_charge(self):
+        from PyQt6.QtWidgets import QComboBox
+        r = self.charges_table.rowCount()
+        self.charges_table.blockSignals(True)
+        self.charges_table.insertRow(r)
+        self.charges_table.setItem(r, 0, QTableWidgetItem("Freight"))
+        tax_combo = QComboBox()
+        tax_combo.addItem("GST (10%)", 10.0)
+        tax_combo.addItem("GST Free (0%)", 0.0)
+        tax_combo.currentIndexChanged.connect(self._update_total)
+        self.charges_table.setCellWidget(r, 1, tax_combo)
+        amt_item = QTableWidgetItem("0.00")
+        amt_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.charges_table.setItem(r, 2, amt_item)
+        self.charges_table.blockSignals(False)
+        self._update_total()
+
+    def _remove_charge(self):
+        row = self.charges_table.currentRow()
+        if row >= 0:
+            self.charges_table.removeRow(row)
+            self._update_total()
 
     def _open_product(self, index):
         row = index.row()
@@ -598,6 +653,21 @@ class POReceive(QWidget):
                     promo_total += inc_val
             except (ValueError, AttributeError):
                 pass
+        # Additional charges
+        if self.charges_table is not None:
+            for cr in range(self.charges_table.rowCount()):
+                try:
+                    amt_item = self.charges_table.item(cr, 2)
+                    if not amt_item:
+                        continue
+                    amt = float(amt_item.text().replace("$", "").replace(",", ""))
+                    tax_combo = self.charges_table.cellWidget(cr, 1)
+                    charge_tax = tax_combo.currentData() if tax_combo else 0.0
+                    total_inc += amt
+                    if charge_tax > 0:
+                        gst_total += amt - (amt / (1 + charge_tax / 100))
+                except (ValueError, AttributeError):
+                    pass
         subtotal = round(total_inc - gst_total, 2)
         gst = round(gst_total, 2)
         total_inc = round(total_inc, 2)
