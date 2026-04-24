@@ -637,7 +637,7 @@ class POReceive(QWidget):
 
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
-                lt_item, remaining_units, is_vw, weight_input = entry
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
 
             qty      = qty_input.value()
             cost     = cost_input.value()     # per unit OR per kg
