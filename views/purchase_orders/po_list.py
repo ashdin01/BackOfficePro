@@ -208,6 +208,7 @@ class POList(QWidget):
         status_colours = {
             'RECEIVED':  '#4CAF50',
             'CANCELLED': '#f44336',
+            'REVERSED':  '#9C27B0',
         }
         for r in range(self.archive_table.rowCount()):
             status = self.archive_table.item(r, 2).text()

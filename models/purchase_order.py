@@ -33,7 +33,7 @@ def get_all(status=None, archived=False):
             SELECT po.*, s.name as supplier_name
             FROM purchase_orders po
             JOIN suppliers s ON po.supplier_id = s.id
-            WHERE po.status IN ('RECEIVED', 'CANCELLED')
+            WHERE po.status IN ('RECEIVED', 'CANCELLED', 'REVERSED')
             ORDER BY po.created_at DESC
         """
         rows = conn.execute(query).fetchall()
@@ -89,6 +89,120 @@ def update_status(po_id, status):
 def cancel(po_id):
     update_status(po_id, PO_STATUS_CANCELLED)
 
+
+def reverse(po_id, reversed_by=''):
+    from models.stock_on_hand import adjust
+    from config.constants import MOVE_REVERSAL
+    conn = get_connection()
+    po = conn.execute(
+        "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
+        "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
+        (po_id,)
+    ).fetchone()
+    if not po:
+        conn.close()
+        raise ValueError(f'PO {po_id} not found')
+    if po['status'] not in ('RECEIVED', 'PARTIAL'):
+        conn.close()
+        raise ValueError('Only RECEIVED or PARTIAL POs can be reversed')
+    lines = conn.execute("SELECT * FROM po_lines WHERE po_id = ?", (po_id,)).fetchall()
+    conn.close()
+    for line in lines:
+        received = int(line['received_qty'] or 0)
+        if received <= 0:
+            continue
+        from models.product import get_by_barcode
+        product = get_by_barcode(line['barcode'])
+        pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
+        units_received = received * pack_qty
+        adjust(
+            barcode=line['barcode'],
+            quantity=-units_received,
+            movement_type=MOVE_REVERSAL,
+            reference=po['po_number'],
+            notes=f"Reversal of {po['po_number']} — {line['description']}",
+            created_by=reversed_by,
+        )
+    update_status(po_id, 'REVERSED')
+
+def reverse(po_id, reversed_by=''):
+    """
+    Reverse a RECEIVED PO:
+    - Reduces SOH for each received line
+    - Records REVERSAL stock movements
+    - Sets PO status to REVERSED
+    """
+    from models.stock_on_hand import adjust
+    from config.constants import MOVE_REVERSAL
+    conn = get_connection()
+    po = conn.execute(
+        "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
+        "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
+        (po_id,)
+    ).fetchone()
+    if not po:
+        conn.close()
+        raise ValueError(f'PO {po_id} not found')
+    if po['status'] not in ('RECEIVED', 'PARTIAL'):
+        conn.close()
+        raise ValueError(f'Only RECEIVED or PARTIAL POs can be reversed')
+    lines = conn.execute(
+        "SELECT * FROM po_lines WHERE po_id = ?", (po_id,)
+    ).fetchall()
+    conn.close()
+    for line in lines:
+        received = int(line['received_qty'] or 0)
+        if received <= 0:
+            continue
+        # Get pack_qty for this product
+        from models.product import get_by_barcode
+        product = get_by_barcode(line['barcode'])
+        pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
+        units_received = received * pack_qty
+        adjust(
+            barcode=line['barcode'],
+            quantity=-units_received,
+            movement_type=MOVE_REVERSAL,
+            reference=po['po_number'],
+            notes=f"Reversal of {po['po_number']} — {line['description']}",
+            created_by=reversed_by,
+        )
+    update_status(po_id, 'REVERSED')
+
+def reverse(po_id, reversed_by=''):
+    from models.stock_on_hand import adjust
+    from config.constants import MOVE_REVERSAL
+    conn = get_connection()
+    po = conn.execute(
+        "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
+        "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
+        (po_id,)
+    ).fetchone()
+    if not po:
+        conn.close()
+        raise ValueError(f'PO {po_id} not found')
+    if po['status'] not in ('RECEIVED', 'PARTIAL'):
+        conn.close()
+        raise ValueError('Only RECEIVED or PARTIAL POs can be reversed')
+    lines = conn.execute("SELECT * FROM po_lines WHERE po_id = ?", (po_id,)).fetchall()
+    conn.close()
+    for line in lines:
+        received = int(line['received_qty'] or 0)
+        if received <= 0:
+            continue
+        from models.product import get_by_barcode
+        product = get_by_barcode(line['barcode'])
+        pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
+        units_received = received * pack_qty
+        adjust(
+            barcode=line['barcode'],
+            quantity=-units_received,
+            movement_type=MOVE_REVERSAL,
+            reference=po['po_number'],
+            notes=f"Reversal of {po['po_number']} — {line['description']}",
+            created_by=reversed_by,
+        )
+    update_status(po_id, 'REVERSED')
 
 def cleanup_old_pos():
     """

@@ -38,6 +38,22 @@ def receive(line_id, received_qty, actual_cost=None):
     conn.commit()
     conn.close()
 
+def correct_received(line_id, new_received_qty):
+    conn = get_connection()
+    conn.execute("UPDATE po_lines SET received_qty=? WHERE id=?", (new_received_qty, line_id))
+    conn.commit()
+    conn.close()
+
+def correct_received(line_id, new_received_qty):
+    """Correct the received_qty on a line — used for partial PO corrections."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE po_lines SET received_qty=? WHERE id=?",
+        (new_received_qty, line_id)
+    )
+    conn.commit()
+    conn.close()
+
 def delete(line_id):
     conn = get_connection()
     conn.execute("DELETE FROM po_lines WHERE id = ?", (line_id,))
