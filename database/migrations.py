@@ -1,5 +1,21 @@
 import logging
+import sqlite3
 from database.connection import get_connection
+
+
+def _add_column(conn, sql):
+    """
+    Execute an ALTER TABLE ... ADD COLUMN statement.
+    Silently ignores 'duplicate column name' (column already exists — safe on
+    re-run).  Any other OperationalError is re-raised so real failures are not
+    masked.
+    """
+    try:
+        conn.execute(sql)
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+
 
 def apply_migrations():
     logging.info("apply_migrations() starting")
@@ -10,11 +26,7 @@ def apply_migrations():
         ).fetchone()
         current = int(version['value']) if version else 1
         logging.info(f"Current schema version: {current}")
-    except Exception as e:
-        logging.critical(f"Failed to read schema_version: {e}")
-        conn.close()
-        raise
-    try:
+
         if current < 2:
             migrate_v2(conn)
             logging.info("Migration v2 applied: barcode_aliases")
@@ -42,12 +54,25 @@ def apply_migrations():
         if current < 10:
             migrate_v10(conn)
             logging.info("Migration v10 applied: auto_reorder column on products")
+        if current < 11:
+            migrate_v11(conn)
+            logging.info("Migration v11 applied: updated_at column on purchase_orders")
+        if current < 12:
+            migrate_v12(conn)
+            logging.info("Migration v12 applied: is_promo column on po_lines")
+        if current < 13:
+            migrate_v13(conn)
+            logging.info("Migration v13 applied: address column on suppliers")
+        if current < 14:
+            migrate_v14(conn)
+            logging.info("Migration v14 applied: product_suppliers junction table")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
         raise
     finally:
         conn.close()
+
 
 def migrate_v2(conn):
     conn.execute("""
@@ -62,27 +87,21 @@ def migrate_v2(conn):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')")
     conn.commit()
 
+
 def migrate_v3(conn):
     """Add brand column to products table."""
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN brand TEXT DEFAULT ''")
-    except Exception:
-        pass
+    _add_column(conn, "ALTER TABLE products ADD COLUMN brand TEXT DEFAULT ''")
     conn.execute("UPDATE settings SET value = '3' WHERE key = 'schema_version'")
     conn.commit()
 
+
 def migrate_v4(conn):
     """Add sku and supplier_sku columns to products table."""
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN sku TEXT DEFAULT ''")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN supplier_sku TEXT DEFAULT ''")
-    except Exception:
-        pass
+    _add_column(conn, "ALTER TABLE products ADD COLUMN sku TEXT DEFAULT ''")
+    _add_column(conn, "ALTER TABLE products ADD COLUMN supplier_sku TEXT DEFAULT ''")
     conn.execute("UPDATE settings SET value = '4' WHERE key = 'schema_version'")
     conn.commit()
+
 
 def migrate_v5(conn):
     """Add abn, rep_name, rep_phone, order_minimum to suppliers table."""
@@ -92,12 +111,10 @@ def migrate_v5(conn):
         ("rep_phone",     "TEXT DEFAULT ''"),
         ("order_minimum", "REAL DEFAULT 0"),
     ]:
-        try:
-            conn.execute(f"ALTER TABLE suppliers ADD COLUMN {col} {typedef}")
-        except Exception:
-            pass
+        _add_column(conn, f"ALTER TABLE suppliers ADD COLUMN {col} {typedef}")
     conn.execute("UPDATE settings SET value = '5' WHERE key = 'schema_version'")
     conn.commit()
+
 
 def migrate_v6(conn):
     """Add product_groups table and group_id to products."""
@@ -112,32 +129,22 @@ def migrate_v6(conn):
             UNIQUE(department_id, code)
         )
     """)
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN group_id INTEGER REFERENCES product_groups(id)")
-    except Exception:
-        pass
+    _add_column(conn, "ALTER TABLE products ADD COLUMN group_id INTEGER REFERENCES product_groups(id)")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '6')")
     conn.commit()
 
+
 def migrate_v7(conn):
-    """Add all columns added during development session."""
+    """Add pack_qty, pack_unit, reorder_max, base_sku to products; actual_cost to po_lines;
+    create plu_barcode_map and sales_daily tables."""
     for col, typedef in [
         ("pack_qty",    "INTEGER DEFAULT 1"),
         ("pack_unit",   "TEXT DEFAULT 'EA'"),
         ("reorder_max", "REAL DEFAULT 0"),
         ("base_sku",    "TEXT"),
     ]:
-        try:
-            conn.execute(f"ALTER TABLE products ADD COLUMN {col} {typedef}")
-        except Exception:
-            pass
-    for col, typedef in [
-        ("actual_cost", "REAL DEFAULT 0"),
-    ]:
-        try:
-            conn.execute(f"ALTER TABLE po_lines ADD COLUMN {col} {typedef}")
-        except Exception:
-            pass
+        _add_column(conn, f"ALTER TABLE products ADD COLUMN {col} {typedef}")
+    _add_column(conn, "ALTER TABLE po_lines ADD COLUMN actual_cost REAL DEFAULT 0")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS plu_barcode_map (
             plu       INTEGER PRIMARY KEY,
@@ -168,6 +175,7 @@ def migrate_v7(conn):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '7')")
     conn.commit()
 
+
 def migrate_v8(conn):
     """Add po_pdf_path setting for PO PDF export folder."""
     conn.execute(
@@ -177,18 +185,14 @@ def migrate_v8(conn):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '8')")
     conn.commit()
 
+
 def migrate_v9(conn):
     """Add separate email fields to suppliers table.
-    Replaces the single 'email' catch-all with four specific addresses:
-    email_orders, email_admin, email_accounts, email_rep.
+    Replaces the single 'email' catch-all with four specific addresses.
     The original 'email' column is retained for backwards compatibility.
     """
     for col in ["email_orders", "email_admin", "email_accounts", "email_rep"]:
-        try:
-            conn.execute(f"ALTER TABLE suppliers ADD COLUMN {col} TEXT DEFAULT ''")
-        except Exception:
-            pass
-    # Migrate existing email value into email_orders as a sensible default
+        _add_column(conn, f"ALTER TABLE suppliers ADD COLUMN {col} TEXT DEFAULT ''")
     conn.execute("""
         UPDATE suppliers
         SET email_orders = email
@@ -198,11 +202,57 @@ def migrate_v9(conn):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '9')")
     conn.commit()
 
+
 def migrate_v10(conn):
     """Add auto_reorder flag to products table."""
-    try:
-        conn.execute("ALTER TABLE products ADD COLUMN auto_reorder INTEGER DEFAULT 0")
-    except Exception:
-        pass
+    _add_column(conn, "ALTER TABLE products ADD COLUMN auto_reorder INTEGER DEFAULT 0")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '10')")
+    conn.commit()
+
+
+def migrate_v11(conn):
+    """Add updated_at column to purchase_orders table."""
+    _add_column(conn, "ALTER TABLE purchase_orders ADD COLUMN updated_at DATETIME")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '11')")
+    conn.commit()
+
+
+def migrate_v12(conn):
+    """Add is_promo column to po_lines table."""
+    _add_column(conn, "ALTER TABLE po_lines ADD COLUMN is_promo INTEGER NOT NULL DEFAULT 0")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '12')")
+    conn.commit()
+
+
+def migrate_v13(conn):
+    """Add address column to suppliers table."""
+    _add_column(conn, "ALTER TABLE suppliers ADD COLUMN address TEXT")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '13')")
+    conn.commit()
+
+
+def migrate_v14(conn):
+    """Create product_suppliers junction table; seed existing supplier_id as default."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS product_suppliers (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            barcode     TEXT    NOT NULL REFERENCES products(barcode),
+            supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+            is_default  INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(barcode, supplier_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_product_suppliers_barcode  ON product_suppliers(barcode)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_product_suppliers_supplier ON product_suppliers(supplier_id)"
+    )
+    conn.execute("""
+        INSERT OR IGNORE INTO product_suppliers (barcode, supplier_id, is_default)
+        SELECT barcode, supplier_id, 1
+        FROM products
+        WHERE supplier_id IS NOT NULL
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '14')")
     conn.commit()

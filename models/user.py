@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 from database.connection import get_connection
 
 
@@ -37,12 +38,20 @@ def verify_pin(username: str, pin: str) -> bool:
     stored = user.get('pin')
     if not stored:
         return False
-    # Support both plain (legacy) and hashed PINs
-    if stored == pin:
-        # Migrate to hashed on first login
+
+    hashed = _hash_pin(pin)
+
+    # Normal path: stored value is already a SHA-256 hash.
+    if hmac.compare_digest(stored, hashed):
+        return True
+
+    # Legacy path: stored value is a plain-text PIN (pre-hash era).
+    # Migrate to hashed on first successful login.
+    if hmac.compare_digest(stored, pin):
         set_pin(username, pin)
         return True
-    return stored == _hash_pin(pin)
+
+    return False
 
 
 def set_pin(username: str, pin: str):

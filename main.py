@@ -59,12 +59,94 @@ sys.excepthook = _handle_exception
 from database import init_db
 from database.migrations import apply_migrations
 
+
+def _try_unlock_db():
+    """
+    Delete stale WAL/SHM sidecar files left behind after a crash.
+    Returns (success: bool, message: str).
+    """
+    from config.settings import DATABASE_PATH
+    removed = []
+    errors  = []
+    for ext in (".db-wal", ".db-shm"):
+        path = DATABASE_PATH + ext
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                removed.append(os.path.basename(path))
+                logging.info(f"Force-unlock: removed {path}")
+            except Exception as e:
+                errors.append(f"{os.path.basename(path)}: {e}")
+                logging.error(f"Force-unlock: could not remove {path}: {e}")
+    if errors:
+        return False, "Could not remove:\n" + "\n".join(errors)
+    if removed:
+        return True, "Removed: " + ", ".join(removed)
+    return True, "No WAL/SHM files found — lock may be held by another process."
+
+
+def _init_db_with_lock_recovery(app):
+    """
+    Run init_db + apply_migrations.  On a database-locked error, show a
+    dialog offering Retry or Force Unlock.  Exits the process if the user
+    cancels or unlock fails.
+    """
+    import sqlite3
+    from PyQt6.QtWidgets import QMessageBox, QPushButton
+
+    while True:
+        try:
+            init_db()
+            apply_migrations()
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                raise
+
+            logging.error(f"Database locked on startup: {e}")
+
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Database Locked")
+            msg.setText("BackOfficePro cannot open the database — it appears to be locked.")
+            msg.setInformativeText(
+                "This usually happens when the app crashed and left temporary files behind.\n\n"
+                "• Retry — try again (use this if another copy of the app was just closed)\n"
+                "• Force Unlock — delete the stale lock files and retry\n"
+                "  ⚠  Any data from the last session that was not saved may be lost."
+            )
+            btn_retry   = msg.addButton("Retry",         QMessageBox.ButtonRole.AcceptRole)
+            btn_unlock  = msg.addButton("Force Unlock",  QMessageBox.ButtonRole.DestructiveRole)
+            btn_exit    = msg.addButton("Exit",          QMessageBox.ButtonRole.RejectRole)
+            msg.setDefaultButton(btn_retry)
+            msg.exec()
+            clicked = msg.clickedButton()
+
+            if clicked == btn_exit or clicked is None:
+                logging.info("User chose Exit on database-locked dialog.")
+                sys.exit(1)
+
+            if clicked == btn_unlock:
+                ok, detail = _try_unlock_db()
+                if not ok:
+                    QMessageBox.critical(
+                        None, "Unlock Failed",
+                        f"Could not remove lock files:\n\n{detail}\n\n"
+                        "Close any other programs that may have the database open, "
+                        "then restart BackOfficePro."
+                    )
+                    logging.error(f"Force-unlock failed: {detail}")
+                    sys.exit(1)
+                logging.info(f"Force-unlock succeeded: {detail}")
+            # loop → retry init_db()
+
+
 def main():
     logging.info("main() called")
-    init_db()
-    apply_migrations()
     from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
+    _init_db_with_lock_recovery(app)
+
     import models.user as user_model
     from views.login_screen import LoginScreen, _SetupPinDialog
     if not user_model.has_any_pin_set():

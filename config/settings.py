@@ -14,4 +14,4 @@ DATABASE_PATH = os.path.join(DATA_DIR, 'backoffice.db')
 
 # App info
 APP_NAME    = "BackOfficePro"
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.2.19"

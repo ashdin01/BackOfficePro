@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from utils.keyboard_mixin import KeyboardMixin
 import models.supplier as supplier_model
 
@@ -18,7 +18,11 @@ class SupplierList(KeyboardMixin, QWidget):
         top = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search suppliers...")
-        self.search.textChanged.connect(self._search)
+        self._search_timer = QTimer()
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(500)
+        self._search_timer.timeout.connect(lambda: self._search(self.search.text()))
+        self.search.textChanged.connect(lambda _: self._search_timer.start())
         self.search.returnPressed.connect(lambda: self.table.setFocus())
         top.addWidget(self.search)
         btn_add = QPushButton("&Add Supplier")

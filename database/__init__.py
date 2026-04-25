@@ -5,6 +5,7 @@ from database.schema import SCHEMA
 def init_db():
     """Create all tables on first run."""
     conn = get_connection()
-    conn.executescript(SCHEMA)
-    conn.commit()
-    conn.close()
+    try:
+        conn.executescript(SCHEMA)
+    finally:
+        conn.close()

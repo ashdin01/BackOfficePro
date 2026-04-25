@@ -28,11 +28,41 @@ CREATE TABLE IF NOT EXISTS suppliers (
     contact_name    TEXT,
     phone           TEXT,
     email           TEXT,
+    address         TEXT,
     account_number  TEXT,
     payment_terms   TEXT,
     notes           TEXT,
     active          INTEGER NOT NULL DEFAULT 1,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    abn             TEXT    DEFAULT '',
+    rep_name        TEXT    DEFAULT '',
+    rep_phone       TEXT    DEFAULT '',
+    order_minimum   REAL    DEFAULT 0,
+    email_orders    TEXT    DEFAULT '',
+    email_admin     TEXT    DEFAULT '',
+    email_accounts  TEXT    DEFAULT '',
+    email_rep       TEXT    DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS product_suppliers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    barcode     TEXT    NOT NULL REFERENCES products(barcode),
+    supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(barcode, supplier_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_suppliers_barcode   ON product_suppliers(barcode);
+CREATE INDEX IF NOT EXISTS idx_product_suppliers_supplier  ON product_suppliers(supplier_id);
+
+CREATE TABLE IF NOT EXISTS product_groups (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    department_id INTEGER NOT NULL,
+    code          TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
+    active        INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (department_id) REFERENCES departments(id),
+    UNIQUE(department_id, code)
 );
 
 CREATE TABLE IF NOT EXISTS products (
@@ -56,6 +86,11 @@ CREATE TABLE IF NOT EXISTS products (
     active          INTEGER NOT NULL DEFAULT 1,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    brand           TEXT    DEFAULT '',
+    sku             TEXT    DEFAULT '',
+    supplier_sku    TEXT    DEFAULT '',
+    group_id        INTEGER REFERENCES product_groups(id),
+    auto_reorder    INTEGER DEFAULT 0,
     FOREIGN KEY (department_id) REFERENCES departments(id),
     FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)
 );
@@ -97,6 +132,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     sent_at         DATETIME,
     received_at     DATETIME,
     created_by      TEXT,
+    updated_at      DATETIME,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
 );
 
@@ -113,12 +149,21 @@ CREATE TABLE IF NOT EXISTS po_lines (
     unit_cost       REAL    NOT NULL DEFAULT 0,
     notes           TEXT,
     actual_cost     REAL    DEFAULT 0,
+    is_promo        INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (po_id)   REFERENCES purchase_orders(id),
     FOREIGN KEY (barcode) REFERENCES products(barcode)
 );
 
 CREATE INDEX IF NOT EXISTS idx_po_lines_po_id   ON po_lines(po_id);
 CREATE INDEX IF NOT EXISTS idx_po_lines_barcode ON po_lines(barcode);
+
+CREATE TABLE IF NOT EXISTS barcode_aliases (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias_barcode  TEXT    NOT NULL UNIQUE,
+    master_barcode TEXT    NOT NULL REFERENCES products(barcode),
+    description    TEXT,
+    created_at     TEXT    DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS stocktake_sessions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +189,29 @@ CREATE TABLE IF NOT EXISTS stocktake_counts (
 
 CREATE INDEX IF NOT EXISTS idx_stocktake_counts_session ON stocktake_counts(session_id);
 CREATE INDEX IF NOT EXISTS idx_stocktake_counts_barcode ON stocktake_counts(barcode);
+
+CREATE TABLE IF NOT EXISTS plu_barcode_map (
+    plu       INTEGER PRIMARY KEY,
+    barcode   TEXT    NOT NULL,
+    mapped_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sales_daily (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_date     TEXT    NOT NULL,
+    plu           TEXT,
+    plu_name      TEXT,
+    sub_group     TEXT,
+    weight_kg     REAL    DEFAULT 0,
+    quantity      REAL    DEFAULT 0,
+    nominal_price REAL    DEFAULT 0,
+    discount      REAL    DEFAULT 0,
+    rounding      REAL    DEFAULT 0,
+    sales_dollars REAL    DEFAULT 0,
+    sales_pct     REAL    DEFAULT 0,
+    imported_at   TEXT    DEFAULT (datetime('now','localtime')),
+    UNIQUE(sale_date, plu)
+);
 
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,29 +242,6 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('currency',       'AUD',            'Currency code'),
     ('po_prefix',      'PO',             'Purchase order number prefix'),
     ('po_next_number', '1',              'Next PO sequence number'),
-    ('po_pdf_path',    '',               'Folder path for exported PO PDFs');
+    ('po_pdf_path',    '',               'Folder path for exported PO PDFs'),
+    ('schema_version', '14',             'Database schema version');
 """
-
-BARCODE_ALIASES_TABLE = """
-CREATE TABLE IF NOT EXISTS barcode_aliases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    alias_barcode TEXT NOT NULL UNIQUE,
-    master_barcode TEXT NOT NULL REFERENCES products(barcode),
-    description TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-"""
-
-def migrate_v2(conn):
-    """Add barcode_aliases table."""
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS barcode_aliases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alias_barcode TEXT NOT NULL UNIQUE,
-            master_barcode TEXT NOT NULL REFERENCES products(barcode),
-            description TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.execute("UPDATE settings SET value = '2' WHERE key = 'schema_version'")
-    conn.commit()

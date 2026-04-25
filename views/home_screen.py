@@ -58,11 +58,11 @@ def _run_import(parent, paths):
         spec.loader.exec_module(module)
         module.ensure_tables()
         errors = []
-        for pdf_path in paths:
+        for path in paths:
             try:
-                module.import_pdf(pdf_path)
+                module.import_file(path)
             except Exception as e:
-                errors.append(f"{os.path.basename(pdf_path)}: {e}")
+                errors.append(f"{os.path.basename(path)}: {e}")
         if errors:
             return False, "Some files had errors:\n" + "\n".join(errors)
         return True, f"Imported {len(paths)} file(s) successfully."
@@ -185,7 +185,7 @@ class HomeScreen(QWidget):
         import_row.addLayout(import_col)
 
         # Import button
-        self._import_btn = QPushButton("⬆  Import Sales PDF")
+        self._import_btn = QPushButton("⬆  Import Sales")
         self._import_btn.setFixedHeight(40)
         self._import_btn.setStyleSheet("""
             QPushButton {
@@ -292,8 +292,9 @@ class HomeScreen(QWidget):
 
     def _import_sales(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Daily PLU Sales PDF(s)",
-            os.path.expanduser("~/Downloads"), "PDF Files (*.pdf)")
+            self, "Select Daily PLU Sales File(s)",
+            os.path.expanduser("~/Downloads"),
+            "Sales Files (*.csv *.pdf);;CSV Files (*.csv);;PDF Files (*.pdf)")
         if not paths:
             return
         success, message = _run_import(self, paths)

@@ -5,99 +5,110 @@ from database.connection import get_connection
 
 def get_all_sessions():
     conn = get_connection()
-    rows = conn.execute("""
-        SELECT st.*, d.name as dept_name,
-               COUNT(sc.id) as line_count
-        FROM stocktake_sessions st
-        LEFT JOIN departments d  ON st.department_id = d.id
-        LEFT JOIN stocktake_counts sc ON sc.session_id = st.id
-        GROUP BY st.id
-        ORDER BY st.started_at DESC
-    """).fetchall()
-    conn.close()
-    return rows
+    try:
+        return conn.execute("""
+            SELECT st.*, d.name as dept_name,
+                   COUNT(sc.id) as line_count
+            FROM stocktake_sessions st
+            LEFT JOIN departments d  ON st.department_id = d.id
+            LEFT JOIN stocktake_counts sc ON sc.session_id = st.id
+            GROUP BY st.id
+            ORDER BY st.started_at DESC
+        """).fetchall()
+    finally:
+        conn.close()
 
 
 def get_session(session_id):
     conn = get_connection()
-    row = conn.execute("""
-        SELECT st.*, d.name as dept_name
-        FROM stocktake_sessions st
-        LEFT JOIN departments d ON st.department_id = d.id
-        WHERE st.id = ?
-    """, (session_id,)).fetchone()
-    conn.close()
-    return row
+    try:
+        return conn.execute("""
+            SELECT st.*, d.name as dept_name
+            FROM stocktake_sessions st
+            LEFT JOIN departments d ON st.department_id = d.id
+            WHERE st.id = ?
+        """, (session_id,)).fetchone()
+    finally:
+        conn.close()
 
 
 def create_session(label, department_id=None, notes='', created_by=''):
     conn = get_connection()
-    cur = conn.execute("""
-        INSERT INTO stocktake_sessions (label, department_id, notes, created_by)
-        VALUES (?, ?, ?, ?)
-    """, (label, department_id, notes, created_by))
-    session_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return session_id
+    try:
+        cur = conn.execute("""
+            INSERT INTO stocktake_sessions (label, department_id, notes, created_by)
+            VALUES (?, ?, ?, ?)
+        """, (label, department_id, notes, created_by))
+        session_id = cur.lastrowid
+        conn.commit()
+        return session_id
+    finally:
+        conn.close()
 
 
 def close_session(session_id):
     conn = get_connection()
-    conn.execute("""
-        UPDATE stocktake_sessions
-        SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-    """, (session_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("""
+            UPDATE stocktake_sessions
+            SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (session_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ── Counts ────────────────────────────────────────────────────────────────────
 
 def get_counts(session_id):
     conn = get_connection()
-    rows = conn.execute("""
-        SELECT sc.*, p.description, p.sell_price, p.cost_price,
-               COALESCE(soh.quantity, 0) as soh_qty,
-               d.name as dept_name
-        FROM stocktake_counts sc
-        JOIN products p         ON sc.barcode = p.barcode
-        LEFT JOIN stock_on_hand soh ON soh.barcode = sc.barcode
-        LEFT JOIN departments d ON p.department_id = d.id
-        WHERE sc.session_id = ?
-        ORDER BY sc.scanned_at DESC
-    """, (session_id,)).fetchall()
-    conn.close()
-    return rows
+    try:
+        return conn.execute("""
+            SELECT sc.*, p.description, p.sell_price, p.cost_price,
+                   COALESCE(soh.quantity, 0) as soh_qty,
+                   d.name as dept_name
+            FROM stocktake_counts sc
+            JOIN products p         ON sc.barcode = p.barcode
+            LEFT JOIN stock_on_hand soh ON soh.barcode = sc.barcode
+            LEFT JOIN departments d ON p.department_id = d.id
+            WHERE sc.session_id = ?
+            ORDER BY sc.scanned_at DESC
+        """, (session_id,)).fetchall()
+    finally:
+        conn.close()
 
 
 def upsert_count(session_id, barcode, qty):
     """Add or update a count line for this session."""
     conn = get_connection()
-    existing = conn.execute(
-        "SELECT id FROM stocktake_counts WHERE session_id=? AND barcode=?",
-        (session_id, barcode)
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
-            (qty, existing['id'])
-        )
-    else:
-        conn.execute(
-            "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
-            (session_id, barcode, qty)
-        )
-    conn.commit()
-    conn.close()
+    try:
+        existing = conn.execute(
+            "SELECT id FROM stocktake_counts WHERE session_id=? AND barcode=?",
+            (session_id, barcode)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
+                (qty, existing['id'])
+            )
+        else:
+            conn.execute(
+                "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
+                (session_id, barcode, qty)
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def delete_count(count_id):
     conn = get_connection()
-    conn.execute("DELETE FROM stocktake_counts WHERE id=?", (count_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("DELETE FROM stocktake_counts WHERE id=?", (count_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def import_from_csv(session_id, filepath):
@@ -110,22 +121,19 @@ def import_from_csv(session_id, filepath):
     """
     import csv
     imported = 0
-    skipped = 0
-    errors = []
+    skipped  = 0
+    errors   = []
 
     with open(filepath, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
-        headers = [h.lower().strip() for h in (reader.fieldnames or [])]
 
-        # Detect barcode column
         barcode_col = next(
-            (h for h in reader.fieldnames
+            (h for h in (reader.fieldnames or [])
              if h.lower().strip() in ('barcode', 'ean', 'code', 'upc', 'barcode/ean')),
             None
         )
-        # Detect qty column
         qty_col = next(
-            (h for h in reader.fieldnames
+            (h for h in (reader.fieldnames or [])
              if h.lower().strip() in ('qty', 'quantity', 'count', 'counted', 'counted_qty')),
             None
         )
@@ -142,52 +150,52 @@ def import_from_csv(session_id, filepath):
             )
 
         conn = get_connection()
-        for row in reader:
-            barcode = str(row[barcode_col]).strip()
-            if not barcode:
-                skipped += 1
-                continue
-            try:
-                qty = float(str(row[qty_col]).strip() or 0)
-            except ValueError:
-                errors.append(f"Bad qty for barcode {barcode}: {row[qty_col]!r}")
-                skipped += 1
-                continue
-            # Check product exists
-            product = conn.execute(
-                "SELECT barcode FROM products WHERE barcode=?", (barcode,)
-            ).fetchone()
-            if not product:
-                # Try barcode_aliases
-                alias = conn.execute(
-                    "SELECT master_barcode FROM barcode_aliases WHERE alias_barcode=?",
-                    (barcode,)
-                ).fetchone()
-                if alias:
-                    barcode = alias['master_barcode']
-                else:
-                    errors.append(f"Unknown barcode: {barcode}")
+        try:
+            for row in reader:
+                barcode = str(row[barcode_col]).strip()
+                if not barcode:
                     skipped += 1
                     continue
-            # Upsert
-            existing = conn.execute(
-                "SELECT id, counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
-                (session_id, barcode)
-            ).fetchone()
-            if existing:
-                new_qty = existing['counted_qty'] + qty
-                conn.execute(
-                    "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (new_qty, existing['id'])
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
-                    (session_id, barcode, qty)
-                )
-            imported += 1
-        conn.commit()
-        conn.close()
+                try:
+                    qty = float(str(row[qty_col]).strip() or 0)
+                except ValueError:
+                    errors.append(f"Bad qty for barcode {barcode}: {row[qty_col]!r}")
+                    skipped += 1
+                    continue
+
+                product = conn.execute(
+                    "SELECT barcode FROM products WHERE barcode=?", (barcode,)
+                ).fetchone()
+                if not product:
+                    alias = conn.execute(
+                        "SELECT master_barcode FROM barcode_aliases WHERE alias_barcode=?",
+                        (barcode,)
+                    ).fetchone()
+                    if alias:
+                        barcode = alias['master_barcode']
+                    else:
+                        errors.append(f"Unknown barcode: {barcode}")
+                        skipped += 1
+                        continue
+
+                existing = conn.execute(
+                    "SELECT id, counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
+                    (session_id, barcode)
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (existing['counted_qty'] + qty, existing['id'])
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
+                        (session_id, barcode, qty)
+                    )
+                imported += 1
+            conn.commit()
+        finally:
+            conn.close()
 
     return imported, skipped, errors
 
@@ -200,96 +208,91 @@ def import_from_sqlite(session_id, filepath):
     """
     import sqlite3
     imported = 0
-    skipped = 0
-    errors = []
+    skipped  = 0
+    errors   = []
 
     ext_conn = sqlite3.connect(filepath)
     ext_conn.row_factory = sqlite3.Row
+    try:
+        tables = [
+            r[0] for r in
+            ext_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        ]
+        if not tables:
+            raise ValueError("No tables found in the SQLite file.")
 
-    # Find a suitable table
-    tables = [
-        r[0] for r in
-        ext_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    ]
-    if not tables:
+        target_table = barcode_col = qty_col = None
+        for table in tables:
+            cols = [r[1].lower() for r in ext_conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            bc = next((c for c in cols if c in ('barcode', 'ean', 'code', 'upc', 'barcode/ean')), None)
+            qc = next((c for c in cols if c in ('qty', 'quantity', 'count', 'counted', 'counted_qty')), None)
+            if bc and qc:
+                orig = [r[1] for r in ext_conn.execute(f"PRAGMA table_info({table})").fetchall()]
+                target_table = table
+                barcode_col  = next(c for c in orig if c.lower() == bc)
+                qty_col      = next(c for c in orig if c.lower() == qc)
+                break
+
+        if not target_table:
+            raise ValueError(
+                f"No suitable table found. Tables: {tables}\n"
+                "Need a table with barcode and qty columns."
+            )
+
+        rows = ext_conn.execute(
+            f"SELECT [{barcode_col}], [{qty_col}] FROM [{target_table}]"
+        ).fetchall()
+    finally:
         ext_conn.close()
-        raise ValueError("No tables found in the SQLite file.")
-
-    target_table = None
-    barcode_col = None
-    qty_col = None
-
-    for table in tables:
-        cols = [r[1].lower() for r in ext_conn.execute(f"PRAGMA table_info({table})").fetchall()]
-        bc = next((c for c in cols if c in ('barcode','ean','code','upc','barcode/ean')), None)
-        qc = next((c for c in cols if c in ('qty','quantity','count','counted','counted_qty')), None)
-        if bc and qc:
-            target_table = table
-            # Get original case column names
-            orig_cols = [r[1] for r in ext_conn.execute(f"PRAGMA table_info({table})").fetchall()]
-            barcode_col = next(c for c in orig_cols if c.lower() == bc)
-            qty_col     = next(c for c in orig_cols if c.lower() == qc)
-            break
-
-    if not target_table:
-        ext_conn.close()
-        raise ValueError(
-            f"No suitable table found. Tables: {tables}\n"
-            "Need a table with barcode and qty columns."
-        )
-
-    rows = ext_conn.execute(
-        f"SELECT [{barcode_col}], [{qty_col}] FROM [{target_table}]"
-    ).fetchall()
-    ext_conn.close()
 
     conn = get_connection()
-    for row in rows:
-        barcode = str(row[0]).strip()
-        if not barcode:
-            skipped += 1
-            continue
-        try:
-            qty = float(row[1] or 0)
-        except (ValueError, TypeError):
-            errors.append(f"Bad qty for barcode {barcode}: {row[1]!r}")
-            skipped += 1
-            continue
-
-        product = conn.execute(
-            "SELECT barcode FROM products WHERE barcode=?", (barcode,)
-        ).fetchone()
-        if not product:
-            alias = conn.execute(
-                "SELECT master_barcode FROM barcode_aliases WHERE alias_barcode=?",
-                (barcode,)
-            ).fetchone()
-            if alias:
-                barcode = alias['master_barcode']
-            else:
-                errors.append(f"Unknown barcode: {barcode}")
+    try:
+        for row in rows:
+            barcode = str(row[0]).strip()
+            if not barcode:
+                skipped += 1
+                continue
+            try:
+                qty = float(row[1] or 0)
+            except (ValueError, TypeError):
+                errors.append(f"Bad qty for barcode {barcode}: {row[1]!r}")
                 skipped += 1
                 continue
 
-        existing = conn.execute(
-            "SELECT id, counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
-            (session_id, barcode)
-        ).fetchone()
-        if existing:
-            new_qty = existing['counted_qty'] + qty
-            conn.execute(
-                "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
-                (new_qty, existing['id'])
-            )
-        else:
-            conn.execute(
-                "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
-                (session_id, barcode, qty)
-            )
-        imported += 1
+            product = conn.execute(
+                "SELECT barcode FROM products WHERE barcode=?", (barcode,)
+            ).fetchone()
+            if not product:
+                alias = conn.execute(
+                    "SELECT master_barcode FROM barcode_aliases WHERE alias_barcode=?",
+                    (barcode,)
+                ).fetchone()
+                if alias:
+                    barcode = alias['master_barcode']
+                else:
+                    errors.append(f"Unknown barcode: {barcode}")
+                    skipped += 1
+                    continue
 
-    conn.commit()
-    conn.close()
+            existing = conn.execute(
+                "SELECT id, counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
+                (session_id, barcode)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (existing['counted_qty'] + qty, existing['id'])
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
+                    (session_id, barcode, qty)
+                )
+            imported += 1
+        conn.commit()
+    finally:
+        conn.close()
+
     return imported, skipped, errors
 
 
@@ -300,72 +303,71 @@ def get_variance_report(session_id):
     are included with counted_qty = None.
     """
     conn = get_connection()
-    session = conn.execute(
-        "SELECT * FROM stocktake_sessions WHERE id=?", (session_id,)
-    ).fetchone()
-    dept_filter = ""
-    params_base = []
-    if session and session['department_id']:
-        dept_filter = "AND p.department_id = ?"
-        params_base = [session['department_id']]
+    try:
+        session = conn.execute(
+            "SELECT * FROM stocktake_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        dept_filter  = ""
+        params_base  = []
+        if session and session['department_id']:
+            dept_filter = "AND p.department_id = ?"
+            params_base = [session['department_id']]
 
-    rows = conn.execute(f"""
-        SELECT
-            p.barcode,
-            p.description,
-            p.cost_price,
-            p.sell_price,
-            d.name as dept_name,
-            COALESCE(soh.quantity, 0) as soh_qty,
-            sc.counted_qty
-        FROM products p
-        LEFT JOIN departments d      ON p.department_id = d.id
-        LEFT JOIN stock_on_hand soh  ON soh.barcode = p.barcode
-        LEFT JOIN stocktake_counts sc
-            ON sc.barcode = p.barcode AND sc.session_id = ?
-        WHERE p.active = 1
-          AND p.expected = 1
-          {dept_filter}
-        ORDER BY d.name, p.description
-    """, [session_id] + params_base).fetchall()
-    conn.close()
-    return rows
+        return conn.execute(f"""
+            SELECT
+                p.barcode,
+                p.description,
+                p.cost_price,
+                p.sell_price,
+                d.name as dept_name,
+                COALESCE(soh.quantity, 0) as soh_qty,
+                sc.counted_qty
+            FROM products p
+            LEFT JOIN departments d      ON p.department_id = d.id
+            LEFT JOIN stock_on_hand soh  ON soh.barcode = p.barcode
+            LEFT JOIN stocktake_counts sc
+                ON sc.barcode = p.barcode AND sc.session_id = ?
+            WHERE p.active = 1
+              AND p.expected = 1
+              {dept_filter}
+            ORDER BY d.name, p.description
+        """, [session_id] + params_base).fetchall()
+    finally:
+        conn.close()
 
 
 def apply_session(session_id):
-
     """Write counted quantities to stock_on_hand and log movements."""
     conn = get_connection()
-    counts = conn.execute(
-        "SELECT * FROM stocktake_counts WHERE session_id=?", (session_id,)
-    ).fetchall()
-    for c in counts:
-        barcode = c['barcode']
-        counted = c['counted_qty']
-        soh = conn.execute(
-            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (barcode,)
-        ).fetchone()
-        current = soh['quantity'] if soh else 0
-        diff = counted - current
-        # Upsert SOH to exact counted value
+    try:
+        counts = conn.execute(
+            "SELECT * FROM stocktake_counts WHERE session_id=?", (session_id,)
+        ).fetchall()
+        for c in counts:
+            barcode = c['barcode']
+            counted = c['counted_qty']
+            soh = conn.execute(
+                "SELECT quantity FROM stock_on_hand WHERE barcode=?", (barcode,)
+            ).fetchone()
+            current = soh['quantity'] if soh else 0
+            diff = counted - current
+            conn.execute("""
+                INSERT INTO stock_on_hand (barcode, quantity)
+                VALUES (?, ?)
+                ON CONFLICT(barcode) DO UPDATE SET
+                    quantity = excluded.quantity,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (barcode, counted))
+            conn.execute("""
+                INSERT INTO stock_movements
+                    (barcode, movement_type, quantity, reference, notes)
+                VALUES (?, 'STOCKTAKE', ?, ?, ?)
+            """, (barcode, diff, f"Stocktake #{session_id}", "Applied from stocktake"))
         conn.execute("""
-            INSERT INTO stock_on_hand (barcode, quantity)
-            VALUES (?, ?)
-            ON CONFLICT(barcode) DO UPDATE SET
-                quantity = excluded.quantity,
-                last_updated = CURRENT_TIMESTAMP
-        """, (barcode, counted))
-        # Log adjustment movement
-        conn.execute("""
-            INSERT INTO stock_movements
-                (barcode, movement_type, quantity, reference, notes)
-            VALUES (?, 'STOCKTAKE', ?, ?, ?)
-        """, (barcode, diff, f"Stocktake #{session_id}", "Applied from stocktake"))
-    # Close session
-    conn.execute("""
-        UPDATE stocktake_sessions
-        SET status='CLOSED', closed_at=CURRENT_TIMESTAMP
-        WHERE id=?
-    """, (session_id,))
-    conn.commit()
-    conn.close()
+            UPDATE stocktake_sessions
+            SET status='CLOSED', closed_at=CURRENT_TIMESTAMP
+            WHERE id=?
+        """, (session_id,))
+        conn.commit()
+    finally:
+        conn.close()

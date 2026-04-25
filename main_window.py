@@ -6,8 +6,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from config.settings import APP_NAME, APP_VERSION, DATABASE_PATH
+import logging
 import shutil
 import os
+import threading
 from datetime import datetime
 
 def _do_backup(dest_path):
@@ -255,7 +257,7 @@ class MainWindow(QMainWindow):
         backup_dir = self._auto_backup_dir()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         dest = os.path.join(backup_dir, f"supermarket_{ts}.db")
-        ok, msg = _do_backup(dest)
+        ok, _ = _do_backup(dest)
         if ok:
             try:
                 files = sorted(
@@ -266,6 +268,28 @@ class MainWindow(QMainWindow):
                     os.remove(old)
             except Exception:
                 pass
+            self._email_backup_async(dest)
+
+    def _email_backup_async(self, backup_path):
+        from database.connection import get_connection
+        conn = get_connection()
+        row = conn.execute("SELECT value FROM settings WHERE key='backup_email'").fetchone()
+        conn.close()
+        to_address = (row['value'] or '').strip() if row else ''
+        if not to_address:
+            return
+
+        from utils.email_graph import send_backup
+
+        def _send():
+            try:
+                send_backup(backup_path, to_address)
+                logging.info(f"Backup emailed to {to_address}")
+            except Exception as e:
+                logging.error(f"Backup email failed: {e}", exc_info=True)
+
+        # daemon=False so the process waits for the send to complete before exiting
+        threading.Thread(target=_send, daemon=False).start()
 
     def _manual_backup(self):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")

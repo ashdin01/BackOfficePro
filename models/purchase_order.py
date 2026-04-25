@@ -1,9 +1,13 @@
+import logging
 from database.connection import get_connection
-from config.constants import PO_STATUS_DRAFT, PO_STATUS_CANCELLED
+from config.constants import PO_STATUS_CANCELLED
 from datetime import datetime, timedelta
 
 
 def _next_po_number(conn):
+    # The counter UPDATE and the PO INSERT share the same connection and are
+    # committed together in create().  If the INSERT fails the whole transaction
+    # rolls back, so the counter is never actually advanced — no gap occurs.
     row    = conn.execute("SELECT value FROM settings WHERE key = 'po_next_number'").fetchone()
     prefix = conn.execute("SELECT value FROM settings WHERE key = 'po_prefix'").fetchone()
     number = int(row['value'])
@@ -15,75 +19,79 @@ def _next_po_number(conn):
 def get_all(status=None, archived=False):
     """
     archived=False → active POs (DRAFT, SENT, PARTIAL)
-    archived=True  → archived POs (RECEIVED, CANCELLED that are kept)
-    status=x       → filter by specific status (admin/filter use)
+    archived=True  → archived POs (RECEIVED, CANCELLED, REVERSED)
+    status=x       → filter by specific status
     """
     conn = get_connection()
-    if status:
-        query = """
-            SELECT po.*, s.name as supplier_name
-            FROM purchase_orders po
-            JOIN suppliers s ON po.supplier_id = s.id
-            WHERE po.status = ?
-            ORDER BY po.created_at DESC
-        """
-        rows = conn.execute(query, (status,)).fetchall()
-    elif archived:
-        query = """
-            SELECT po.*, s.name as supplier_name
-            FROM purchase_orders po
-            JOIN suppliers s ON po.supplier_id = s.id
-            WHERE po.status IN ('RECEIVED', 'CANCELLED', 'REVERSED')
-            ORDER BY po.created_at DESC
-        """
-        rows = conn.execute(query).fetchall()
-    else:
-        # Main screen — active only
-        query = """
-            SELECT po.*, s.name as supplier_name
-            FROM purchase_orders po
-            JOIN suppliers s ON po.supplier_id = s.id
-            WHERE po.status IN ('DRAFT', 'SENT', 'PARTIAL')
-            ORDER BY po.created_at DESC
-        """
-        rows = conn.execute(query).fetchall()
-    conn.close()
-    return rows
+    try:
+        if status:
+            query = """
+                SELECT po.*, s.name as supplier_name
+                FROM purchase_orders po
+                JOIN suppliers s ON po.supplier_id = s.id
+                WHERE po.status = ?
+                ORDER BY po.created_at DESC
+            """
+            return conn.execute(query, (status,)).fetchall()
+        elif archived:
+            query = """
+                SELECT po.*, s.name as supplier_name
+                FROM purchase_orders po
+                JOIN suppliers s ON po.supplier_id = s.id
+                WHERE po.status IN ('RECEIVED', 'CANCELLED', 'REVERSED')
+                ORDER BY po.created_at DESC
+            """
+            return conn.execute(query).fetchall()
+        else:
+            query = """
+                SELECT po.*, s.name as supplier_name
+                FROM purchase_orders po
+                JOIN suppliers s ON po.supplier_id = s.id
+                WHERE po.status IN ('DRAFT', 'SENT', 'PARTIAL')
+                ORDER BY po.created_at DESC
+            """
+            return conn.execute(query).fetchall()
+    finally:
+        conn.close()
 
 
 def get_by_id(po_id):
     conn = get_connection()
-    row = conn.execute("""
-        SELECT po.*, s.name as supplier_name
-        FROM purchase_orders po
-        JOIN suppliers s ON po.supplier_id = s.id
-        WHERE po.id = ?
-    """, (po_id,)).fetchone()
-    conn.close()
-    return row
+    try:
+        return conn.execute("""
+            SELECT po.*, s.name as supplier_name
+            FROM purchase_orders po
+            JOIN suppliers s ON po.supplier_id = s.id
+            WHERE po.id = ?
+        """, (po_id,)).fetchone()
+    finally:
+        conn.close()
 
 
 def create(supplier_id, delivery_date=None, notes='', created_by=''):
     conn = get_connection()
-    po_number = _next_po_number(conn)
-    conn.execute("""
-        INSERT INTO purchase_orders (po_number, supplier_id, delivery_date, notes, created_by)
-        VALUES (?, ?, ?, ?, ?)
-    """, (po_number, supplier_id, delivery_date, notes, created_by))
-    conn.commit()
-    po_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    conn.close()
-    return po_id
+    try:
+        po_number = _next_po_number(conn)
+        conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, delivery_date, notes, created_by)
+            VALUES (?, ?, ?, ?, ?)
+        """, (po_number, supplier_id, delivery_date, notes, created_by))
+        conn.commit()
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    finally:
+        conn.close()
 
 
 def update_status(po_id, status):
     conn = get_connection()
-    conn.execute(
-        "UPDATE purchase_orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (status, po_id)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            "UPDATE purchase_orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (status, po_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def cancel(po_id):
@@ -91,144 +99,78 @@ def cancel(po_id):
 
 
 def reverse(po_id, reversed_by=''):
-    from models.stock_on_hand import adjust
-    from config.constants import MOVE_REVERSAL
-    conn = get_connection()
-    po = conn.execute(
-        "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
-        "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
-        (po_id,)
-    ).fetchone()
-    if not po:
-        conn.close()
-        raise ValueError(f'PO {po_id} not found')
-    if po['status'] not in ('RECEIVED', 'PARTIAL'):
-        conn.close()
-        raise ValueError('Only RECEIVED or PARTIAL POs can be reversed')
-    lines = conn.execute("SELECT * FROM po_lines WHERE po_id = ?", (po_id,)).fetchall()
-    conn.close()
-    for line in lines:
-        received = int(line['received_qty'] or 0)
-        if received <= 0:
-            continue
-        from models.product import get_by_barcode
-        product = get_by_barcode(line['barcode'])
-        pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
-        units_received = received * pack_qty
-        adjust(
-            barcode=line['barcode'],
-            quantity=-units_received,
-            movement_type=MOVE_REVERSAL,
-            reference=po['po_number'],
-            notes=f"Reversal of {po['po_number']} — {line['description']}",
-            created_by=reversed_by,
-        )
-    update_status(po_id, 'REVERSED')
-
-def reverse(po_id, reversed_by=''):
     """
-    Reverse a RECEIVED PO:
+    Reverse a RECEIVED or PARTIAL PO:
     - Reduces SOH for each received line
     - Records REVERSAL stock movements
     - Sets PO status to REVERSED
     """
     from models.stock_on_hand import adjust
+    from models.product import get_by_barcode
     from config.constants import MOVE_REVERSAL
+
     conn = get_connection()
-    po = conn.execute(
-        "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
-        "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
-        (po_id,)
-    ).fetchone()
-    if not po:
+    try:
+        po = conn.execute(
+            "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
+            "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
+            (po_id,)
+        ).fetchone()
+        if not po:
+            raise ValueError(f'PO {po_id} not found')
+        if po['status'] not in ('RECEIVED', 'PARTIAL'):
+            raise ValueError('Only RECEIVED or PARTIAL POs can be reversed')
+        lines = conn.execute(
+            "SELECT * FROM po_lines WHERE po_id = ?", (po_id,)
+        ).fetchall()
+    finally:
         conn.close()
-        raise ValueError(f'PO {po_id} not found')
-    if po['status'] not in ('RECEIVED', 'PARTIAL'):
-        conn.close()
-        raise ValueError(f'Only RECEIVED or PARTIAL POs can be reversed')
-    lines = conn.execute(
-        "SELECT * FROM po_lines WHERE po_id = ?", (po_id,)
-    ).fetchall()
-    conn.close()
+
     for line in lines:
         received = int(line['received_qty'] or 0)
         if received <= 0:
             continue
-        # Get pack_qty for this product
-        from models.product import get_by_barcode
-        product = get_by_barcode(line['barcode'])
+        product  = get_by_barcode(line['barcode'])
         pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
-        units_received = received * pack_qty
         adjust(
             barcode=line['barcode'],
-            quantity=-units_received,
+            quantity=-(received * pack_qty),
             movement_type=MOVE_REVERSAL,
             reference=po['po_number'],
             notes=f"Reversal of {po['po_number']} — {line['description']}",
             created_by=reversed_by,
         )
+
     update_status(po_id, 'REVERSED')
 
-def reverse(po_id, reversed_by=''):
-    from models.stock_on_hand import adjust
-    from config.constants import MOVE_REVERSAL
-    conn = get_connection()
-    po = conn.execute(
-        "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
-        "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
-        (po_id,)
-    ).fetchone()
-    if not po:
-        conn.close()
-        raise ValueError(f'PO {po_id} not found')
-    if po['status'] not in ('RECEIVED', 'PARTIAL'):
-        conn.close()
-        raise ValueError('Only RECEIVED or PARTIAL POs can be reversed')
-    lines = conn.execute("SELECT * FROM po_lines WHERE po_id = ?", (po_id,)).fetchall()
-    conn.close()
-    for line in lines:
-        received = int(line['received_qty'] or 0)
-        if received <= 0:
-            continue
-        from models.product import get_by_barcode
-        product = get_by_barcode(line['barcode'])
-        pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
-        units_received = received * pack_qty
-        adjust(
-            barcode=line['barcode'],
-            quantity=-units_received,
-            movement_type=MOVE_REVERSAL,
-            reference=po['po_number'],
-            notes=f"Reversal of {po['po_number']} — {line['description']}",
-            created_by=reversed_by,
-        )
-    update_status(po_id, 'REVERSED')
 
 def cleanup_old_pos():
     """
-    Run on startup:
-    - Permanently delete CANCELLED POs older than 24 hours (+ their lines)
+    Delete CANCELLED POs older than 24 hours (and their lines).
     Returns count of deleted POs.
     """
     cutoff = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_connection()
     try:
-        # Find old cancelled POs
-        old = conn.execute("""
-            SELECT id FROM purchase_orders
+        conn.execute("""
+            DELETE FROM po_lines
+            WHERE po_id IN (
+                SELECT id FROM purchase_orders
+                WHERE status = 'CANCELLED'
+                AND COALESCE(updated_at, created_at) < ?
+            )
+        """, (cutoff,))
+        cursor = conn.execute("""
+            DELETE FROM purchase_orders
             WHERE status = 'CANCELLED'
             AND COALESCE(updated_at, created_at) < ?
-        """, (cutoff,)).fetchall()
-
-        count = len(old)
-        for row in old:
-            conn.execute("DELETE FROM po_lines WHERE po_id = ?", (row[0],))
-            conn.execute("DELETE FROM purchase_orders WHERE id = ?", (row[0],))
-
+        """, (cutoff,))
+        count = cursor.rowcount
         conn.commit()
         return count
     except Exception as e:
-        print(f"PO cleanup error: {e}")
+        conn.rollback()
+        logging.error(f"PO cleanup error: {e}", exc_info=True)
         return 0
     finally:
         conn.close()

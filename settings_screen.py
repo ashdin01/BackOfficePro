@@ -36,6 +36,10 @@ GRAPH_FIELDS = [
     ("graph_from_address",   "From Address",    "Microsoft 365 email address to send from"),
 ]
 
+BACKUP_FIELDS = [
+    ("backup_email", "Email backup to", "e.g. owner@yourbusiness.com.au — leave blank to disable"),
+]
+
 
 def _load_settings():
     conn = get_connection()
@@ -153,6 +157,29 @@ class SettingsScreen(QWidget):
         graph_form.addRow("", note)
 
         scroll_layout.addWidget(graph_group)
+
+        # ── Backup ────────────────────────────────────────────────────
+        backup_group = QGroupBox("Backup")
+        backup_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        backup_form = QFormLayout(backup_group)
+        backup_form.setContentsMargins(16, 16, 16, 16)
+        backup_form.setSpacing(10)
+        backup_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        for key, label, placeholder in BACKUP_FIELDS:
+            edit = QLineEdit()
+            edit.setPlaceholderText(placeholder)
+            edit.setMinimumWidth(360)
+            backup_form.addRow(label, edit)
+            self._fields[key] = edit
+        backup_note = QLabel(
+            "💡 Uses the Microsoft 365 email configuration above.\n"
+            "    The database backup is attached and sent automatically on app close."
+        )
+        backup_note.setStyleSheet("color: grey; font-size: 8pt;")
+        backup_note.setWordWrap(True)
+        backup_form.addRow("", backup_note)
+        scroll_layout.addWidget(backup_group)
+
         scroll_layout.addStretch()
 
         # ── Buttons ────────────────────────────────────────────────────
@@ -196,9 +223,12 @@ class SettingsScreen(QWidget):
         self.close()
 
     def _test_graph(self):
-        # Save current field values first so the test uses what's on screen
+        # Persist only the graph credential fields so the test uses current
+        # on-screen values, without saving unrelated settings prematurely.
+        graph_keys = {key for key, _, _ in GRAPH_FIELDS}
         for key, edit in self._fields.items():
-            _save_setting(key, edit.text().strip())
+            if key in graph_keys:
+                _save_setting(key, edit.text().strip())
         try:
             from utils.email_graph import test_graph_connection
             success, message = test_graph_connection()

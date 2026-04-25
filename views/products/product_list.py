@@ -63,7 +63,7 @@ class ProductList(KeyboardMixin, QWidget):
         self.search_input.setPlaceholderText("Search by barcode, PLU, description, brand, supplier or department…")
         self._search_timer = QTimer()
         self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(400)
+        self._search_timer.setInterval(500)
         self._search_timer.timeout.connect(lambda: self._search(self.search_input.text()))
         self.search_input.textChanged.connect(lambda: self._search_timer.start())
         self.search_input.returnPressed.connect(self._focus_table)

@@ -7,11 +7,13 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
+import controllers.product_controller as product_controller
 import models.product as product_model
 import models.department as dept_model
 import models.supplier as supplier_model
 import models.barcode_alias as alias_model
 import models.group as group_model
+import models.product_suppliers as ps_model
 
 
 class ProductEdit(KeyboardMixin, QWidget):
@@ -42,6 +44,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._group_id      = p['group_id'] if 'group_id' in p.keys() else None
         self._dept_id       = p['department_id']
         self._supplier_id   = p['supplier_id']
+        self._product_suppliers = self._load_product_suppliers()
         self._unit          = p['unit'] or 'EA'
         self._sell_price    = p['sell_price']
         self._cost_price    = p['cost_price']
@@ -84,10 +87,10 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_brand = ro_row("Brand", self._brand or "—", self._edit_brand)
         form.addRow(r)
 
-        r, self.lbl_plu = ro_row("SKU", self._plu or "—", self._edit_plu)
+        r, self.lbl_plu = ro_row("PLU", self._plu or "—", self._edit_plu)
         form.addRow(r)
 
-        r, self.lbl_supplier = ro_row("Supplier", self._supplier_name(), self._edit_supplier)
+        r, self.lbl_supplier = ro_row("Supplier (default)", self._supplier_name(), self._edit_supplier)
         form.addRow(r)
 
         # Supplier SKU + pack size on one row
@@ -167,7 +170,6 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         # ── Stock info (read-only, no edit button) ────────────────
         from models.stock_on_hand import get_by_barcode as _get_soh
-        from database.connection import get_connection as _get_conn
         soh = _get_soh(self.barcode)
         soh_qty = int(soh["quantity"]) if soh else 0
         soh_color = "#4CAF50" if soh_qty > 0 else "#FF9800" if soh_qty == 0 else "#f44336"
@@ -175,20 +177,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.lbl_soh.setTextFormat(Qt.TextFormat.RichText)
         form.addRow("Stock on Hand", self.lbl_soh)
 
-        # Stock on order — sum of outstanding units across open POs
-        _conn = _get_conn()
-        on_order_row = _conn.execute(
-            "SELECT COALESCE(SUM((pl.ordered_qty - pl.received_qty) * "
-            "COALESCE(p.pack_qty, 1)), 0) "
-            "FROM po_lines pl "
-            "JOIN purchase_orders po ON po.id = pl.po_id "
-            "JOIN products p ON p.barcode = pl.barcode "
-            "WHERE pl.barcode=? AND po.status IN ('DRAFT','SENT','PARTIAL') "
-            "AND (pl.ordered_qty - pl.received_qty) > 0",
-            (self.barcode,)
-        ).fetchone()
-        _conn.close()
-        on_order = int(on_order_row[0]) if on_order_row else 0
+        on_order = product_controller.get_stock_on_order(self.barcode)
         on_order_color = "#2196F3" if on_order > 0 else "#8b949e"
         self.lbl_on_order = QLabel(f'<span style="color:{on_order_color};font-weight:bold;">{on_order}</span>')
         self.lbl_on_order.setTextFormat(Qt.TextFormat.RichText)
@@ -254,49 +243,14 @@ class ProductEdit(KeyboardMixin, QWidget):
         new_bc = _text_popup("Edit Barcode", "Barcode", self.product['barcode'], self)
         if new_bc is None or new_bc == self.product['barcode']:
             return
-        # Check barcode doesn't already exist
-        from database.connection import get_connection
-        conn = get_connection()
-        existing = conn.execute(
-            "SELECT description FROM products WHERE barcode=?", (new_bc,)
-        ).fetchone()
-        conn.close()
-        if existing:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Barcode Exists",
-                f"Barcode {new_bc!r} already belongs to:\n{existing['description']}")
-            return
-        # Update barcode in database
         try:
-            conn = get_connection()
-            conn.execute("PRAGMA foreign_keys = OFF")
-            conn.execute("UPDATE stock_movements SET barcode=? WHERE barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("UPDATE stock_on_hand SET barcode=? WHERE barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("UPDATE po_lines SET barcode=? WHERE barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("UPDATE barcode_aliases SET master_barcode=? WHERE master_barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("UPDATE barcode_aliases SET alias_barcode=? WHERE alias_barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("UPDATE plu_barcode_map SET barcode=? WHERE barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("UPDATE stocktake_counts SET barcode=? WHERE barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("UPDATE products SET barcode=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
-                        (new_bc, self.barcode))
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.commit()
-            conn.close()
+            product_controller.rename_barcode(self.barcode, new_bc)
             self.barcode = new_bc
             self.lbl_barcode.setText(new_bc)
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(self, "Updated", "Barcode updated to " + repr(new_bc))
+        except ValueError as e:
+            QMessageBox.warning(self, "Barcode Exists", str(e))
         except Exception as e:
-            try: conn.close()
-            except: pass
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", str(e))
 
     def _edit_description(self):
@@ -350,14 +304,140 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._dept_id = ids[names.index(val)]
             self.lbl_dept.setText(val)
 
+    def _load_product_suppliers(self):
+        rows = ps_model.get_by_barcode(self.barcode)
+        if rows:
+            return [
+                {'supplier_id': r['supplier_id'],
+                 'supplier_name': r['supplier_name'],
+                 'is_default': bool(r['is_default'])}
+                for r in rows
+            ]
+        # Fallback for products not yet migrated to junction table
+        if self._supplier_id:
+            name = next((s['name'] for s in self._suppliers if s['id'] == self._supplier_id), "-- None --")
+            return [{'supplier_id': self._supplier_id, 'supplier_name': name, 'is_default': True}]
+        return []
+
     def _edit_supplier(self):
-        names = ["-- None --"] + [s['name'] for s in self._suppliers]
-        ids   = [None]         + [s['id']   for s in self._suppliers]
-        current_idx = ids.index(self._supplier_id) if self._supplier_id in ids else 0
-        val = _choice_popup("Edit Supplier", "Supplier", names, names[current_idx], self)
-        if val is not None:
-            self._supplier_id = ids[names.index(val)]
-            self.lbl_supplier.setText(val)
+        from PyQt6.QtWidgets import (
+            QDialog, QTableWidget, QTableWidgetItem, QHeaderView,
+            QComboBox, QHBoxLayout, QVBoxLayout
+        )
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Manage Suppliers")
+        dlg.setMinimumWidth(520)
+        dlg.setMinimumHeight(300)
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        note = QLabel(
+            "The Default supplier determines which purchase orders this product appears in.\n"
+            "Additional suppliers can be used to manually add lines to their POs."
+        )
+        note.setStyleSheet("color: #8b949e; font-size: 11px;")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self._sup_table = QTableWidget()
+        self._sup_table.setColumnCount(3)
+        self._sup_table.setHorizontalHeaderLabels(["Supplier", "Default", ""])
+        self._sup_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._sup_table.setColumnWidth(1, 110)
+        self._sup_table.setColumnWidth(2, 60)
+        self._sup_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._sup_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._sup_table.verticalHeader().setVisible(False)
+        self._sup_table.setAlternatingRowColors(True)
+        layout.addWidget(self._sup_table)
+
+        add_row = QHBoxLayout()
+        self._sup_combo = QComboBox()
+        self._sup_combo.setMinimumWidth(260)
+        btn_add = QPushButton("+ Add Supplier")
+        btn_add.setFixedHeight(30)
+        btn_add.clicked.connect(self._add_supplier)
+        add_row.addWidget(QLabel("Add:"))
+        add_row.addWidget(self._sup_combo)
+        add_row.addWidget(btn_add)
+        add_row.addStretch()
+        layout.addLayout(add_row)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_done = QPushButton("Done")
+        btn_done.setFixedHeight(32)
+        btn_done.setStyleSheet(
+            "QPushButton { background: #1565c0; color: white; border: none; "
+            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
+            "QPushButton:hover { background: #1976d2; }"
+        )
+        btn_done.clicked.connect(dlg.accept)
+        btn_row.addWidget(btn_done)
+        layout.addLayout(btn_row)
+
+        self._refresh_sup_table()
+        self._refresh_sup_combo()
+        dlg.exec()
+        self.lbl_supplier.setText(self._supplier_name())
+
+    def _refresh_sup_table(self):
+        self._sup_table.setUpdatesEnabled(False)
+        self._sup_table.setRowCount(len(self._product_suppliers))
+        for r, entry in enumerate(self._product_suppliers):
+            self._sup_table.setItem(r, 0, QTableWidgetItem(entry['supplier_name']))
+            if entry['is_default']:
+                btn_def = QPushButton("★ Default")
+                btn_def.setEnabled(False)
+                btn_def.setFixedHeight(26)
+                btn_def.setStyleSheet(
+                    "QPushButton { background: #1565c0; color: white; border: none; "
+                    "border-radius: 3px; font-weight: bold; }"
+                )
+            else:
+                btn_def = QPushButton("Set Default")
+                btn_def.setFixedHeight(26)
+                btn_def.clicked.connect(lambda _, i=r: self._set_default_supplier(i))
+            self._sup_table.setCellWidget(r, 1, btn_def)
+            btn_rem = QPushButton("✕")
+            btn_rem.setFixedHeight(26)
+            btn_rem.setStyleSheet("color: #f44336; font-weight: bold;")
+            btn_rem.clicked.connect(lambda _, i=r: self._remove_supplier(i))
+            self._sup_table.setCellWidget(r, 2, btn_rem)
+        self._sup_table.setUpdatesEnabled(True)
+
+    def _refresh_sup_combo(self):
+        existing_ids = {e['supplier_id'] for e in self._product_suppliers}
+        self._sup_combo.clear()
+        for s in self._suppliers:
+            if s['id'] not in existing_ids:
+                self._sup_combo.addItem(s['name'], s['id'])
+
+    def _add_supplier(self):
+        sup_id = self._sup_combo.currentData()
+        if sup_id is None:
+            return
+        sup_name = self._sup_combo.currentText()
+        is_default = len(self._product_suppliers) == 0
+        self._product_suppliers.append(
+            {'supplier_id': sup_id, 'supplier_name': sup_name, 'is_default': is_default}
+        )
+        self._refresh_sup_table()
+        self._refresh_sup_combo()
+
+    def _remove_supplier(self, idx):
+        was_default = self._product_suppliers[idx]['is_default']
+        del self._product_suppliers[idx]
+        if was_default and self._product_suppliers:
+            self._product_suppliers[0]['is_default'] = True
+        self._refresh_sup_table()
+        self._refresh_sup_combo()
+
+    def _set_default_supplier(self, idx):
+        for i, entry in enumerate(self._product_suppliers):
+            entry['is_default'] = (i == idx)
+        self._refresh_sup_table()
 
     def _edit_unit(self):
         units = ['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML']
@@ -438,9 +518,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         return "Unknown"
 
     def _supplier_name(self):
-        for s in self._suppliers:
-            if s['id'] == self._supplier_id:
-                return s['name']
+        for entry in self._product_suppliers:
+            if entry['is_default']:
+                return entry['supplier_name']
         return "-- None --"
 
     def _tax_label(self):
@@ -603,11 +683,10 @@ class ProductEdit(KeyboardMixin, QWidget):
         dlg.exec()
 
     def _save(self):
-        if not self._description.strip():
-            QMessageBox.warning(self, "Validation", "Description is required.")
-            return
+        default_sup = next((s for s in self._product_suppliers if s['is_default']), None)
+        self._supplier_id = default_sup['supplier_id'] if default_sup else None
         try:
-            product_model.update(
+            product_controller.save_product(
                 barcode=self.barcode,
                 description=self._description,
                 brand=self._brand,
@@ -628,10 +707,13 @@ class ProductEdit(KeyboardMixin, QWidget):
                 expected=int(self._in_stocktake),
                 active=int(self._active),
                 auto_reorder=int(self._auto_reorder),
+                product_suppliers=self._product_suppliers,
             )
             if self.on_save:
                 self.on_save()
             self.close()
+        except ValueError as e:
+            QMessageBox.warning(self, "Validation", str(e))
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 

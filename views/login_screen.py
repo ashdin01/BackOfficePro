@@ -4,7 +4,16 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
+from datetime import datetime, timedelta
 import models.user as user_model
+
+_MAX_ATTEMPTS = 5
+_LOCKOUT_SECONDS = 30
+
+# Module-level: survives login screen close/reopen within the same app session,
+# preventing bypass by dismissing and reopening the widget.
+_failed_attempts: dict = {}  # username -> int
+_lockout_until: dict = {}    # username -> datetime
 
 
 class _SetupPinDialog(QDialog):
@@ -90,8 +99,7 @@ class LoginScreen(QWidget):
         self._on_login = on_login
         self._users = []
         self._selected_user = None
-        self._attempts = 0
-        self._locked_until = None
+        self._countdown_username = None
         self.setWindowTitle("BackOfficePro — Login")
         self.setMinimumSize(500, 400)
         self.setStyleSheet("""
@@ -99,6 +107,9 @@ class LoginScreen(QWidget):
             QLabel   { background: transparent; }
         """)
         self._build_ui()
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(1000)
+        self._countdown_timer.timeout.connect(self._tick_countdown)
         self._load_users()
 
     def _build_ui(self):
@@ -184,7 +195,6 @@ class LoginScreen(QWidget):
         root.addStretch()
 
     def _load_users(self):
-        # Clear existing buttons
         for i in reversed(range(self._user_btn_area.count())):
             w = self._user_btn_area.itemAt(i).widget()
             if w:
@@ -212,26 +222,44 @@ class LoginScreen(QWidget):
             btn.clicked.connect(lambda _, u=user, b=btn: self._select_user(u, b))
             self._user_btn_area.addWidget(btn)
 
-        # Auto-select if only one user
         if len(self._users) == 1:
             first_btn = self._user_btn_area.itemAt(0).widget()
             self._select_user(self._users[0], first_btn)
 
     def _select_user(self, user, btn):
         self._selected_user = user
-        # Uncheck all other buttons
         for i in range(self._user_btn_area.count()):
             w = self._user_btn_area.itemAt(i).widget()
             if w and w != btn:
                 w.setChecked(False)
         btn.setChecked(True)
-        self.pin_input.setFocus()
         self.pin_input.clear()
-        self.status_lbl.clear()
+
+        # Stop any countdown running for the previous user
+        self._countdown_timer.stop()
+        self._countdown_username = None
+
+        username = user['username']
+        until = _lockout_until.get(username)
+        if until and datetime.now() < until:
+            self._start_countdown(username)
+        else:
+            self.status_lbl.clear()
+            self.login_btn.setEnabled(True)
+            self.pin_input.setEnabled(True)
+            self.pin_input.setFocus()
 
     def _attempt_login(self):
         if not self._selected_user:
             self.status_lbl.setText("Please select your name first.")
+            return
+
+        username = self._selected_user['username']
+
+        until = _lockout_until.get(username)
+        if until and datetime.now() < until:
+            # Guard against Enter key or button click while locked
+            self._start_countdown(username)
             return
 
         pin = self.pin_input.text().strip()
@@ -239,24 +267,48 @@ class LoginScreen(QWidget):
             self.status_lbl.setText("Please enter your PIN.")
             return
 
-        username = self._selected_user['username']
         if user_model.verify_pin(username, pin):
-            self._attempts = 0
+            _failed_attempts.pop(username, None)
+            _lockout_until.pop(username, None)
             self._on_login(self._selected_user)
         else:
-            self._attempts += 1
+            attempts = _failed_attempts.get(username, 0) + 1
+            _failed_attempts[username] = attempts
             self.pin_input.clear()
-            if self._attempts >= 5:
-                self.status_lbl.setText("Too many attempts. Wait 30 seconds.")
-                self.login_btn.setEnabled(False)
-                self.pin_input.setEnabled(False)
-                QTimer.singleShot(30000, self._unlock)
+
+            if attempts >= _MAX_ATTEMPTS:
+                _failed_attempts[username] = 0
+                _lockout_until[username] = datetime.now() + timedelta(seconds=_LOCKOUT_SECONDS)
+                self._start_countdown(username)
             else:
-                remaining = 5 - self._attempts
+                remaining = _MAX_ATTEMPTS - attempts
                 self.status_lbl.setText(f"Incorrect PIN. {remaining} attempt(s) remaining.")
 
+    def _start_countdown(self, username):
+        self._countdown_username = username
+        self.login_btn.setEnabled(False)
+        self.pin_input.setEnabled(False)
+        if not self._countdown_timer.isActive():
+            self._countdown_timer.start()
+        self._tick_countdown()
+
+    def _tick_countdown(self):
+        username = self._countdown_username
+        if not username:
+            return
+        until = _lockout_until.get(username)
+        if not until:
+            self._unlock()
+            return
+        remaining = max(0, int((until - datetime.now()).total_seconds()))
+        if remaining <= 0:
+            self._unlock()
+        else:
+            self.status_lbl.setText(f"Too many attempts. Try again in {remaining}s.")
+
     def _unlock(self):
-        self._attempts = 0
+        self._countdown_timer.stop()
+        self._countdown_username = None
         self.login_btn.setEnabled(True)
         self.pin_input.setEnabled(True)
         self.pin_input.setFocus()

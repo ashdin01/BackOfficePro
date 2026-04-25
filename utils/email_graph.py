@@ -9,24 +9,8 @@ Supports Purchase Orders now, and Reports in future.
 
 import base64
 import logging
+import mimetypes
 import os
-
-# ── Dependency bootstrap (Windows .exe support) ───────────────────────────────
-def _ensure_dependencies():
-    import subprocess
-    import sys
-    for package in ["msal", "requests"]:
-        try:
-            __import__(package)
-        except ImportError:
-            logging.info(f"Installing missing dependency: {package}")
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", package],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-
-_ensure_dependencies()
 
 import msal
 import requests
@@ -124,11 +108,12 @@ def send_email(
             file_data = f.read()
         encoded = base64.b64encode(file_data).decode("utf-8")
         filename = os.path.basename(attachment_path)
+        content_type, _ = mimetypes.guess_type(attachment_path)
         message["attachments"] = [
             {
                 "@odata.type": "#microsoft.graph.fileAttachment",
                 "name": filename,
-                "contentType": "application/pdf",
+                "contentType": content_type or "application/octet-stream",
                 "contentBytes": encoded,
             }
         ]
@@ -202,6 +187,46 @@ def send_purchase_order(po_id: int, to_address: str, pdf_path: str) -> bool:
         subject=subject,
         body=body,
         attachment_path=pdf_path,
+    )
+
+
+# ── Backup helper ────────────────────────────────────────────────────────────
+def send_backup(backup_path: str, to_address: str) -> bool:
+    """
+    Email a database backup file to to_address.
+
+    Args:
+        backup_path: Full path to the .db backup file.
+        to_address:  Recipient email address.
+
+    Returns:
+        True on success, raises RuntimeError on failure.
+    """
+    from database.connection import get_connection
+    from datetime import datetime as _dt
+    conn = get_connection()
+    store = conn.execute("SELECT value FROM settings WHERE key='store_name'").fetchone()
+    conn.close()
+
+    store_name = store["value"] if store else "BackOfficePro"
+    ts = _dt.now().strftime("%d/%m/%Y %H:%M")
+    filename = os.path.basename(backup_path)
+    size_kb = os.path.getsize(backup_path) / 1024
+
+    subject = f"BackOfficePro Backup — {store_name} — {ts}"
+    body = (
+        f"Automated database backup from {store_name}.\n\n"
+        f"File:  {filename}\n"
+        f"Size:  {size_kb:.1f} KB\n"
+        f"Time:  {ts}\n\n"
+        f"This backup was sent automatically on application close."
+    )
+
+    return send_email(
+        to_address=to_address,
+        subject=subject,
+        body=body,
+        attachment_path=backup_path,
     )
 
 

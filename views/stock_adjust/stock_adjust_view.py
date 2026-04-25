@@ -427,7 +427,7 @@ class StockAdjustView(QWidget):
             self.adj_type.setFocus()
 
     def _on_search_changed(self):
-        self._timer.start(250)
+        self._timer.start(500)
 
     def _do_search(self):
         query = self.search.text().strip()
@@ -435,11 +435,26 @@ class StockAdjustView(QWidget):
         if len(query) < 2:
             return
         products = search_products(query)
-        for p in products:
-            soh = soh_model.get_by_barcode(p["barcode"])
-            on_hand = int(soh["quantity"]) if soh else 0
-            r = self.results_table.rowCount()
-            self.results_table.insertRow(r)
+        if not products:
+            return
+
+        # Single query for all SOH instead of one connection per product
+        barcodes = [p["barcode"] for p in products]
+        conn = get_connection()
+        try:
+            placeholders = ",".join("?" * len(barcodes))
+            soh_rows = conn.execute(
+                f"SELECT barcode, quantity FROM stock_on_hand WHERE barcode IN ({placeholders})",
+                barcodes
+            ).fetchall()
+        finally:
+            conn.close()
+        soh_map = {r["barcode"]: r["quantity"] for r in soh_rows}
+
+        self.results_table.setUpdatesEnabled(False)
+        self.results_table.setRowCount(len(products))
+        for r, p in enumerate(products):
+            on_hand = int(soh_map.get(p["barcode"], 0))
             self.results_table.setItem(r, 0, _item(p["barcode"]))
             self.results_table.setItem(r, 1, _item(p["description"]))
             self.results_table.setItem(r, 2, _item(p["supplier_sku"] or ""))
@@ -451,6 +466,7 @@ class StockAdjustView(QWidget):
                 lambda _, bc=p["barcode"], nm=p["description"]: self._select(bc, nm)
             )
             self.results_table.setCellWidget(r, 5, sel_btn)
+        self.results_table.setUpdatesEnabled(True)
 
     def _select(self, barcode, description):
         self._selected_barcode = barcode
@@ -520,19 +536,20 @@ class StockAdjustView(QWidget):
 
     def _load_history(self):
         conn = get_connection()
-        rows = conn.execute("""
-            SELECT m.created_at, m.barcode, p.description,
-                   m.movement_type, m.quantity, m.reference, m.notes
-            FROM stock_movements m
-            LEFT JOIN products p ON m.barcode = p.barcode
-            WHERE m.movement_type NOT IN ('SALE', 'RECEIPT')
-            ORDER BY m.created_at DESC LIMIT 100
-        """).fetchall()
-        conn.close()
-        self.history_table.setRowCount(0)
-        for row in rows:
-            r = self.history_table.rowCount()
-            self.history_table.insertRow(r)
+        try:
+            rows = conn.execute("""
+                SELECT m.created_at, m.barcode, p.description,
+                       m.movement_type, m.quantity, m.reference, m.notes
+                FROM stock_movements m
+                LEFT JOIN products p ON m.barcode = p.barcode
+                WHERE m.movement_type NOT IN ('SALE', 'RECEIPT')
+                ORDER BY m.created_at DESC LIMIT 100
+            """).fetchall()
+        finally:
+            conn.close()
+        self.history_table.setUpdatesEnabled(False)
+        self.history_table.setRowCount(len(rows))
+        for r, row in enumerate(rows):
             self.history_table.setItem(r, 0, _item((row[0] or "")[:16]))
             self.history_table.setItem(r, 1, _item(row[1] or ""))
             self.history_table.setItem(r, 2, _item(row[2] or ""))
@@ -543,3 +560,4 @@ class StockAdjustView(QWidget):
             self.history_table.setItem(r, 4, qi)
             self.history_table.setItem(r, 5, _item(row[5] or ""))
             self.history_table.setItem(r, 6, _item(row[6] or ""))
+        self.history_table.setUpdatesEnabled(True)

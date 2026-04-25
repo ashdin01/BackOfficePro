@@ -25,24 +25,29 @@ ROLE_ADMIN   = 'ADMIN'
 ROLE_MANAGER = 'MANAGER'
 ROLE_STAFF   = 'STAFF'
 
-# Stock movement types
-MOVE_RECEIPT    = 'RECEIPT'
-MOVE_SALE       = 'SALE'
-MOVE_ADJUSTMENT = 'ADJUSTMENT'
-MOVE_WASTAGE    = 'WASTAGE'
-MOVE_REVERSAL   = 'REVERSAL'
-MOVE_STOCKTAKE  = 'STOCKTAKE'
+# Stock movement types — user-selectable (shown in dropdowns)
+MOVE_RECEIPT        = 'RECEIPT'
+MOVE_ADJUSTMENT_IN  = 'ADJUSTMENT_IN'
+MOVE_RETURN         = 'RETURN'
+MOVE_SALE           = 'SALE'
+MOVE_WASTAGE        = 'WASTAGE'
+MOVE_ADJUSTMENT_OUT = 'ADJUSTMENT_OUT'
+MOVE_SHRINKAGE      = 'SHRINKAGE'
+
+# Stock movement types — system-generated (not shown in dropdowns)
+MOVE_REVERSAL  = 'REVERSAL'
+MOVE_STOCKTAKE = 'STOCKTAKE'
+
+# Dropdown list for stock adjustment screens — must stay in sync with MOVE_* constants above
+MOVE_TYPES = [
+    MOVE_RECEIPT,
+    MOVE_ADJUSTMENT_IN,
+    MOVE_RETURN,
+    MOVE_SALE,
+    MOVE_WASTAGE,
+    MOVE_ADJUSTMENT_OUT,
+    MOVE_SHRINKAGE,
+]
 
 # Units
 UNITS = ['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML']
-
-# List of movement types for stock adjustment dropdown
-MOVE_TYPES = [
-    'RECEIPT',
-    'ADJUSTMENT_IN',
-    'RETURN',
-    'SALE',
-    'WASTAGE',
-    'ADJUSTMENT_OUT',
-    'SHRINKAGE',
-]

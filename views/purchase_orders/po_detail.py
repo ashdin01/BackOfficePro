@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QDoubleSpinBox, QDialog, QFormLayout, QSpinBox,
     QFileDialog, QAbstractItemView, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 import models.purchase_order as po_model
 import models.po_lines as lines_model
@@ -73,7 +73,11 @@ class ItemLookupDialog(QDialog):
         search_row.addWidget(QLabel("Search:"))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filter by supplier, barcode or description...")
-        self.search_input.textChanged.connect(self._filter)
+        self._filter_timer = QTimer()
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(500)
+        self._filter_timer.timeout.connect(lambda: self._filter(self.search_input.text()))
+        self.search_input.textChanged.connect(lambda _: self._filter_timer.start())
         search_row.addWidget(self.search_input)
         layout.addLayout(search_row)
 

@@ -14,18 +14,6 @@ import models.product as product_model
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
 
 
-def _ensure_promo_column():
-    """Add is_promo column to po_lines if it doesn't exist yet. Safe to call every run."""
-    from database.connection import get_connection
-    conn = get_connection()
-    try:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(po_lines)").fetchall()]
-        if 'is_promo' not in cols:
-            conn.execute("ALTER TABLE po_lines ADD COLUMN is_promo INTEGER NOT NULL DEFAULT 0")
-            conn.commit()
-    finally:
-        conn.close()
-
 
 class _PriceChangeDialog(QDialog):
     """
@@ -230,7 +218,6 @@ class POReceive(QWidget):
         self.on_save = on_save
         self.setWindowTitle("Receive Stock")
         self.setMinimumSize(1340, 560)
-        _ensure_promo_column()
         self.charges_table = None
         self._build_ui()
         self._load()

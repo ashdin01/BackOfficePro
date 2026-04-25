@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QKeySequence
 from config.settings import APP_NAME, APP_VERSION, DATABASE_PATH
 import shutil
 import os
@@ -13,7 +13,9 @@ from datetime import datetime
 def _do_backup(dest_path):
     """Copy the live DB to dest_path. Returns (success, message)."""
     try:
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        dest_dir = os.path.dirname(dest_path)
+        if dest_dir:
+            os.makedirs(dest_dir, exist_ok=True)
         shutil.copy2(DATABASE_PATH, dest_path)
         size = os.path.getsize(dest_path)
         return True, f"Backup saved:\n{dest_path}\n({size/1024:.1f} KB)"
@@ -27,76 +29,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1400, 850)
         self._build_ui()
-        self._run_auto_plu_map()
-
-    def _run_auto_plu_map(self):
-        import logging
-        try:
-            from utils.auto_plu_map import auto_map_plu_barcodes
-            result = auto_map_plu_barcodes()
-            mapped   = result.get('mapped', [])
-            skipped  = result.get('skipped', [])
-            unmapped = result.get('unmapped', [])
-            if mapped:
-                try:
-                    self.screens[0]._refresh()
-                except Exception:
-                    pass
-            lines = []
-            if mapped:
-                lines.append(f'✅ {len(mapped)} PLU(s) auto-mapped to barcodes.')
-            if unmapped:
-                plu_list = ', '.join(str(p) for p in unmapped[:10])
-                if len(unmapped) > 10:
-                    plu_list += f' and {len(unmapped) - 10} more'
-                lines.append(f'⚠ {len(unmapped)} PLU(s) have sales data but no matching product:\nPLUs: {plu_list}\nGo to Reports > Sales, right-click a row to match.')
-            if skipped:
-                plu_list = ', '.join(str(p) for p, _ in skipped[:5])
-                lines.append(f'⚠ {len(skipped)} PLU(s) skipped - multiple products share the same PLU:\nPLUs: {plu_list}\nManual match required in Reports > Sales.')
-            if lines:
-                from PyQt6.QtWidgets import QMessageBox
-                msg = QMessageBox(self)
-                msg.setWindowTitle('PLU Mapping - Startup Check')
-                msg.setText('\n\n'.join(lines))
-                msg.setIcon(QMessageBox.Icon.Warning if (unmapped or skipped) else QMessageBox.Icon.Information)
-                msg.exec()
-        except Exception as e:
-            logging.warning(f'[startup] auto_plu_map failed: {e}')
-        self._run_auto_plu_map()
-
-    def _run_auto_plu_map(self):
-        import logging
-        try:
-            from utils.auto_plu_map import auto_map_plu_barcodes
-            result = auto_map_plu_barcodes()
-            mapped   = result.get('mapped', [])
-            skipped  = result.get('skipped', [])
-            unmapped = result.get('unmapped', [])
-            if mapped:
-                try:
-                    self.screens[0]._refresh()
-                except Exception:
-                    pass
-            lines = []
-            if mapped:
-                lines.append(f'✅ {len(mapped)} PLU(s) auto-mapped to barcodes.')
-            if unmapped:
-                plu_list = ', '.join(str(p) for p in unmapped[:10])
-                if len(unmapped) > 10:
-                    plu_list += f' and {len(unmapped) - 10} more'
-                lines.append(f'⚠ {len(unmapped)} PLU(s) have sales data but no matching product:\nPLUs: {plu_list}\nGo to Reports > Sales, right-click a row to match.')
-            if skipped:
-                plu_list = ', '.join(str(p) for p, _ in skipped[:5])
-                lines.append(f'⚠ {len(skipped)} PLU(s) skipped - multiple products share the same PLU:\nPLUs: {plu_list}\nManual match required in Reports > Sales.')
-            if lines:
-                from PyQt6.QtWidgets import QMessageBox
-                msg = QMessageBox(self)
-                msg.setWindowTitle('PLU Mapping - Startup Check')
-                msg.setText('\n\n'.join(lines))
-                msg.setIcon(QMessageBox.Icon.Warning if (unmapped or skipped) else QMessageBox.Icon.Information)
-                msg.exec()
-        except Exception as e:
-            logging.warning(f'[startup] auto_plu_map failed: {e}')
         self._run_auto_plu_map()
 
     def _run_auto_plu_map(self):
@@ -223,7 +155,7 @@ class MainWindow(QMainWindow):
         self._refresh_last_backup_label()
 
         sidebar_layout.addSpacing(8)
-        hint = QLabel("Hotkeys:\nH·P·S·D·O·R·K·A·L")
+        hint = QLabel("Hotkeys (outside text fields):\nH·P·S·D·O·R·K·A")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: grey; font-size: 10px;")
         sidebar_layout.addWidget(hint)
@@ -291,15 +223,8 @@ class MainWindow(QMainWindow):
         stock_adjust = self.screens[7]
         stock_adjust.stock_changed.connect(self._on_stock_changed)
 
-        QShortcut(QKeySequence("H"),      self, lambda: self._switch(0))
-        QShortcut(QKeySequence("Escape"), self, lambda: self._switch(0))
-        QShortcut(QKeySequence("P"),      self, lambda: self._switch(1))
-        QShortcut(QKeySequence("S"),      self, lambda: self._switch(2))
-        QShortcut(QKeySequence("D"),      self, lambda: self._switch(3))
-        QShortcut(QKeySequence("O"),      self, lambda: self._switch(4))
-        QShortcut(QKeySequence("R"),      self, lambda: self._switch(5))
-        QShortcut(QKeySequence("K"),      self, lambda: self._switch(6))
-        QShortcut(QKeySequence("A"),      self, lambda: self._switch(7))
+        # Single-key nav is handled in keyPressEvent so it only fires when
+        # focus is NOT on a text input field.
 
         self._switch(0)
 
@@ -310,14 +235,20 @@ class MainWindow(QMainWindow):
 
     def _lock(self):
         """Lock the app and return to login screen."""
-        import models.user as user_model
         from views.login_screen import LoginScreen
         self.hide()
 
         def on_relogin(user):
             login_win.hide()
             self.current_user = user
-            # Rebuild UI to apply new user's role
+            # Stop timers on the HomeScreen before the widget is replaced,
+            # so they don't fire after the old screen is orphaned.
+            if hasattr(self, 'screens') and self.screens:
+                home = self.screens[0]
+                for attr in ('_timer', '_flash_timer', '_clock_timer'):
+                    t = getattr(home, attr, None)
+                    if t is not None:
+                        t.stop()
             self._build_ui()
             self.show()
 
@@ -359,6 +290,28 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(index)
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
+
+    def keyPressEvent(self, event):
+        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox
+        # Don't intercept keys while the user is typing in an input widget.
+        if isinstance(self.focusWidget(), (QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox)):
+            super().keyPressEvent(event)
+            return
+        nav = {
+            Qt.Key.Key_H:      0,
+            Qt.Key.Key_P:      1,
+            Qt.Key.Key_S:      2,
+            Qt.Key.Key_D:      3,
+            Qt.Key.Key_O:      4,
+            Qt.Key.Key_R:      5,
+            Qt.Key.Key_K:      6,
+            Qt.Key.Key_A:      7,
+            Qt.Key.Key_Escape: 0,
+        }
+        if event.key() in nav:
+            self._switch(nav[event.key()])
+        else:
+            super().keyPressEvent(event)
 
     # ── Backup logic ──────────────────────────────────────────────────
     def _auto_backup_dir(self):

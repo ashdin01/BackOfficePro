@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QPushButton, QAbstractItemView, QSplitter,
     QGroupBox, QScrollArea, QCheckBox, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtCore import Qt, QDate, QTimer
 from PyQt6.QtGui import QColor
 import models.purchase_order as po_model
 import models.po_lines as line_model
@@ -39,7 +39,11 @@ class ItemLookupDialog(QDialog):
         search_row.addWidget(QLabel("Search:"))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filter by supplier, barcode or description…")
-        self.search_input.textChanged.connect(self._filter)
+        self._filter_timer = QTimer()
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(500)
+        self._filter_timer.timeout.connect(lambda: self._filter(self.search_input.text()))
+        self.search_input.textChanged.connect(lambda _: self._filter_timer.start())
         search_row.addWidget(self.search_input)
         layout.addLayout(search_row)
 
@@ -321,6 +325,7 @@ class PODetailDialog(QDialog):
         po = po_model.get_by_id(po_id)
         if not po:
             return
+        self._supplier_id = po['supplier_id']
 
         # PO header info
         info = QLabel(
@@ -354,7 +359,11 @@ class PODetailDialog(QDialog):
             self.prod_combo = QComboBox()
             self.prod_combo.setMinimumWidth(280)
             self._load_products()
-            self.prod_search.textChanged.connect(self._filter_products)
+            self._prod_filter_timer = QTimer()
+            self._prod_filter_timer.setSingleShot(True)
+            self._prod_filter_timer.setInterval(500)
+            self._prod_filter_timer.timeout.connect(lambda: self._filter_products(self.prod_search.text()))
+            self.prod_search.textChanged.connect(lambda _: self._prod_filter_timer.start())
             self.add_qty = QDoubleSpinBox()
             self.add_qty.setRange(0.1, 99999)
             self.add_qty.setValue(1)
@@ -396,7 +405,8 @@ class PODetailDialog(QDialog):
         self._reload_lines()
 
     def _load_products(self):
-        self._all_products = prod_model.get_all()
+        import models.product_suppliers as ps_model
+        self._all_products = list(ps_model.get_by_supplier(self._supplier_id, default_only=True))
         self.prod_combo.clear()
         for p in self._all_products:
             self.prod_combo.addItem(f"{p['barcode']} — {p['description']}", p["barcode"])

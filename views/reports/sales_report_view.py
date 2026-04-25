@@ -433,7 +433,7 @@ class _AddProductDialog(QDialog):
                 department_id=self.f_dept.currentData(),
                 supplier_id=self.f_supplier.currentData(),
                 brand=self.f_brand.text().strip(),
-                sku=self.f_sku.text().strip(),
+                base_sku=self.f_sku.text().strip(),
                 unit=self.f_unit_type.currentText(),
                 pack_qty=self.f_upc.value() or 1,
                 sell_price=self.f_sell.value(),
@@ -535,7 +535,7 @@ class _MatchItemDialog(QDialog):
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Type name, barcode or brand…")
         self.search_edit.setText(self.sales_row.get("plu_name",""))
-        self.search_edit.textChanged.connect(lambda _: self._timer.start(250))
+        self.search_edit.textChanged.connect(lambda _: self._timer.start(500))
         sb_lay.addWidget(self.search_edit, stretch=1)
         self.lbl_count = QLabel(""); self.lbl_count.setStyleSheet("color:#6e7681;font-size:11px;")
         sb_lay.addWidget(self.lbl_count)
@@ -785,10 +785,10 @@ class SalesReportView(QWidget):
         load_btn.clicked.connect(self._load)
         filter_row.addWidget(load_btn)
 
-        import_btn = QPushButton("⬆  Import PDF")
+        import_btn = QPushButton("⬆  Import Sales")
         import_btn.setMinimumHeight(34)
         import_btn.setStyleSheet("background:#2e7d32;color:white;font-weight:bold;padding:0 16px;")
-        import_btn.clicked.connect(self._import_pdf)
+        import_btn.clicked.connect(self._import_sales)
         filter_row.addWidget(import_btn)
 
         export_btn = QPushButton("⬇  Export CSV")
@@ -893,7 +893,7 @@ class SalesReportView(QWidget):
         if not exists:
             conn.close()
             self.footer_label.setText(
-                "No sales data yet — import a PDF using the ⬆ Import PDF button.")
+                "No sales data yet — import a CSV or PDF using the ⬆ Import Sales button.")
             return
 
         d_from, d_to = self._get_dates()
@@ -1205,10 +1205,11 @@ class SalesReportView(QWidget):
             QMessageBox.warning(self, "Not Found", f"No product for barcode {bc!r}")
 
     # ── Import / Export ───────────────────────────────────────────────────────
-    def _import_pdf(self):
+    def _import_sales(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Daily PLU Sales PDF(s)",
-            os.path.expanduser("~/Downloads"), "PDF Files (*.pdf)")
+            self, "Select Daily PLU Sales File(s)",
+            os.path.expanduser("~/Downloads"),
+            "Sales Files (*.csv *.pdf);;CSV Files (*.csv);;PDF Files (*.pdf)")
         if not paths: return
 
         # Import the script as a module directly — works in both dev and
@@ -1235,11 +1236,11 @@ class SalesReportView(QWidget):
             module.ensure_tables()
 
             errors = []
-            for pdf_path in paths:
+            for path in paths:
                 try:
-                    module.import_pdf(pdf_path)
+                    module.import_file(path)
                 except Exception as e:
-                    errors.append(f"{os.path.basename(pdf_path)}: {e}")
+                    errors.append(f"{os.path.basename(path)}: {e}")
 
             if errors:
                 QMessageBox.warning(self, "Import Warnings",
