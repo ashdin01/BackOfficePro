@@ -66,6 +66,12 @@ def apply_migrations():
         if current < 14:
             migrate_v14(conn)
             logging.info("Migration v14 applied: product_suppliers junction table")
+        if current < 15:
+            migrate_v15(conn)
+            logging.info("Migration v15 applied: online_order fields on suppliers")
+        if current < 16:
+            migrate_v16(conn)
+            logging.info("Migration v16 applied: per-supplier SKU, pack_qty, pack_unit")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -255,4 +261,35 @@ def migrate_v14(conn):
         WHERE supplier_id IS NOT NULL
     """)
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '14')")
+    conn.commit()
+
+
+def migrate_v15(conn):
+    """Add online ordering portal flag and note to suppliers table."""
+    _add_column(conn, "ALTER TABLE suppliers ADD COLUMN online_order INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "ALTER TABLE suppliers ADD COLUMN online_order_note TEXT DEFAULT ''")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '15')")
+    conn.commit()
+
+
+def migrate_v16(conn):
+    """Add per-supplier SKU, pack_qty, pack_unit to product_suppliers.
+    Seeds values from the products table for each product's default supplier link."""
+    _add_column(conn, "ALTER TABLE product_suppliers ADD COLUMN supplier_sku TEXT DEFAULT ''")
+    _add_column(conn, "ALTER TABLE product_suppliers ADD COLUMN pack_qty INTEGER DEFAULT 1")
+    _add_column(conn, "ALTER TABLE product_suppliers ADD COLUMN pack_unit TEXT DEFAULT 'EA'")
+    conn.execute("""
+        UPDATE product_suppliers
+        SET supplier_sku = COALESCE((
+                SELECT p.supplier_sku FROM products p WHERE p.barcode = product_suppliers.barcode
+            ), ''),
+            pack_qty = COALESCE((
+                SELECT p.pack_qty FROM products p WHERE p.barcode = product_suppliers.barcode
+            ), 1),
+            pack_unit = COALESCE((
+                SELECT p.pack_unit FROM products p WHERE p.barcode = product_suppliers.barcode
+            ), 'EA')
+        WHERE is_default = 1
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '16')")
     conn.commit()

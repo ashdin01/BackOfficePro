@@ -1,13 +1,15 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFrame,
-    QFileDialog, QMessageBox
+    QFileDialog, QMessageBox, QApplication, QSystemTrayIcon
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeySequence
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QKeySequence, QIcon, QPixmap, QColor
 from config.settings import APP_NAME, APP_VERSION, DATABASE_PATH
+import logging
 import shutil
 import os
+import threading
 from datetime import datetime
 
 def _do_backup(dest_path):
@@ -350,6 +352,39 @@ class MainWindow(QMainWindow):
                     os.remove(old)
             except Exception:
                 pass
+            return self._email_backup_async(dest)
+        return None
+
+    def _email_backup_async(self, backup_path):
+        from database.connection import get_connection
+        try:
+            conn = get_connection()
+            row = conn.execute("SELECT value FROM settings WHERE key='backup_email'").fetchone()
+            conn.close()
+            to_address = (row['value'] or '').strip() if row else ''
+        except Exception as e:
+            logging.error(f"Backup email: failed to read backup_email setting: {e}", exc_info=True)
+            return None
+
+        logging.info(f"Backup email: to_address='{to_address}', path='{backup_path}'")
+        if not to_address:
+            logging.warning("Backup email: backup_email setting is empty — skipping.")
+            return None
+
+        from utils.email_graph import send_backup
+
+        def _send():
+            logging.info(f"Backup email thread: starting send to {to_address}")
+            try:
+                send_backup(backup_path, to_address)
+                logging.info(f"Backup email thread: sent successfully to {to_address}")
+            except Exception as e:
+                logging.error(f"Backup email thread: send failed: {e}", exc_info=True)
+
+        t = threading.Thread(target=_send, daemon=True)
+        t.start()
+        logging.info(f"Backup email thread: started")
+        return t
 
     def _manual_backup(self):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -440,5 +475,24 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
-        self._silent_auto_backup()
-        event.accept()
+        event.ignore()
+        self.hide()
+
+        def _backup_work():
+            try:
+                email_thread = self._silent_auto_backup()
+                if email_thread is not None:
+                    email_thread.join(timeout=30)
+            except Exception as e:
+                logging.error(f"Backup on close failed: {e}", exc_info=True)
+
+        self._close_worker = threading.Thread(target=_backup_work, daemon=True)
+        self._close_worker.start()
+        self._close_poll = QTimer(self)
+        self._close_poll.timeout.connect(self._on_close_poll)
+        self._close_poll.start(200)
+
+    def _on_close_poll(self):
+        if not self._close_worker.is_alive():
+            self._close_poll.stop()
+            QApplication.instance().quit()

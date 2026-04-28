@@ -43,6 +43,22 @@ def get_below_reorder():
         conn.close()
 
 
+def get_by_barcodes(barcodes):
+    """Return a {barcode: quantity} map for a list of barcodes in a single query."""
+    if not barcodes:
+        return {}
+    conn = get_connection()
+    try:
+        placeholders = ",".join("?" * len(barcodes))
+        rows = conn.execute(
+            f"SELECT barcode, quantity FROM stock_on_hand WHERE barcode IN ({placeholders})",
+            barcodes
+        ).fetchall()
+        return {r["barcode"]: r["quantity"] for r in rows}
+    finally:
+        conn.close()
+
+
 def adjust(barcode, quantity, movement_type, reference='', notes='', created_by=''):
     conn = get_connection()
     try:

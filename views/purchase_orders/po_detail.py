@@ -2,59 +2,49 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
     QLineEdit, QDoubleSpinBox, QDialog, QFormLayout, QSpinBox,
-    QFileDialog, QAbstractItemView, QDialogButtonBox
+    QFileDialog, QAbstractItemView, QDialogButtonBox, QDateEdit, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QUrl, QDate
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 import models.purchase_order as po_model
 import models.po_lines as lines_model
 import models.product as product_model
 import models.stock_on_hand as stock_model
+import models.settings as settings_model
+import controllers.purchase_order_controller as po_controller
 from config.constants import PO_STATUS_SENT
-from database.connection import get_connection
+from datetime import date, timedelta
 import csv
 import os
 import math
 
 
-def get_recommendations(supplier_id):
-    conn = get_connection()
-    rows = conn.execute("""
-        SELECT p.barcode, p.description, p.reorder_point,
-               COALESCE(p.reorder_max, 0) as reorder_max,
-               p.cost_price, COALESCE(s.quantity, 0) as on_hand,
-               COALESCE(p.pack_qty, 1) as pack_qty,
-               COALESCE(p.pack_unit, 'EA') as pack_unit,
-               p.supplier_sku
-        FROM products p
-        LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
-        WHERE p.supplier_id = ?
-          AND p.active = 1
-          AND COALESCE(s.quantity, 0) <= p.reorder_point
-          AND p.reorder_point > 0
-        ORDER BY p.description
-    """, (supplier_id,)).fetchall()
-    conn.close()
-    return rows
+def _week_bounds(offset=0):
+    """offset=0 → last completed week; offset=1 → two weeks ago."""
+    today = date.today()
+    mon   = today - timedelta(days=today.weekday())
+    start = mon - timedelta(weeks=(1 + offset))
+    return start, start + timedelta(days=6)
+
+
+def _fy_bounds(year=None):
+    today = date.today()
+    if year is None:
+        year = today.year if today.month >= 7 else today.year - 1
+    return date(year, 7, 1), date(year + 1, 6, 30)
 
 
 def _cartons_needed(reorder_qty, pack_qty):
-    pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
-    return max(1, math.ceil(reorder_qty / pack_qty))
+    return po_controller.cartons_needed(reorder_qty, pack_qty)
 
 
 def _calc_order_units(reorder_max, reorder_qty, on_hand):
-    reorder_max = reorder_max or 0
-    on_hand = on_hand or 0
-    if reorder_max > 0:
-        needed = reorder_max - on_hand
-        return max(1, int(needed))
-    return max(1, int(reorder_qty or 1))
+    return po_controller.calc_order_units(reorder_max, reorder_qty, on_hand)
 
 
 def _carton_note(pack_qty, pack_unit, barcode):
-    pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
-    return f"{pack_qty} × {pack_unit}  |  barcode: {barcode}"
+    return po_controller.carton_note(pack_qty, pack_unit, barcode)
 
 
 class ItemLookupDialog(QDialog):
@@ -106,37 +96,7 @@ class ItemLookupDialog(QDialog):
         self._load_products()
 
     def _load_products(self):
-        conn = get_connection()
-        if self.supplier_id:
-            rows = conn.execute("""
-                SELECT
-                    COALESCE(s.name, '') AS supplier_name,
-                    p.barcode,
-                    p.description,
-                    COALESCE(p.pack_qty, 1) AS pack_qty,
-                    COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                    COALESCE(p.cost_price, 0.0) AS cost_price
-                FROM products p
-                LEFT JOIN suppliers s ON p.supplier_id = s.id
-                WHERE p.active = 1
-                  AND p.supplier_id = ?
-                ORDER BY p.description ASC
-            """, (self.supplier_id,)).fetchall()
-        else:
-            rows = conn.execute("""
-                SELECT
-                    COALESCE(s.name, '') AS supplier_name,
-                    p.barcode,
-                    p.description,
-                    COALESCE(p.pack_qty, 1) AS pack_qty,
-                    COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                    COALESCE(p.cost_price, 0.0) AS cost_price
-                FROM products p
-                LEFT JOIN suppliers s ON p.supplier_id = s.id
-                WHERE p.active = 1
-                ORDER BY supplier_name ASC, p.description ASC
-            """).fetchall()
-        conn.close()
+        rows = po_controller.get_items_for_supplier(self.supplier_id)
         self._all_rows = [dict(r) for r in rows]
         self._populate(self._all_rows)
     def _populate(self, rows):
@@ -175,49 +135,6 @@ class ItemLookupDialog(QDialog):
         self.accept()
 
 
-def _get_sales_for_barcode(barcode):
-    from datetime import date, timedelta
-    today = date.today()
-
-    days_since_monday = today.weekday()
-    this_week_start = today - timedelta(days=days_since_monday)
-    last_week_start = this_week_start - timedelta(days=7)
-    last_week_end = this_week_start - timedelta(days=1)
-    two_weeks_start = last_week_start - timedelta(days=7)
-    two_weeks_end = last_week_start - timedelta(days=1)
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
-
-    try:
-        conn = get_connection()
-        plu_row = conn.execute(
-            "SELECT plu FROM plu_barcode_map WHERE barcode=?", (barcode,)
-        ).fetchone()
-
-        if not plu_row:
-            conn.close()
-            return None
-
-        plu = str(plu_row[0])
-
-        def qty(d_from, d_to):
-            row = conn.execute("""
-                SELECT COALESCE(SUM(quantity), 0)
-                FROM sales_daily
-                WHERE plu=? AND sale_date BETWEEN ? AND ?
-            """, (plu, str(d_from), str(d_to))).fetchone()
-            return int(row[0]) if row else 0
-
-        result = {
-            "last_week": qty(last_week_start, last_week_end),
-            "two_weeks": qty(two_weeks_start, two_weeks_end),
-            "this_month": qty(month_start, today),
-            "ytd": qty(year_start, today),
-        }
-        conn.close()
-        return result
-    except Exception:
-        return None
 
 
 class PODetail(QWidget):
@@ -243,29 +160,82 @@ class PODetail(QWidget):
         self.rec_banner.setStyleSheet("color: steelblue; padding: 4px;")
         layout.addWidget(self.rec_banner)
 
+        # ── Sales period selector ─────────────────────────────────────────
+        period_row = QHBoxLayout()
+        period_row.setSpacing(6)
+        period_row.addWidget(QLabel("Sales period:"))
+
+        _btn_style = (
+            "QPushButton{background:#1e2a38;color:#e6edf3;border:1px solid #2a3a4a;"
+            "border-radius:3px;padding:0 8px;font-size:11px;height:26px;}"
+            "QPushButton:hover{background:#2a3a4a;}"
+        )
+        for label, fn in [
+            ("This Wk",    self._set_this_week),
+            ("Last Wk",    self._set_last_week),
+            ("2 Wks Ago",  self._set_two_weeks_ago),
+            ("This Month", self._set_this_month),
+            ("Last Month", self._set_last_month),
+            ("This FY",    self._set_this_fy),
+            ("Last FY",    self._set_last_fy),
+            ("All Time",   self._set_all_time),
+        ]:
+            btn = QPushButton(label)
+            btn.setStyleSheet(_btn_style)
+            btn.setFixedHeight(26)
+            btn.clicked.connect(fn)
+            period_row.addWidget(btn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet("color:#2a3a4a;")
+        period_row.addWidget(sep)
+
+        period_row.addWidget(QLabel("From:"))
+        self._date_from = QDateEdit()
+        self._date_from.setCalendarPopup(True)
+        self._date_from.setDisplayFormat("dd/MM/yyyy")
+        self._date_from.setDate(QDate.currentDate().addDays(-7))
+        self._date_from.setFixedHeight(26)
+        period_row.addWidget(self._date_from)
+
+        period_row.addWidget(QLabel("To:"))
+        self._date_to = QDateEdit()
+        self._date_to.setCalendarPopup(True)
+        self._date_to.setDisplayFormat("dd/MM/yyyy")
+        self._date_to.setDate(QDate.currentDate())
+        self._date_to.setFixedHeight(26)
+        period_row.addWidget(self._date_to)
+
+        apply_btn = QPushButton("Apply")
+        apply_btn.setFixedHeight(26)
+        apply_btn.setStyleSheet(
+            "QPushButton{background:#1565c0;color:white;border:none;"
+            "border-radius:3px;padding:0 10px;font-size:11px;}"
+            "QPushButton:hover{background:#1976d2;}"
+        )
+        apply_btn.clicked.connect(self._refresh_sales_column)
+        period_row.addWidget(apply_btn)
+        period_row.addStretch()
+        layout.addLayout(period_row)
+
+        self._sales_period_label = "Last Week"
+
         self.table = QTableWidget()
-        self.table.setColumnCount(13)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "Description", "Supplier Ctn Qty", "Supplier SKU", "On Hand", "Reorder Pt",
             "Order Qty", "Unit Cost $", "Line Total $",
-            "Last Week", "Two Weeks Ago", "This Month", "Year to Date"
+            "Sales: Last Week",
         ])
         hdr = self.table.horizontalHeader()
-        for _ci in range(13):
+        hdr.setMinimumSectionSize(60)
+        for _ci in range(10):
             hdr.setSectionResizeMode(_ci, QHeaderView.ResizeMode.Interactive)
+        # Description (col 1) absorbs leftover space; Supplier cols (2, 3) are next priority
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 110)
-        self.table.setColumnWidth(2, 110)
-        self.table.setColumnWidth(3, 110)
-        self.table.setColumnWidth(4, 75)
-        self.table.setColumnWidth(5, 80)
-        self.table.setColumnWidth(6, 90)
-        self.table.setColumnWidth(7, 85)
-        self.table.setColumnWidth(8, 95)
-        self.table.setColumnWidth(9, 80)
-        self.table.setColumnWidth(10, 95)
-        self.table.setColumnWidth(11, 85)
-        self.table.setColumnWidth(12, 85)
+        # Fit all non-stretch headers once the widget has rendered and fonts are resolved
+        QTimer.singleShot(0, self._fit_header_widths)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(self._on_item_changed)
         self.table.doubleClicked.connect(self._open_product)
@@ -392,12 +362,7 @@ class PODetail(QWidget):
             except Exception as e:
                 logging.warning(f"Auto-save before PDF export failed: {e}")
 
-        conn = get_connection()
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key='po_pdf_path'"
-        ).fetchone()
-        conn.close()
-        pdf_folder = (row[0] or "").strip() if row else ""
+        pdf_folder = settings_model.get_setting('po_pdf_path').strip()
         if not pdf_folder:
             pdf_folder = os.path.join(
                 os.path.expanduser("~"), "Documents", "BackOfficePro", "PurchaseOrders"
@@ -413,6 +378,7 @@ class PODetail(QWidget):
             if self.on_save:
                 self.on_save()
             logging.info(f"PDF exported: {path}")
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
             QMessageBox.information(self, "PDF Exported", f"✓ Saved to:\n{path}")
         except Exception as e:
             logging.critical(f"PDF export failed: {e}", exc_info=True)
@@ -429,6 +395,24 @@ class PODetail(QWidget):
         if self.table.rowCount() == 0:
             QMessageBox.warning(self, "Cannot Send", "Add at least one line before emailing the PO.")
             return
+
+        # ── Online ordering portal warning ────────────────────────────
+        if supplier and supplier['online_order']:
+            note = (supplier['online_order_note'] or '').strip()
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Online Ordering Required")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setText(
+                f"<b>{po['supplier_name']}</b> requires ordering via an online portal."
+            )
+            msg.setInformativeText(note if note else "Do not email this PO — place the order manually via the supplier's portal.")
+            msg.setStandardButtons(
+                QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ignore
+            )
+            msg.button(QMessageBox.StandardButton.Ignore).setText("Send Email Anyway")
+            msg.setDefaultButton(QMessageBox.StandardButton.Cancel)
+            if msg.exec() != QMessageBox.StandardButton.Ignore:
+                return
 
         supplier_email = (supplier['email_orders'] or '').strip() if supplier else ''
         if not supplier_email:
@@ -448,11 +432,7 @@ class PODetail(QWidget):
             return
 
         try:
-            conn = get_connection()
-            row = conn.execute("SELECT value FROM settings WHERE key='po_pdf_path'").fetchone()
-            conn.close()
-
-            pdf_folder = (row[0] or '').strip() if row else ''
+            pdf_folder = settings_model.get_setting('po_pdf_path').strip()
             if not pdf_folder:
                 pdf_folder = os.path.join(os.path.expanduser('~'), 'Documents', 'BackOfficePro', 'PurchaseOrders')
             os.makedirs(pdf_folder, exist_ok=True)
@@ -572,7 +552,7 @@ class PODetail(QWidget):
         self._populate_table(lines)
 
     def _auto_load_recommendations(self):
-        recs = get_recommendations(self._po['supplier_id'])
+        recs = po_controller.get_reorder_recommendations(self._po['supplier_id'])
         if not recs:
             self.rec_banner.setText("✓ All stock levels are above reorder points for this supplier.")
             return
@@ -591,18 +571,7 @@ class PODetail(QWidget):
                 notes=note,
             )
         # ── Also add any auto_reorder products not already on PO ─────
-        from database.connection import get_connection as _gc
-        _conn = _gc()
-        auto_rows = _conn.execute("""
-            SELECT p.barcode, p.description, p.cost_price,
-                   COALESCE(p.pack_qty, 1) as pack_qty,
-                   COALESCE(p.pack_unit, 'EA') as pack_unit
-            FROM products p
-            WHERE p.supplier_id = ?
-              AND p.auto_reorder = 1
-              AND p.active = 1
-        """, (self._po['supplier_id'],)).fetchall()
-        _conn.close()
+        auto_rows = po_controller.get_auto_reorder_items(self._po['supplier_id'])
         existing_barcodes = {l['barcode'] for l in lines_model.get_by_po(self.po_id)}
         auto_added = 0
         for ar in auto_rows:
@@ -624,7 +593,7 @@ class PODetail(QWidget):
         self.rec_banner.setText(_banner)
 
     def _reload_recommendations(self):
-        recs = get_recommendations(self._po['supplier_id'])
+        recs = po_controller.get_reorder_recommendations(self._po['supplier_id'])
         if not recs:
             QMessageBox.information(self, "Recommendations", "All products are above reorder points.")
             return
@@ -728,24 +697,100 @@ class PODetail(QWidget):
             total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(r, 8, total_item)
 
-            sales = _get_sales_for_barcode(line['barcode'])
-            for col_idx, key in enumerate(['last_week', 'two_weeks', 'this_month', 'ytd'], start=9):
-                if sales is None:
-                    cell = QTableWidgetItem("—")
-                    cell.setForeground(QColor("#666666"))
-                else:
-                    val = sales[key]
-                    cell = QTableWidgetItem(str(val) if val > 0 else "0")
-                    if val == 0:
-                        cell.setForeground(QColor("#666666"))
-                    elif key == 'last_week' and val > 0:
-                        cell.setForeground(QColor("#4CAF50"))
-                cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(r, col_idx, cell)
+            d_from = self._date_from.date().toPyDate()
+            d_to   = self._date_to.date().toPyDate()
+            sales_val = po_controller.get_sales_for_barcode_range(line['barcode'], d_from, d_to)
+            if sales_val is None:
+                sales_cell = QTableWidgetItem("—")
+                sales_cell.setForeground(QColor("#666666"))
+            else:
+                sales_cell = QTableWidgetItem(str(sales_val) if sales_val > 0 else "0")
+                sales_cell.setForeground(QColor("#4CAF50" if sales_val > 0 else "#666666"))
+            sales_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            sales_cell.setFlags(sales_cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(r, 9, sales_cell)
 
         self.table.blockSignals(False)
         self._update_total()
+
+    def _fit_header_widths(self):
+        """Expand any non-stretch column that is too narrow to show its header text."""
+        hdr = self.table.horizontalHeader()
+        fm  = hdr.fontMetrics()
+        # 44px covers: 8px left pad + 8px right pad + ~20px sort indicator + 8px safety margin
+        PADDING = 44
+        for col in range(self.table.columnCount()):
+            if hdr.sectionResizeMode(col) == QHeaderView.ResizeMode.Stretch:
+                continue
+            item = self.table.horizontalHeaderItem(col)
+            text = item.text() if item else ""
+            needed = fm.horizontalAdvance(text) + PADDING
+            if self.table.columnWidth(col) < needed:
+                self.table.setColumnWidth(col, needed)
+
+    def _set_period(self, label, d_from, d_to):
+        self._date_from.setDate(QDate(d_from.year, d_from.month, d_from.day))
+        self._date_to.setDate(QDate(d_to.year, d_to.month, d_to.day))
+        self._sales_period_label = label
+        self._refresh_sales_column()
+
+    def _set_this_week(self):
+        t = date.today()
+        self._set_period("This Week", t - timedelta(days=t.weekday()), t)
+
+    def _set_last_week(self):
+        s, e = _week_bounds(0)
+        self._set_period("Last Week", s, e)
+
+    def _set_two_weeks_ago(self):
+        s, e = _week_bounds(1)
+        self._set_period("2 Wks Ago", s, e)
+
+    def _set_this_month(self):
+        t = date.today()
+        self._set_period("This Month", t.replace(day=1), t)
+
+    def _set_last_month(self):
+        t = date.today()
+        last_day = t.replace(day=1) - timedelta(days=1)
+        self._set_period("Last Month", last_day.replace(day=1), last_day)
+
+    def _set_this_fy(self):
+        s, e = _fy_bounds()
+        self._set_period("This FY", s, min(e, date.today()))
+
+    def _set_last_fy(self):
+        t = date.today()
+        y = t.year if t.month >= 7 else t.year - 1
+        s, e = _fy_bounds(y - 1)
+        self._set_period("Last FY", s, e)
+
+    def _set_all_time(self):
+        self._set_period("All Time", date(2000, 1, 1), date.today())
+
+    def _refresh_sales_column(self):
+        label = getattr(self, '_sales_period_label', 'Selected Period')
+        d_from = self._date_from.date().toPyDate()
+        d_to   = self._date_to.date().toPyDate()
+        self.table.setHorizontalHeaderItem(9, QTableWidgetItem(f"Sales: {label}"))
+        self._fit_header_widths()
+        self.table.blockSignals(True)
+        for r in range(self.table.rowCount()):
+            barcode_item = self.table.item(r, 0)
+            if not barcode_item:
+                continue
+            barcode = barcode_item.text().strip()
+            sales_val = po_controller.get_sales_for_barcode_range(barcode, d_from, d_to)
+            if sales_val is None:
+                cell = QTableWidgetItem("—")
+                cell.setForeground(QColor("#666666"))
+            else:
+                cell = QTableWidgetItem(str(sales_val) if sales_val > 0 else "0")
+                cell.setForeground(QColor("#4CAF50" if sales_val > 0 else "#666666"))
+            cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(r, 9, cell)
+        self.table.blockSignals(False)
 
     def _on_item_changed(self, item):
         row = item.row()
@@ -1058,15 +1103,9 @@ class AddLineDialog(QDialog):
         product = product_model.get_by_barcode(barcode)
         if product:
             if self.supplier_id and product['supplier_id'] != self.supplier_id:
-                from database.connection import get_connection
-                conn = get_connection()
-                po_sup = conn.execute(
-                    "SELECT name FROM suppliers WHERE id=?", (self.supplier_id,)
-                ).fetchone()
-                prod_sup = conn.execute(
-                    "SELECT name FROM suppliers WHERE id=?", (product['supplier_id'],)
-                ).fetchone() if product['supplier_id'] else None
-                conn.close()
+                import models.supplier as _sup_model
+                po_sup   = _sup_model.get_by_id(self.supplier_id)
+                prod_sup = _sup_model.get_by_id(product['supplier_id']) if product['supplier_id'] else None
                 po_name   = po_sup['name'] if po_sup else "Unknown"
                 prod_name = prod_sup['name'] if prod_sup else "No supplier set"
                 QMessageBox.warning(

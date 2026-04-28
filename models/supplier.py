@@ -24,19 +24,22 @@ def get_by_id(supplier_id):
 
 def add(code, name, contact_name='', phone='', account_number='',
         payment_terms='', address='', notes='', abn='', rep_name='', rep_phone='',
-        order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep=''):
+        order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
+        online_order=0, online_order_note=''):
     conn = get_connection()
     try:
         conn.execute("""
             INSERT INTO suppliers (
                 code, name, contact_name, phone, account_number,
                 payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
-                email_orders, email_admin, email_accounts, email_rep
+                email_orders, email_admin, email_accounts, email_rep,
+                online_order, online_order_note
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
-              email_orders, email_admin, email_accounts, email_rep))
+              email_orders, email_admin, email_accounts, email_rep,
+              online_order, online_order_note))
         conn.commit()
     finally:
         conn.close()
@@ -44,7 +47,8 @@ def add(code, name, contact_name='', phone='', account_number='',
 
 def update(supplier_id, code, name, contact_name, phone, account_number,
            payment_terms, address, notes, active, abn='', rep_name='', rep_phone='',
-           order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep=''):
+           order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
+           online_order=0, online_order_note=''):
     conn = get_connection()
     try:
         conn.execute("""
@@ -52,11 +56,13 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
             SET code=?, name=?, contact_name=?, phone=?,
                 account_number=?, payment_terms=?, address=?, notes=?, active=?,
                 abn=?, rep_name=?, rep_phone=?, order_minimum=?,
-                email_orders=?, email_admin=?, email_accounts=?, email_rep=?
+                email_orders=?, email_admin=?, email_accounts=?, email_rep=?,
+                online_order=?, online_order_note=?
             WHERE id=?
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, active, abn, rep_name, rep_phone,
               order_minimum, email_orders, email_admin, email_accounts, email_rep,
+              online_order, online_order_note,
               supplier_id))
         conn.commit()
     finally:

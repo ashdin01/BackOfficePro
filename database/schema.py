@@ -45,10 +45,13 @@ CREATE TABLE IF NOT EXISTS suppliers (
 );
 
 CREATE TABLE IF NOT EXISTS product_suppliers (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    barcode     TEXT    NOT NULL REFERENCES products(barcode),
-    supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
-    is_default  INTEGER NOT NULL DEFAULT 0,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    barcode      TEXT    NOT NULL REFERENCES products(barcode),
+    supplier_id  INTEGER NOT NULL REFERENCES suppliers(id),
+    is_default   INTEGER NOT NULL DEFAULT 0,
+    supplier_sku TEXT    DEFAULT '',
+    pack_qty     INTEGER DEFAULT 1,
+    pack_unit    TEXT    DEFAULT 'EA',
     UNIQUE(barcode, supplier_id)
 );
 

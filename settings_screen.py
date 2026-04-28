@@ -14,6 +14,7 @@ from database.connection import get_connection
 SETTINGS_FIELDS = [
     # (db_key,              label,               placeholder)
     ("store_name",        "Store Name *",        "e.g. The Little Red Apple"),
+    ("store_manager",     "Store Manager",       "e.g. Jane Smith"),
     ("store_address",     "Address",             "e.g. 8795 Midland Highway Barkers Creek VIC 3451"),
     ("store_phone",       "Phone",               "e.g. (03) 54742483"),
     ("store_abn",         "ABN",                 "e.g. 12 345 678 901"),

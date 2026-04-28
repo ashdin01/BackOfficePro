@@ -4,10 +4,10 @@ from PyQt6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QMessageBox, QDialog,
     QAbstractItemView, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer, QObject, QEvent, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QObject, QEvent, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 import models.stock_on_hand as soh_model
-from database.connection import get_connection
+import controllers.product_controller as product_controller
 
 
 def _btn(text, color=None):
@@ -261,6 +261,33 @@ class _SearchEnterFilter(QObject):
         return False
 
 
+class _AdjustWorker(QObject):
+    """Runs the DB write and history fetch on a background thread."""
+    finished = pyqtSignal(int, object)  # new_qty, history_rows
+    error    = pyqtSignal(str)
+
+    def __init__(self, barcode, qty, adj_type, reference, notes):
+        super().__init__()
+        self._barcode   = barcode
+        self._qty       = qty
+        self._adj_type  = adj_type
+        self._reference = reference
+        self._notes     = notes
+
+    def run(self):
+        try:
+            soh_model.adjust(
+                self._barcode, self._qty, self._adj_type,
+                reference=self._reference, notes=self._notes,
+            )
+            soh     = soh_model.get_by_barcode(self._barcode)
+            new_qty = int(soh["quantity"]) if soh else 0
+            rows    = product_controller.get_recent_adjustments(limit=100)
+            self.finished.emit(new_qty, rows)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class StockAdjustView(QWidget):
     stock_changed = pyqtSignal()
 
@@ -374,6 +401,8 @@ class StockAdjustView(QWidget):
         layout.addWidget(self.history_table)
 
         self._selected_barcode = None
+        self._thread = None
+        self._worker = None
         self._timer = QTimer()
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._do_search)
@@ -438,18 +467,8 @@ class StockAdjustView(QWidget):
         if not products:
             return
 
-        # Single query for all SOH instead of one connection per product
         barcodes = [p["barcode"] for p in products]
-        conn = get_connection()
-        try:
-            placeholders = ",".join("?" * len(barcodes))
-            soh_rows = conn.execute(
-                f"SELECT barcode, quantity FROM stock_on_hand WHERE barcode IN ({placeholders})",
-                barcodes
-            ).fetchall()
-        finally:
-            conn.close()
-        soh_map = {r["barcode"]: r["quantity"] for r in soh_rows}
+        soh_map = soh_model.get_by_barcodes(barcodes)
 
         self.results_table.setUpdatesEnabled(False)
         self.results_table.setRowCount(len(products))
@@ -494,7 +513,6 @@ class StockAdjustView(QWidget):
         else:
             adj_type_val = "ADJUSTMENT"
 
-        # Show confirmation dialog
         desc = self.selected_label.text().split("   |   ")[0].replace("Selected: ", "")
         dlg = _ConfirmAdjustDialog(
             description=desc,
@@ -506,23 +524,42 @@ class StockAdjustView(QWidget):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        try:
-            soh_model.adjust(
-                self._selected_barcode, qty,
-                adj_type_val,
-                reference=self.ref_input.text().strip() or None,
-                notes=self.notes_input.text().strip() or None,
-            )
-            soh = soh_model.get_by_barcode(self._selected_barcode)
-            new_qty = int(soh["quantity"]) if soh else 0
-            QMessageBox.information(self, "Done",
-                f"Adjustment applied.\nNew stock on hand: {new_qty}")
-            self._clear_selection()
-            self._load_history()
-            self._do_search()
-            self.stock_changed.emit()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.setText("Processing…")
+        self.clear_btn.setEnabled(False)
+
+        self._worker = _AdjustWorker(
+            barcode=self._selected_barcode,
+            qty=qty,
+            adj_type=adj_type_val,
+            reference=self.ref_input.text().strip() or None,
+            notes=self.notes_input.text().strip() or None,
+        )
+        self._thread = QThread(self)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.finished.connect(self._on_adjust_done)
+        self._worker.error.connect(self._on_adjust_error)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.error.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.start()
+
+    def _on_adjust_done(self, new_qty, history_rows):
+        QMessageBox.information(self, "Done",
+            f"Adjustment applied.\nNew stock on hand: {new_qty}")
+        self._clear_selection()
+        self._populate_history(history_rows)
+        self._do_search()
+        self.apply_btn.setText("✓  Apply Adjustment")
+        self.clear_btn.setEnabled(True)
+        self.stock_changed.emit()
+
+    def _on_adjust_error(self, msg):
+        QMessageBox.critical(self, "Error", msg)
+        self.apply_btn.setEnabled(True)
+        self.apply_btn.setText("✓  Apply Adjustment")
+        self.clear_btn.setEnabled(True)
 
     def _clear_selection(self):
         self._selected_barcode = None
@@ -535,18 +572,10 @@ class StockAdjustView(QWidget):
         self.notes_input.clear()
 
     def _load_history(self):
-        conn = get_connection()
-        try:
-            rows = conn.execute("""
-                SELECT m.created_at, m.barcode, p.description,
-                       m.movement_type, m.quantity, m.reference, m.notes
-                FROM stock_movements m
-                LEFT JOIN products p ON m.barcode = p.barcode
-                WHERE m.movement_type NOT IN ('SALE', 'RECEIPT')
-                ORDER BY m.created_at DESC LIMIT 100
-            """).fetchall()
-        finally:
-            conn.close()
+        rows = product_controller.get_recent_adjustments(limit=100)
+        self._populate_history(rows)
+
+    def _populate_history(self, rows):
         self.history_table.setUpdatesEnabled(False)
         self.history_table.setRowCount(len(rows))
         for r, row in enumerate(rows):

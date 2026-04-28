@@ -10,6 +10,7 @@ import models.supplier as supplier_model
 class SupplierList(KeyboardMixin, QWidget):
     def __init__(self):
         super().__init__()
+        self._open_wins = []
         self._build_ui()
         self._load()
 
@@ -73,16 +74,28 @@ class SupplierList(KeyboardMixin, QWidget):
         filtered = [r for r in all_rows if term in r['name'].lower() or term in r['code'].lower()]
         self._load(filtered)
 
+    def _open_win(self, win):
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        win.show()
+        win.raise_()
+        win.activateWindow()
+        def _alive(w):
+            try:
+                w.isVisible()
+                return True
+            except RuntimeError:
+                return False
+        self._open_wins = [w for w in self._open_wins if _alive(w)]
+        self._open_wins.append(win)
+
     def _add(self):
         from views.suppliers.supplier_edit import SupplierEdit
-        self.edit_win = SupplierEdit(on_save=self._load)
-        self.edit_win.show()
+        self._open_win(SupplierEdit(on_save=self._load))
 
-    def _edit(self):
+    def _edit(self, index=None):
         row = self.table.currentRow()
         if row < 0:
             return
         supplier_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
         from views.suppliers.supplier_edit import SupplierEdit
-        self.edit_win = SupplierEdit(supplier_id=supplier_id, on_save=self._load)
-        self.edit_win.show()
+        self._open_win(SupplierEdit(supplier_id=supplier_id, on_save=self._load))

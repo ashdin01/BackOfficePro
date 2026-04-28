@@ -92,6 +92,24 @@ class SupplierEdit(KeyboardMixin, QWidget):
         email_form.addRow("Accounts", self.email_accounts)
         layout.addWidget(email_group)
 
+        # ── Online Ordering ───────────────────────────────────────────
+        online_group = QGroupBox("Online Ordering")
+        online_form = QFormLayout(online_group)
+        online_form.setSpacing(8)
+
+        self.online_order = QCheckBox("This supplier requires ordering via an online portal")
+        self.online_order_note = QTextEdit()
+        self.online_order_note.setMaximumHeight(70)
+        self.online_order_note.setPlaceholderText(
+            "e.g. Log in at https://portal.supplier.com.au and place order manually. Do NOT email this PO."
+        )
+        self.online_order_note.setEnabled(False)
+        self.online_order.toggled.connect(self.online_order_note.setEnabled)
+
+        online_form.addRow("", self.online_order)
+        online_form.addRow("Instructions", self.online_order_note)
+        layout.addWidget(online_group)
+
         # ── Buttons ───────────────────────────────────────────────────
         btns = QHBoxLayout()
         save_btn = QPushButton("Save  [Ctrl+S]")
@@ -139,6 +157,11 @@ class SupplierEdit(KeyboardMixin, QWidget):
         self.email_accounts.setText(s['email_accounts'] if 'email_accounts' in keys else '')
         self.email_rep.setText(s['email_rep'] if 'email_rep' in keys else '')
 
+        is_online = bool(s['online_order']) if 'online_order' in keys else False
+        self.online_order.setChecked(is_online)
+        self.online_order_note.setEnabled(is_online)
+        self.online_order_note.setText(s['online_order_note'] if 'online_order_note' in keys else '')
+
     def _save(self):
         code = self.code.text().strip()
         name = self.name.text().strip()
@@ -164,6 +187,8 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     email_admin=self.email_admin.text().strip(),
                     email_accounts=self.email_accounts.text().strip(),
                     email_rep=self.email_rep.text().strip(),
+                    online_order=int(self.online_order.isChecked()),
+                    online_order_note=self.online_order_note.toPlainText().strip(),
                 )
             else:
                 supplier_model.add(
@@ -182,6 +207,8 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     email_admin=self.email_admin.text().strip(),
                     email_accounts=self.email_accounts.text().strip(),
                     email_rep=self.email_rep.text().strip(),
+                    online_order=int(self.online_order.isChecked()),
+                    online_order_note=self.online_order_note.toPlainText().strip(),
                 )
             if self.on_save:
                 self.on_save()

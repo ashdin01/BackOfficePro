@@ -186,24 +186,32 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         story.append(Spacer(1, 6))
 
     # ── Line items table ──────────────────────────────────────────────────
+    # Columns: Description (barcode sub-text) | SKU | Pack | Order Qty | Unit Cost | Line Total
     col_widths = [
-        W*0.14,   # Barcode
-        W*0.35,   # Description
-        W*0.10,   # Pack Size
-        W*0.10,   # SKU
-        W*0.10,   # Qty (units)
-        W*0.11,   # Unit Cost
-        W*0.10,   # Line Total
+        W*0.36,   # Description + barcode
+        W*0.14,   # Supplier SKU
+        W*0.10,   # Pack size
+        W*0.16,   # Order qty (cartons + units)
+        W*0.12,   # Unit cost
+        W*0.12,   # Line total
     ]
 
+    st_ctr = ParagraphStyle("ctr", fontSize=9, fontName="Helvetica",
+                             alignment=TA_CENTER, textColor=C_TEXT)
+    st_ctr_bold = ParagraphStyle("ctr_bold", fontSize=9, fontName="Helvetica-Bold",
+                                 alignment=TA_CENTER, textColor=C_WHITE)
+    st_sub = ParagraphStyle("sub", fontSize=7, fontName="Helvetica",
+                            textColor=C_SUBTEXT, leading=9)
+
     tbl_data = [[
-        Paragraph("Barcode",     st["body_bold"]),
-        Paragraph("Description", st["body_bold"]),
-        Paragraph("Pack",        st["body_bold"]),
-        Paragraph("SKU",         st["body_bold"]),
-        Paragraph("Qty\n(Units)",st["body_bold"]),
-        Paragraph("Unit\nCost",  st["body_bold"]),
-        Paragraph("Line\nTotal", st["right_bold"]),
+        Paragraph("Description",     st["body_bold"]),
+        Paragraph("Supplier SKU",    st["body_bold"]),
+        Paragraph("Pack",            st["body_bold"]),
+        Paragraph("Order Qty",       ParagraphStyle("hctr", fontSize=9,
+                                        fontName="Helvetica-Bold",
+                                        alignment=TA_CENTER, textColor=C_WHITE)),
+        Paragraph("Unit Cost",       st["right_bold"]),
+        Paragraph("Line Total",      st["right_bold"]),
     ]]
 
     fixed_total = 0.0
@@ -223,20 +231,31 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
 
         fixed_total += line_total
         if tax_rate > 0:
-            gst_total += line_total - (line_total / (1 + tax_rate / 100))
+            gst_total += line_total * (tax_rate / 100)
 
-        pack_str = f"{pack_qty}x{pack_unit}"
-        row_bg = C_WHITE if idx % 2 == 0 else C_ROW_ALT
+        # Description with barcode as small secondary line
+        desc_para = Paragraph(
+            f'{line["description"]}<br/>'
+            f'<font size="7" color="#888888">{line["barcode"]}</font>',
+            st["body"]
+        )
+
+        # Pack size: "12 × EA" is clearer than "12xEA"
+        pack_str = f"{pack_qty} × {pack_unit}" if pack_qty > 1 else pack_unit
+
+        # Order qty: show cartons + total units so the supplier knows exactly what to ship
+        if pack_qty > 1:
+            ctn_label = "ctn" if cartons == 1 else "ctns"
+            qty_str = f"{cartons} {ctn_label}\n({total_units} units)"
+        else:
+            qty_str = f"{total_units} units"
 
         tbl_data.append([
-            Paragraph(line["barcode"],    st["small"]),
-            Paragraph(line["description"], st["body"]),
-            Paragraph(pack_str,           st["small"]),
-            Paragraph(sup_sku,            st["small"]),
-            Paragraph(str(total_units),
-                ParagraphStyle("ctr", fontSize=9, fontName="Helvetica",
-                               alignment=TA_CENTER, textColor=C_TEXT)),
-            Paragraph(f"${unit_cost:.4f}", st["right"]),
+            desc_para,
+            Paragraph(sup_sku or "—",      st["small"]),
+            Paragraph(pack_str,             st["small"]),
+            Paragraph(qty_str,              st_ctr),
+            Paragraph(f"${unit_cost:.2f}",  st["right"]),
             Paragraph(f"${line_total:.2f}", st["right"]),
         ])
 

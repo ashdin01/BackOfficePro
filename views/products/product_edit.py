@@ -9,11 +9,11 @@ from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
 import controllers.product_controller as product_controller
 import models.product as product_model
+from PyQt6.QtGui import QColor
 import models.department as dept_model
 import models.supplier as supplier_model
 import models.barcode_alias as alias_model
 import models.group as group_model
-import models.product_suppliers as ps_model
 
 
 class ProductEdit(KeyboardMixin, QWidget):
@@ -232,10 +232,15 @@ class ProductEdit(KeyboardMixin, QWidget):
     # ── Supplier SKU display ──────────────────────────────────────────
 
     def _supplier_sku_display(self):
-        base = self._supplier_sku or "—"
-        if self._pack_qty and self._pack_qty > 1:
-            return f"{base}  ({self._pack_qty} × {self._pack_unit} per carton)"
-        return base
+        default = next((e for e in self._product_suppliers if e['is_default']), None)
+        if not default:
+            return "—"
+        sku = default.get('supplier_sku') or "—"
+        qty = default.get('pack_qty') or 1
+        unit = default.get('pack_unit') or 'EA'
+        if qty > 1:
+            return f"{sku}  ({qty} × {unit} per carton)"
+        return sku
 
     # ── Edit popup helpers ────────────────────────────────────────────
 
@@ -272,10 +277,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             self.lbl_plu.setText(val or "—")
 
     def _edit_supplier_sku(self):
-        result = _supplier_sku_popup(self._supplier_sku, self._pack_qty, self._pack_unit, self)
-        if result is not None:
-            self._supplier_sku, self._pack_qty, self._pack_unit = result
-            self.lbl_supplier_sku.setText(self._supplier_sku_display())
+        self._edit_supplier()
 
     def _group_name(self):
         if not self._group_id:
@@ -305,19 +307,13 @@ class ProductEdit(KeyboardMixin, QWidget):
             self.lbl_dept.setText(val)
 
     def _load_product_suppliers(self):
-        rows = ps_model.get_by_barcode(self.barcode)
-        if rows:
-            return [
-                {'supplier_id': r['supplier_id'],
-                 'supplier_name': r['supplier_name'],
-                 'is_default': bool(r['is_default'])}
-                for r in rows
-            ]
-        # Fallback for products not yet migrated to junction table
-        if self._supplier_id:
-            name = next((s['name'] for s in self._suppliers if s['id'] == self._supplier_id), "-- None --")
-            return [{'supplier_id': self._supplier_id, 'supplier_name': name, 'is_default': True}]
-        return []
+        return product_controller.get_product_suppliers(
+            self.barcode,
+            fallback_supplier_id=self._supplier_id,
+            fallback_sku=self._supplier_sku,
+            fallback_pack_qty=self._pack_qty,
+            fallback_pack_unit=self._pack_unit,
+        )
 
     def _edit_supplier(self):
         from PyQt6.QtWidgets import (
@@ -326,45 +322,43 @@ class ProductEdit(KeyboardMixin, QWidget):
         )
         dlg = QDialog(self)
         dlg.setWindowTitle("Manage Suppliers")
-        dlg.setMinimumWidth(520)
-        dlg.setMinimumHeight(300)
+        dlg.setMinimumWidth(740)
+        dlg.setMinimumHeight(320)
         layout = QVBoxLayout(dlg)
         layout.setSpacing(10)
         layout.setContentsMargins(16, 16, 16, 16)
 
         note = QLabel(
-            "The Default supplier determines which purchase orders this product appears in.\n"
-            "Additional suppliers can be used to manually add lines to their POs."
+            "The Default supplier determines which purchase orders this product appears in. "
+            "Set the Supplier SKU and carton pack size per supplier."
         )
         note.setStyleSheet("color: #8b949e; font-size: 11px;")
         note.setWordWrap(True)
         layout.addWidget(note)
 
         self._sup_table = QTableWidget()
-        self._sup_table.setColumnCount(3)
-        self._sup_table.setHorizontalHeaderLabels(["Supplier", "Default", ""])
+        self._sup_table.setColumnCount(6)
+        self._sup_table.setHorizontalHeaderLabels(
+            ["Supplier", "Supplier SKU", "Pack Qty", "Unit", "Default", ""]
+        )
         self._sup_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._sup_table.setColumnWidth(1, 110)
-        self._sup_table.setColumnWidth(2, 60)
+        self._sup_table.setColumnWidth(1, 150)
+        self._sup_table.setColumnWidth(2, 75)
+        self._sup_table.setColumnWidth(3, 65)
+        self._sup_table.setColumnWidth(4, 110)
+        self._sup_table.setColumnWidth(5, 50)
         self._sup_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._sup_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._sup_table.verticalHeader().setVisible(False)
         self._sup_table.setAlternatingRowColors(True)
+        self._sup_table.setMinimumHeight(120)
         layout.addWidget(self._sup_table)
 
-        add_row = QHBoxLayout()
-        self._sup_combo = QComboBox()
-        self._sup_combo.setMinimumWidth(260)
+        btn_row = QHBoxLayout()
         btn_add = QPushButton("+ Add Supplier")
         btn_add.setFixedHeight(30)
-        btn_add.clicked.connect(self._add_supplier)
-        add_row.addWidget(QLabel("Add:"))
-        add_row.addWidget(self._sup_combo)
-        add_row.addWidget(btn_add)
-        add_row.addStretch()
-        layout.addLayout(add_row)
-
-        btn_row = QHBoxLayout()
+        btn_add.clicked.connect(self._add_supplier_popup)
+        btn_row.addWidget(btn_add)
         btn_row.addStretch()
         btn_done = QPushButton("Done")
         btn_done.setFixedHeight(32)
@@ -378,15 +372,44 @@ class ProductEdit(KeyboardMixin, QWidget):
         layout.addLayout(btn_row)
 
         self._refresh_sup_table()
-        self._refresh_sup_combo()
         dlg.exec()
         self.lbl_supplier.setText(self._supplier_name())
+        self.lbl_supplier_sku.setText(self._supplier_sku_display())
 
     def _refresh_sup_table(self):
         self._sup_table.setUpdatesEnabled(False)
         self._sup_table.setRowCount(len(self._product_suppliers))
         for r, entry in enumerate(self._product_suppliers):
             self._sup_table.setItem(r, 0, QTableWidgetItem(entry['supplier_name']))
+
+            # Col 1 — Supplier SKU (inline QLineEdit)
+            sku_edit = QLineEdit(entry.get('supplier_sku') or '')
+            sku_edit.setPlaceholderText("e.g. BIP-240")
+            sku_edit.textChanged.connect(
+                lambda text, i=r: self._product_suppliers[i].__setitem__('supplier_sku', text.strip())
+            )
+            self._sup_table.setCellWidget(r, 1, sku_edit)
+
+            # Col 2 — Pack Qty (inline QSpinBox)
+            qty_spin = QSpinBox()
+            qty_spin.setMinimum(1)
+            qty_spin.setMaximum(9999)
+            qty_spin.setValue(entry.get('pack_qty') or 1)
+            qty_spin.valueChanged.connect(
+                lambda val, i=r: self._product_suppliers[i].__setitem__('pack_qty', val)
+            )
+            self._sup_table.setCellWidget(r, 2, qty_spin)
+
+            # Col 3 — Pack Unit (inline QComboBox)
+            unit_cb = QComboBox()
+            unit_cb.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
+            unit_cb.setCurrentText(entry.get('pack_unit') or 'EA')
+            unit_cb.currentTextChanged.connect(
+                lambda text, i=r: self._product_suppliers[i].__setitem__('pack_unit', text)
+            )
+            self._sup_table.setCellWidget(r, 3, unit_cb)
+
+            # Col 4 — Default toggle
             if entry['is_default']:
                 btn_def = QPushButton("★ Default")
                 btn_def.setEnabled(False)
@@ -399,32 +422,98 @@ class ProductEdit(KeyboardMixin, QWidget):
                 btn_def = QPushButton("Set Default")
                 btn_def.setFixedHeight(26)
                 btn_def.clicked.connect(lambda _, i=r: self._set_default_supplier(i))
-            self._sup_table.setCellWidget(r, 1, btn_def)
+            self._sup_table.setCellWidget(r, 4, btn_def)
+
+            # Col 5 — Remove
             btn_rem = QPushButton("✕")
             btn_rem.setFixedHeight(26)
             btn_rem.setStyleSheet("color: #f44336; font-weight: bold;")
             btn_rem.clicked.connect(lambda _, i=r: self._remove_supplier(i))
-            self._sup_table.setCellWidget(r, 2, btn_rem)
+            self._sup_table.setCellWidget(r, 5, btn_rem)
+
         self._sup_table.setUpdatesEnabled(True)
 
-    def _refresh_sup_combo(self):
-        existing_ids = {e['supplier_id'] for e in self._product_suppliers}
-        self._sup_combo.clear()
-        for s in self._suppliers:
-            if s['id'] not in existing_ids:
-                self._sup_combo.addItem(s['name'], s['id'])
+    def _add_supplier_popup(self):
+        from PyQt6.QtWidgets import QFormLayout
+        from PyQt6.QtGui import QShortcut, QKeySequence
 
-    def _add_supplier(self):
-        sup_id = self._sup_combo.currentData()
-        if sup_id is None:
+        existing_ids = {e['supplier_id'] for e in self._product_suppliers}
+        available = [s for s in self._suppliers if s['id'] not in existing_ids]
+        if not available:
+            QMessageBox.information(self, "Add Supplier", "All suppliers are already linked to this product.")
             return
-        sup_name = self._sup_combo.currentText()
-        is_default = len(self._product_suppliers) == 0
-        self._product_suppliers.append(
-            {'supplier_id': sup_id, 'supplier_name': sup_name, 'is_default': is_default}
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add Supplier")
+        dlg.setMinimumWidth(380)
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        sup_combo = QComboBox()
+        for s in available:
+            sup_combo.addItem(s['name'], s['id'])
+        form.addRow("Supplier", sup_combo)
+
+        sku_input = QLineEdit()
+        sku_input.setPlaceholderText("e.g. BIP-240")
+        form.addRow("Supplier SKU", sku_input)
+
+        pack_layout = QHBoxLayout()
+        qty_spin = QSpinBox()
+        qty_spin.setMinimum(1)
+        qty_spin.setMaximum(9999)
+        qty_spin.setValue(1)
+        qty_spin.setFixedWidth(80)
+        unit_cb = QComboBox()
+        unit_cb.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
+        unit_cb.setFixedWidth(80)
+        pack_layout.addWidget(qty_spin)
+        pack_layout.addWidget(unit_cb)
+        pack_layout.addStretch()
+        form.addRow("Pack Size", pack_layout)
+
+        layout.addLayout(form)
+        layout.addSpacing(4)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        ok_btn = QPushButton("Add  [Ctrl+S]")
+        ok_btn.setFixedHeight(32)
+        ok_btn.setStyleSheet(
+            "QPushButton { background: #1565c0; color: white; border: none; "
+            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
+            "QPushButton:hover { background: #1976d2; }"
         )
-        self._refresh_sup_table()
-        self._refresh_sup_combo()
+        cancel_btn = QPushButton("Cancel  [Esc]")
+        cancel_btn.setFixedHeight(32)
+        btns.addWidget(ok_btn)
+        btns.addWidget(cancel_btn)
+        layout.addLayout(btns)
+
+        def confirm():
+            sup_id   = sup_combo.currentData()
+            sup_name = sup_combo.currentText()
+            self._product_suppliers.append({
+                'supplier_id':   sup_id,
+                'supplier_name': sup_name,
+                'is_default':    len(self._product_suppliers) == 0,
+                'supplier_sku':  sku_input.text().strip(),
+                'pack_qty':      qty_spin.value(),
+                'pack_unit':     unit_cb.currentText(),
+            })
+            self._refresh_sup_table()
+            dlg.accept()
+
+        ok_btn.clicked.connect(confirm)
+        cancel_btn.clicked.connect(dlg.reject)
+        QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
+        QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
+        sku_input.setFocus()
+        dlg.exec()
 
     def _remove_supplier(self, idx):
         was_default = self._product_suppliers[idx]['is_default']
@@ -564,20 +653,17 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._load_aliases()
 
     def _view_history(self):
-        """Open movement history popup for this product."""
         from PyQt6.QtWidgets import (
             QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
             QTableWidgetItem, QHeaderView, QLabel, QComboBox, QPushButton
         )
-        from PyQt6.QtGui import QColor
-        from database.connection import get_connection
+        from PyQt6.QtGui import QShortcut, QKeySequence
 
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Movement History — {self.product['barcode']}")
         dlg.setMinimumSize(820, 500)
         layout = QVBoxLayout(dlg)
 
-        # Filter row
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("Type:"))
         type_cb = QComboBox()
@@ -589,16 +675,12 @@ class ProductEdit(KeyboardMixin, QWidget):
         filter_row.addWidget(status_lbl)
         layout.addLayout(filter_row)
 
-        # Table
         tbl = QTableWidget()
         tbl.setColumnCount(6)
         tbl.setHorizontalHeaderLabels(["Date/Time", "Type", "Qty", "Balance", "Reference", "Notes"])
         hdr = tbl.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        for ci in range(5):
+            hdr.setSectionResizeMode(ci, QHeaderView.ResizeMode.Interactive)
         hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         tbl.setColumnWidth(0, 135)
         tbl.setColumnWidth(1, 110)
@@ -611,20 +693,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         layout.addWidget(tbl)
 
         def load(move_type=None):
-            conn = get_connection()
-            sql = """
-                SELECT movement_type, quantity, reference, notes, created_at
-                FROM stock_movements
-                WHERE barcode = ?
-            """
-            params = [self.barcode]
-            if move_type and move_type != "ALL":
-                sql += " AND movement_type = ?"
-                params.append(move_type)
-            sql += " ORDER BY created_at ASC"
-            rows = conn.execute(sql, params).fetchall()
-            conn.close()
-
+            rows = product_controller.get_movement_history(self.barcode, move_type)
             tbl.setRowCount(0)
             balance = 0.0
             display_rows = []
@@ -632,7 +701,6 @@ class ProductEdit(KeyboardMixin, QWidget):
                 balance += row["quantity"]
                 display_rows.append((row, balance))
 
-            # Show newest first
             for row, bal in reversed(display_rows):
                 r = tbl.rowCount()
                 tbl.insertRow(r)
@@ -670,7 +738,6 @@ class ProductEdit(KeyboardMixin, QWidget):
         type_cb.currentTextChanged.connect(load)
         load()
 
-        # Close button
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         close_btn = QPushButton("Close  [Esc]")
@@ -678,22 +745,25 @@ class ProductEdit(KeyboardMixin, QWidget):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
-        from PyQt6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Escape"), dlg, dlg.accept)
         dlg.exec()
 
     def _save(self):
         default_sup = next((s for s in self._product_suppliers if s['is_default']), None)
         self._supplier_id = default_sup['supplier_id'] if default_sup else None
+        # Sync products table from default supplier's per-supplier values
+        supplier_sku = default_sup.get('supplier_sku', '') if default_sup else ''
+        pack_qty     = default_sup.get('pack_qty', 1)     if default_sup else 1
+        pack_unit    = default_sup.get('pack_unit', 'EA') if default_sup else 'EA'
         try:
             product_controller.save_product(
                 barcode=self.barcode,
                 description=self._description,
                 brand=self._brand,
                 plu=self._plu,
-                supplier_sku=self._supplier_sku,
-                pack_qty=self._pack_qty,
-                pack_unit=self._pack_unit,
+                supplier_sku=supplier_sku,
+                pack_qty=pack_qty,
+                pack_unit=pack_unit,
                 group_id=self._group_id,
                 department_id=self._dept_id,
                 supplier_id=self._supplier_id,
@@ -716,81 +786,6 @@ class ProductEdit(KeyboardMixin, QWidget):
             QMessageBox.warning(self, "Validation", str(e))
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
-
-
-# ── Supplier SKU popup with pack size ─────────────────────────────────
-
-def _supplier_sku_popup(current_sku, current_pack_qty, current_pack_unit, parent=None):
-    dlg = QDialog(parent)
-    dlg.setWindowTitle("Edit Supplier SKU")
-    dlg.setMinimumWidth(380)
-    layout = QVBoxLayout(dlg)
-
-    note = QLabel("The Supplier SKU links to purchase orders.\nPack size describes the bulk carton this product arrives in.")
-    note.setStyleSheet("color: grey; font-size: 11px;")
-    note.setWordWrap(True)
-    layout.addWidget(note)
-    layout.addSpacing(6)
-
-    form = QFormLayout()
-
-    inp_sku = QLineEdit(current_sku or "")
-    inp_sku.setPlaceholderText("e.g. BIP-BOMBA-240")
-    form.addRow("Supplier SKU", inp_sku)
-
-    inp_qty = QSpinBox()
-    inp_qty.setMinimum(1)
-    inp_qty.setMaximum(9999)
-    inp_qty.setValue(current_pack_qty or 1)
-    inp_qty.setToolTip("How many units arrive per carton/case")
-    form.addRow("Units per Carton", inp_qty)
-
-    inp_unit = QComboBox()
-    inp_unit.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
-    inp_unit.setCurrentText(current_pack_unit or 'EA')
-    form.addRow("Unit", inp_unit)
-
-    preview = QLabel()
-    preview.setStyleSheet("color: #555; font-style: italic;")
-
-    def update_preview():
-        sku = inp_sku.text().strip() or "SKU"
-        qty = inp_qty.value()
-        unit = inp_unit.currentText()
-        preview.setText(f"→  {sku}  ({qty} × {unit} per carton)")
-
-    inp_sku.textChanged.connect(update_preview)
-    inp_qty.valueChanged.connect(update_preview)
-    inp_unit.currentTextChanged.connect(update_preview)
-    update_preview()
-
-    form.addRow("Preview", preview)
-    layout.addLayout(form)
-    layout.addSpacing(8)
-
-    btns = QHBoxLayout()
-    ok = QPushButton("Save  [Ctrl+S]")
-    ok.setFixedHeight(32)
-    cancel = QPushButton("Cancel  [Esc]")
-    cancel.setFixedHeight(32)
-    btns.addWidget(ok)
-    btns.addWidget(cancel)
-    layout.addLayout(btns)
-
-    from PyQt6.QtGui import QShortcut, QKeySequence
-    result = [None]
-
-    def confirm():
-        result[0] = (inp_sku.text().strip(), inp_qty.value(), inp_unit.currentText())
-        dlg.accept()
-
-    ok.clicked.connect(confirm)
-    cancel.clicked.connect(dlg.reject)
-    QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-    QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-    inp_sku.setFocus()
-    dlg.exec()
-    return result[0]
 
 
 # ── Reusable popup dialogs ────────────────────────────────────────────
@@ -1001,125 +996,6 @@ class AddAliasDialog(QDialog):
         QShortcut(QKeySequence("Escape"), self, self.reject)
         QShortcut(QKeySequence("Ctrl+S"), self, self._save)
         self.barcode.setFocus()
-
-    def _view_history(self):
-        """Open movement history popup for this product."""
-        from PyQt6.QtWidgets import (
-            QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
-            QTableWidgetItem, QHeaderView, QLabel, QComboBox, QPushButton
-        )
-        from PyQt6.QtGui import QColor
-        from database.connection import get_connection
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Movement History — {self.product['barcode']}")
-        dlg.setMinimumSize(820, 500)
-        layout = QVBoxLayout(dlg)
-
-        # Filter row
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(QLabel("Type:"))
-        type_cb = QComboBox()
-        type_cb.addItems(["ALL", "RECEIPT", "SALE", "ADJUSTMENT", "ADJUSTMENT_IN",
-                          "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE"])
-        filter_row.addWidget(type_cb)
-        filter_row.addStretch()
-        status_lbl = QLabel()
-        filter_row.addWidget(status_lbl)
-        layout.addLayout(filter_row)
-
-        # Table
-        tbl = QTableWidget()
-        tbl.setColumnCount(6)
-        tbl.setHorizontalHeaderLabels(["Date/Time", "Type", "Qty", "Balance", "Reference", "Notes"])
-        hdr = tbl.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        tbl.setColumnWidth(0, 135)
-        tbl.setColumnWidth(1, 110)
-        tbl.setColumnWidth(2, 60)
-        tbl.setColumnWidth(3, 70)
-        tbl.setColumnWidth(4, 110)
-        tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        tbl.setSortingEnabled(False)
-        layout.addWidget(tbl)
-
-        def load(move_type=None):
-            conn = get_connection()
-            sql = """
-                SELECT movement_type, quantity, reference, notes, created_at
-                FROM stock_movements
-                WHERE barcode = ?
-            """
-            params = [self.barcode]
-            if move_type and move_type != "ALL":
-                sql += " AND movement_type = ?"
-                params.append(move_type)
-            sql += " ORDER BY created_at ASC"
-            rows = conn.execute(sql, params).fetchall()
-            conn.close()
-
-            tbl.setRowCount(0)
-            balance = 0.0
-            display_rows = []
-            for row in rows:
-                balance += row["quantity"]
-                display_rows.append((row, balance))
-
-            # Show newest first
-            for row, bal in reversed(display_rows):
-                r = tbl.rowCount()
-                tbl.insertRow(r)
-                tbl.setItem(r, 0, QTableWidgetItem(str(row["created_at"])[:16]))
-
-                type_item = QTableWidgetItem(row["movement_type"])
-                type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                qty = row["quantity"]
-                if row["movement_type"] in ("RECEIPT", "ADJUSTMENT_IN", "RETURN"):
-                    type_item.setForeground(QColor("#4CAF50"))
-                elif row["movement_type"] in ("SALE", "WASTAGE", "ADJUSTMENT_OUT", "SHRINKAGE"):
-                    type_item.setForeground(QColor("#f85149"))
-                else:
-                    type_item.setForeground(QColor("steelblue"))
-                tbl.setItem(r, 1, type_item)
-
-                qty_item = QTableWidgetItem(f"{'+' if qty > 0 else ''}{qty:.0f}")
-                qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                qty_item.setForeground(QColor("#4CAF50") if qty > 0 else QColor("#f85149"))
-                tbl.setItem(r, 2, qty_item)
-
-                bal_item = QTableWidgetItem(f"{bal:.0f}")
-                bal_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                bal_item.setForeground(
-                    QColor("#4CAF50") if bal > 0 else
-                    QColor("#FF9800") if bal == 0 else
-                    QColor("#f85149")
-                )
-                tbl.setItem(r, 3, bal_item)
-                tbl.setItem(r, 4, QTableWidgetItem(row["reference"] or ""))
-                tbl.setItem(r, 5, QTableWidgetItem(row["notes"] or ""))
-
-            status_lbl.setText(f"{tbl.rowCount()} movements")
-
-        type_cb.currentTextChanged.connect(load)
-        load()
-
-        # Close button
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        close_btn = QPushButton("Close  [Esc]")
-        close_btn.clicked.connect(dlg.accept)
-        btn_row.addWidget(close_btn)
-        layout.addLayout(btn_row)
-
-        from PyQt6.QtGui import QShortcut, QKeySequence
-        QShortcut(QKeySequence("Escape"), dlg, dlg.accept)
-        dlg.exec()
 
     def _save(self):
         barcode = self.barcode.text().strip()

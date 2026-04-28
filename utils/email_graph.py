@@ -165,21 +165,22 @@ def send_purchase_order(po_id: int, to_address: str, pdf_path: str) -> bool:
    JOIN suppliers s ON po.supplier_id = s.id
    WHERE po.id=?""", (po_id,)
     ).fetchone()
-    store = conn.execute(
-        "SELECT value FROM settings WHERE key='store_name'"
-    ).fetchone()
+    settings_rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key IN ('store_name', 'store_manager')"
+    ).fetchall()
     conn.close()
+    settings = {r[0]: (r[1] or "").strip() for r in settings_rows}
 
-    po_number    = po["po_number"] if po else f"PO-{po_id}"
-    supplier     = po["supplier_name"] if po else "Supplier"
-    store_name   = store["value"] if store else "Our Store"
+    po_number     = po["po_number"] if po else f"PO-{po_id}"
+    supplier      = po["supplier_name"] if po else "Supplier"
+    store_name    = settings.get("store_name", "Our Store")
+    store_manager = settings.get("store_manager", store_name)
 
     subject = f"Purchase Order {po_number} — {store_name}"
     body = (
         f"Dear {supplier},\n\n"
         f"Please find attached Purchase Order {po_number} from {store_name}.\n\n"
-        f"Please confirm receipt and expected delivery date at your earliest convenience.\n\n"
-        f"Kind regards,\n{store_name}"
+        f"Kind regards,\n{store_manager}\n{store_name}"
     )
 
     return send_email(
