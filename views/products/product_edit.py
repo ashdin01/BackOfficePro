@@ -1,12 +1,14 @@
 from PyQt6.QtWidgets import (
-    QWidget, QFormLayout, QComboBox,
+    QWidget, QFormLayout, QComboBox, QFrame,
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox,
     QDoubleSpinBox, QLabel, QDialog, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QCheckBox, QSpinBox
+    QCheckBox, QSpinBox, QFileDialog, QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from utils.keyboard_mixin import KeyboardMixin
+import os, shutil
 import controllers.product_controller as product_controller
 import models.product as product_model
 from PyQt6.QtGui import QColor
@@ -20,9 +22,9 @@ class ProductEdit(KeyboardMixin, QWidget):
     def __init__(self, barcode, on_save=None):
         super().__init__()
         self.setWindowTitle("Product Detail")
-        self.setMinimumWidth(720)
-        self.setMinimumHeight(750)
-        self.resize(720, 900)
+        self.setMinimumWidth(900)
+        self.setMinimumHeight(700)
+        self.resize(960, 860)
         self.barcode = barcode
         self.on_save = on_save
         self._depts = dept_model.get_all()
@@ -33,7 +35,45 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._build_ui()
         self.setup_keyboard()
 
+    def _check_selling_unit(self):
+        from database.connection import get_connection as _gc
+        conn = _gc()
+        try:
+            row = conn.execute(
+                """
+                SELECT su.master_barcode, su.label, su.unit_qty,
+                       p.description AS master_desc
+                FROM product_selling_units su
+                JOIN products p ON su.master_barcode = p.barcode
+                WHERE su.barcode = ? AND su.active = 1
+                """,
+                (self.barcode,)
+            ).fetchone()
+            if row:
+                self._is_selling_unit = True
+                self._su_master = dict(row)
+            else:
+                self._is_selling_unit = False
+                self._su_master = None
+        finally:
+            conn.close()
+
+    def _selling_unit_guard(self) -> bool:
+        """Returns True (and shows warning) if this product is a selling unit — caller should abort edit."""
+        if self._is_selling_unit:
+            m = self._su_master
+            QMessageBox.information(
+                self, "Selling Unit — Read Only",
+                f"This product is a selling unit of:\n\n"
+                f"  {m['master_desc']}  ({m['master_barcode']})\n\n"
+                "Pricing, PLU, description and barcode are managed on the master product.\n"
+                "Open the master product to make changes."
+            )
+            return True
+        return False
+
     def _init_values(self):
+        self._check_selling_unit()
         p = self.product
         self._description   = p['description']
         self._brand         = p['brand'] or ''
@@ -58,8 +98,21 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setSpacing(10)
+        layout.setSpacing(8)
+
+        if self._is_selling_unit:
+            m = self._su_master
+            banner = QLabel(
+                f"⚠  Selling unit of:  {m['master_desc']}  —  barcode {m['master_barcode']}  "
+                f"({int(m['unit_qty'])} units per pack).  "
+                "Pricing, PLU and description are managed on the master product."
+            )
+            banner.setWordWrap(True)
+            banner.setStyleSheet(
+                "background: #3a2a00; color: #ffcc44; border: 1px solid #7a5a00;"
+                "border-radius: 6px; padding: 8px 12px; font-size: 12px;"
+            )
+            layout.addWidget(banner)
 
         def ro_row(field_label, value, on_edit):
             row = QHBoxLayout()
@@ -67,133 +120,171 @@ class ProductEdit(KeyboardMixin, QWidget):
             btn.setFixedSize(28, 28)
             btn.clicked.connect(on_edit)
             key = QLabel(field_label)
-            key.setMinimumWidth(140)
+            key.setMinimumWidth(130)
             key.setStyleSheet('color: #8b949e;')
             lbl = QLabel(str(value))
-            lbl.setMinimumWidth(260)
+            lbl.setMinimumWidth(180)
             row.addWidget(btn)
             row.addWidget(key)
             row.addWidget(lbl)
             row.addStretch()
             return row, lbl
 
-        # ── Field order per spec ──────────────────────────────────────
+        def info_row(field_label, widget):
+            row = QHBoxLayout()
+            stub = QPushButton()
+            stub.setFixedSize(28, 28)
+            stub.setEnabled(False)
+            stub.setStyleSheet("background: transparent; border: none;")
+            key = QLabel(field_label)
+            key.setMinimumWidth(130)
+            key.setStyleSheet("color: #8b949e;")
+            row.addWidget(stub)
+            row.addWidget(key)
+            row.addWidget(widget)
+            row.addStretch()
+            return row
+
+        # ── Two-column field area ─────────────────────────────────────
+        two_col = QHBoxLayout()
+        two_col.setSpacing(12)
+
+        left_col = QVBoxLayout()
+        left_col.setSpacing(5)
+        right_col = QVBoxLayout()
+        right_col.setSpacing(5)
+
+        # Left — identification & classification
         r, self.lbl_barcode = ro_row("Barcode", self.product['barcode'], self._edit_barcode)
-        form.addRow(r)
+        left_col.addLayout(r)
 
         r, self.lbl_desc = ro_row("Description", self._description, self._edit_description)
-        form.addRow(r)
+        left_col.addLayout(r)
 
         r, self.lbl_brand = ro_row("Brand", self._brand or "—", self._edit_brand)
-        form.addRow(r)
+        left_col.addLayout(r)
 
         r, self.lbl_plu = ro_row("PLU", self._plu or "—", self._edit_plu)
-        form.addRow(r)
+        left_col.addLayout(r)
 
         r, self.lbl_supplier = ro_row("Supplier (default)", self._supplier_name(), self._edit_supplier)
-        form.addRow(r)
+        left_col.addLayout(r)
 
-        # Supplier SKU + pack size on one row
         r, self.lbl_supplier_sku = ro_row("Supplier SKU", self._supplier_sku_display(), self._edit_supplier_sku)
-        form.addRow(r)
+        left_col.addLayout(r)
 
         r, self.lbl_dept = ro_row("Department", self._dept_name(), self._edit_dept)
-        form.addRow(r)
+        left_col.addLayout(r)
 
         r, self.lbl_group = ro_row("Group", self._group_name(), self._edit_group)
-        form.addRow(r)
+        left_col.addLayout(r)
 
         r, self.lbl_unit = ro_row("Unit", self._unit, self._edit_unit)
-        form.addRow(r)
+        left_col.addLayout(r)
 
+        left_col.addStretch()
+
+        # Right — pricing, stock & flags
         r, self.lbl_cost = ro_row("Cost Price (ex GST)", f"${self._cost_price:.4f}", self._edit_cost)
-        form.addRow(r)
+        right_col.addLayout(r)
+
         tax = self._tax_rate or 0.0
         inc = self._cost_price * (1 + tax / 100)
         color = "#4CAF50" if tax > 0 else "grey"
         self.lbl_cost_inc = QLabel(f"<b style='color:{color}'>${inc:.2f}</b>")
         self.lbl_cost_inc.setTextFormat(Qt.TextFormat.RichText)
-        _inc_row = QHBoxLayout()
-        _inc_btn = QPushButton()
-        _inc_btn.setFixedSize(28, 28)
-        _inc_btn.setEnabled(False)
-        _inc_btn.setStyleSheet("background: transparent; border: none;")
-        _inc_key = QLabel("Cost Price (inc GST)")
-        _inc_key.setMinimumWidth(140)
-        _inc_key.setStyleSheet("color: #8b949e;")
-        _inc_row.addWidget(_inc_btn)
-        _inc_row.addWidget(_inc_key)
-        _inc_row.addWidget(self.lbl_cost_inc)
-        _inc_row.addStretch()
-        form.addRow(_inc_row)
+        right_col.addLayout(info_row("Cost Price (inc GST)", self.lbl_cost_inc))
 
         r, self.lbl_sell = ro_row("Sell Price (inc GST)", f"${self._sell_price:.2f}", self._edit_sell)
-        form.addRow(r)
+        right_col.addLayout(r)
 
         self.lbl_gp = QLabel()
         self.lbl_gp.setTextFormat(Qt.TextFormat.RichText)
         self._refresh_gp()
-        _gp_row = QHBoxLayout()
-        _gp_btn = QPushButton()
-        _gp_btn.setFixedSize(28, 28)
-        _gp_btn.setEnabled(False)
-        _gp_btn.setStyleSheet("background: transparent; border: none;")
-        _gp_key = QLabel("Gross Profit")
-        _gp_key.setMinimumWidth(140)
-        _gp_key.setStyleSheet("color: #8b949e;")
-        _gp_row.addWidget(_gp_btn)
-        _gp_row.addWidget(_gp_key)
-        _gp_row.addWidget(self.lbl_gp)
-        _gp_row.addStretch()
-        form.addRow(_gp_row)
+        right_col.addLayout(info_row("Gross Profit", self.lbl_gp))
 
         r, self.lbl_tax = ro_row("Tax Rate", self._tax_label(), self._edit_tax)
-        form.addRow(r)
+        right_col.addLayout(r)
 
         r, self.lbl_reorder_pt = ro_row("Reorder Point", int(self._reorder_point), self._edit_reorder_point)
-        form.addRow(r)
-
+        right_col.addLayout(r)
 
         r, self.lbl_reorder_max = ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
-        form.addRow(r)
+        right_col.addLayout(r)
 
         r, self.lbl_vw = ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
-        form.addRow(r)
+        right_col.addLayout(r)
 
-        r, self.lbl_stocktake = ro_row("Include in Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
-        form.addRow(r)
+        r, self.lbl_stocktake = ro_row("In Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
+        right_col.addLayout(r)
 
         r, self.lbl_active = ro_row("Active", "Yes" if self._active else "No", self._edit_active)
-        form.addRow(r)
-        r, self.lbl_auto_reorder = ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
-        form.addRow(r)
+        right_col.addLayout(r)
 
-        # ── Stock info (read-only, no edit button) ────────────────
+        r, self.lbl_auto_reorder = ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
+        right_col.addLayout(r)
+
         from models.stock_on_hand import get_by_barcode as _get_soh
         soh = _get_soh(self.barcode)
         soh_qty = int(soh["quantity"]) if soh else 0
         soh_color = "#4CAF50" if soh_qty > 0 else "#FF9800" if soh_qty == 0 else "#f44336"
         self.lbl_soh = QLabel(f'<span style="color:{soh_color};font-weight:bold;">{soh_qty}</span>')
         self.lbl_soh.setTextFormat(Qt.TextFormat.RichText)
-        form.addRow("Stock on Hand", self.lbl_soh)
+        right_col.addLayout(info_row("Stock on Hand", self.lbl_soh))
 
         on_order = product_controller.get_stock_on_order(self.barcode)
         on_order_color = "#2196F3" if on_order > 0 else "#8b949e"
         self.lbl_on_order = QLabel(f'<span style="color:{on_order_color};font-weight:bold;">{on_order}</span>')
         self.lbl_on_order.setTextFormat(Qt.TextFormat.RichText)
-        form.addRow("Stock on Order", self.lbl_on_order)
+        right_col.addLayout(info_row("Stock on Order", self.lbl_on_order))
 
-        layout.addLayout(form)
+        right_col.addStretch()
 
-        # Alternate barcodes
-        # ── Movement History button ───────────────────────────────
-        hist_row = QHBoxLayout()
-        btn_history = QPushButton("📋 View Movement History")
-        btn_history.setFixedHeight(30)
-        btn_history.clicked.connect(self._view_history)
-        hist_row.addWidget(btn_history)
-        hist_row.addStretch()
-        layout.addLayout(hist_row)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        sep.setStyleSheet("color: #2a3a4a;")
+
+        two_col.addLayout(left_col, 1)
+        two_col.addWidget(sep)
+        two_col.addLayout(right_col, 1)
+        layout.addLayout(two_col)
+
+        # ── Bottom row: image + alternate barcodes ────────────────────
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(12)
+
+        img_group = QGroupBox("Product Image")
+        img_lay = QHBoxLayout(img_group)
+        img_lay.setSpacing(12)
+
+        self._img_label = QLabel()
+        self._img_label.setFixedSize(80, 80)
+        self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._img_label.setStyleSheet(
+            "background:#1a2332; border:1px solid #2a3a4a; border-radius:6px; color:#8b949e;"
+        )
+        img_lay.addWidget(self._img_label)
+
+        img_btn_col = QVBoxLayout()
+        img_btn_col.setSpacing(4)
+        self._img_path_lbl = QLabel("No image")
+        self._img_path_lbl.setStyleSheet("color:#8b949e; font-size:11px;")
+        self._img_path_lbl.setWordWrap(True)
+        img_btn_col.addWidget(self._img_path_lbl)
+        btn_upload = QPushButton("📷  Upload Image")
+        btn_upload.setFixedHeight(26)
+        btn_upload.clicked.connect(self._upload_image)
+        img_btn_col.addWidget(btn_upload)
+        btn_remove = QPushButton("✕  Remove Image")
+        btn_remove.setFixedHeight(26)
+        btn_remove.clicked.connect(self._remove_image)
+        img_btn_col.addWidget(btn_remove)
+        img_btn_col.addStretch()
+        img_lay.addLayout(img_btn_col)
+
+        bottom_row.addWidget(img_group)
+        self._load_image_preview()
 
         alias_group = QGroupBox("Alternate Barcodes")
         alias_layout = QVBoxLayout(alias_group)
@@ -201,7 +292,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.alias_table.setColumnCount(3)
         self.alias_table.setHorizontalHeaderLabels(["Barcode", "Note", "Added"])
         self.alias_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.alias_table.setMaximumHeight(140)
+        self.alias_table.setMinimumHeight(60)
+        self.alias_table.setMaximumHeight(100)
         self.alias_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.alias_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         alias_layout.addWidget(self.alias_table)
@@ -214,20 +306,31 @@ class ProductEdit(KeyboardMixin, QWidget):
         alias_btns.addWidget(btn_del_alias)
         alias_btns.addStretch()
         alias_layout.addLayout(alias_btns)
-        layout.addWidget(alias_group)
+
+        bottom_row.addWidget(alias_group, 1)
         self._load_aliases()
 
-        layout.addSpacing(8)
-        btns = QHBoxLayout()
+        layout.addLayout(bottom_row)
+
+        # ── Selling Units ─────────────────────────────────────────────
+        layout.addWidget(self._build_selling_units_section())
+
+        # ── Action buttons ────────────────────────────────────────────
+        act_row = QHBoxLayout()
+        btn_history = QPushButton("📋 View Movement History")
+        btn_history.setFixedHeight(30)
+        btn_history.clicked.connect(self._view_history)
+        act_row.addWidget(btn_history)
+        act_row.addStretch()
         save_btn = QPushButton("Save  [Ctrl+S]")
         save_btn.setFixedHeight(35)
         save_btn.clicked.connect(self._save)
         cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.close)
-        btns.addWidget(save_btn)
-        btns.addWidget(cancel_btn)
-        layout.addLayout(btns)
+        act_row.addWidget(save_btn)
+        act_row.addWidget(cancel_btn)
+        layout.addLayout(act_row)
 
     # ── Supplier SKU display ──────────────────────────────────────────
 
@@ -245,6 +348,7 @@ class ProductEdit(KeyboardMixin, QWidget):
     # ── Edit popup helpers ────────────────────────────────────────────
 
     def _edit_barcode(self):
+        if self._selling_unit_guard(): return
         new_bc = _text_popup("Edit Barcode", "Barcode", self.product['barcode'], self)
         if new_bc is None or new_bc == self.product['barcode']:
             return
@@ -259,6 +363,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
     def _edit_description(self):
+        if self._selling_unit_guard(): return
         val = _text_popup("Edit Description", "Description", self._description, self)
         if val is not None:
             self._description = val
@@ -271,6 +376,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             self.lbl_brand.setText(val or "—")
 
     def _edit_plu(self):
+        if self._selling_unit_guard(): return
         val = _text_popup_optional("Edit PLU", "PLU", self._plu, self)
         if val is not None:
             self._plu = val
@@ -521,7 +627,6 @@ class ProductEdit(KeyboardMixin, QWidget):
         if was_default and self._product_suppliers:
             self._product_suppliers[0]['is_default'] = True
         self._refresh_sup_table()
-        self._refresh_sup_combo()
 
     def _set_default_supplier(self, idx):
         for i, entry in enumerate(self._product_suppliers):
@@ -536,6 +641,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             self.lbl_unit.setText(val)
 
     def _edit_sell(self):
+        if self._selling_unit_guard(): return
         val = _price_popup("Edit Sell Price", "Sell Price", self._sell_price, self)
         if val is not None:
             self._sell_price = val
@@ -626,6 +732,75 @@ class ProductEdit(KeyboardMixin, QWidget):
         else:
             self.lbl_gp.setText("<b style='color:grey'>--</b>")
 
+    # ── Image helpers ─────────────────────────────────────────────────
+
+    def _image_path(self):
+        from config.settings import DATA_DIR
+        img_dir = os.path.join(DATA_DIR, 'images')
+        for ext in ('jpg', 'jpeg', 'png', 'webp'):
+            p = os.path.join(img_dir, f"{self.barcode}.{ext}")
+            if os.path.exists(p):
+                return p
+        return None
+
+    def _load_image_preview(self):
+        path = self._image_path()
+        if path:
+            pix = QPixmap(path).scaled(
+                80, 80,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self._img_label.setPixmap(pix)
+            self._img_path_lbl.setText(os.path.basename(path))
+        else:
+            self._img_label.setText("No image")
+            self._img_label.setPixmap(QPixmap())
+            self._img_path_lbl.setText("No image")
+
+    def _upload_image(self):
+        from config.settings import DATA_DIR
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Product Image",
+            os.path.expanduser("~"),
+            "Images (*.jpg *.jpeg *.png *.webp *.bmp);;All Files (*)"
+        )
+        if not path:
+            return
+        img_dir = os.path.join(DATA_DIR, 'images')
+        os.makedirs(img_dir, exist_ok=True)
+        # Save scaled copy as JPEG to keep file sizes manageable
+        pix = QPixmap(path)
+        if pix.isNull():
+            QMessageBox.warning(self, "Invalid Image", "Could not load the selected file.")
+            return
+        pix = pix.scaled(
+            600, 600,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        dest = os.path.join(img_dir, f"{self.barcode}.jpg")
+        # Remove any existing alternate-extension copies first
+        for ext in ('jpeg', 'png', 'webp', 'bmp'):
+            old = os.path.join(img_dir, f"{self.barcode}.{ext}")
+            if os.path.exists(old):
+                os.remove(old)
+        pix.save(dest, "JPEG", 88)
+        self._load_image_preview()
+
+    def _remove_image(self):
+        path = self._image_path()
+        if not path:
+            return
+        if QMessageBox.question(
+            self, "Remove Image",
+            "Remove the product image?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        ) == QMessageBox.StandardButton.Yes:
+            os.remove(path)
+            self._load_image_preview()
+
     def _load_aliases(self):
         aliases = alias_model.get_aliases(self.barcode)
         self.alias_table.setRowCount(0)
@@ -651,6 +826,307 @@ class ProductEdit(KeyboardMixin, QWidget):
         if QMessageBox.question(self, "Confirm", "Remove this alternate barcode?") == QMessageBox.StandardButton.Yes:
             alias_model.delete(alias_id)
             self._load_aliases()
+
+    # ── Selling Units ─────────────────────────────────────────────────
+
+    def _build_selling_units_section(self) -> 'QGroupBox':
+        from database.connection import get_connection as _gc
+        grp = QGroupBox("Selling Units  (case, 6-pack, etc.)")
+        lay = QVBoxLayout(grp)
+        lay.setSpacing(6)
+
+        note = QLabel(
+            "Define alternate pack sizes that draw from this product's base stock. "
+            "Each unit sold deducts the configured quantity from stock on hand."
+        )
+        note.setStyleSheet("color: #8b949e; font-size: 11px;")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+
+        self._su_table = QTableWidget()
+        self._su_table.setColumnCount(7)
+        self._su_table.setHorizontalHeaderLabels(
+            ["Barcode", "PLU", "Name", "Units / Pack", "Sell Price", "", ""]
+        )
+        self._su_table.setColumnWidth(0, 130)
+        self._su_table.setColumnWidth(1, 70)
+        self._su_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        self._su_table.setColumnWidth(3, 90)
+        self._su_table.setColumnWidth(4, 90)
+        self._su_table.setColumnWidth(5, 36)
+        self._su_table.setColumnWidth(6, 36)
+        self._su_table.setMaximumHeight(150)
+        self._su_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._su_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._su_table.verticalHeader().setVisible(False)
+        lay.addWidget(self._su_table)
+
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton("+ Add Selling Unit")
+        btn_add.setFixedHeight(28)
+        btn_add.clicked.connect(self._add_selling_unit_popup)
+        btn_row.addWidget(btn_add)
+        btn_row.addStretch()
+        lay.addLayout(btn_row)
+
+        self._load_selling_units()
+        return grp
+
+    def _load_selling_units(self):
+        from database.connection import get_connection as _gc
+        conn = _gc()
+        try:
+            rows = conn.execute(
+                "SELECT id, label, unit_qty, plu, barcode, sell_price "
+                "FROM product_selling_units WHERE master_barcode=? ORDER BY unit_qty",
+                (self.barcode,)
+            ).fetchall()
+        finally:
+            conn.close()
+
+        self._su_table.setRowCount(0)
+        for su in rows:
+            r = self._su_table.rowCount()
+            self._su_table.insertRow(r)
+
+            bc_item = QTableWidgetItem(su['barcode'] or '—')
+            bc_item.setData(Qt.ItemDataRole.UserRole, su['id'])
+            self._su_table.setItem(r, 0, bc_item)
+
+            plu_item = QTableWidgetItem(su['plu'] or '—')
+            plu_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._su_table.setItem(r, 1, plu_item)
+
+            self._su_table.setItem(r, 2, QTableWidgetItem(su['label']))
+
+            qty_item = QTableWidgetItem(f"×{int(su['unit_qty']) if su['unit_qty'] == int(su['unit_qty']) else su['unit_qty']}")
+            qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._su_table.setItem(r, 3, qty_item)
+
+            price_item = QTableWidgetItem(f"${su['sell_price']:.2f}")
+            price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._su_table.setItem(r, 4, price_item)
+
+            btn_edit = QPushButton("✎")
+            btn_edit.setFixedHeight(24)
+            btn_edit.setStyleSheet("color: #4fc3f7; font-weight: bold; border: none; background: transparent;")
+            btn_edit.clicked.connect(lambda _, sid=su['id']: self._edit_selling_unit_popup(sid))
+            self._su_table.setCellWidget(r, 5, btn_edit)
+
+            btn_rem = QPushButton("✕")
+            btn_rem.setFixedHeight(24)
+            btn_rem.setStyleSheet("color: #f44336; font-weight: bold; border: none; background: transparent;")
+            btn_rem.clicked.connect(lambda _, sid=su['id']: self._remove_selling_unit(sid))
+            self._su_table.setCellWidget(r, 6, btn_rem)
+
+    def _add_selling_unit_popup(self):
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        from database.connection import get_connection as _gc
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add Selling Unit")
+        dlg.setMinimumWidth(380)
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(10)
+        lay.setContentsMargins(16, 16, 16, 16)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        lbl_input = QLineEdit()
+        lbl_input.setPlaceholderText('e.g. "Case (24×375ml)"')
+        form.addRow("Label *", lbl_input)
+
+        qty_spin = QDoubleSpinBox()
+        qty_spin.setMinimum(1)
+        qty_spin.setMaximum(9999)
+        qty_spin.setDecimals(0)
+        qty_spin.setValue(6)
+        form.addRow("Units per pack *", qty_spin)
+
+        plu_input = QLineEdit()
+        plu_input.setPlaceholderText("e.g. 134 (optional)")
+        form.addRow("PLU", plu_input)
+
+        bc_input = QLineEdit()
+        bc_input.setPlaceholderText("Scan or type (optional)")
+        form.addRow("Barcode", bc_input)
+
+        price_spin = QDoubleSpinBox()
+        price_spin.setMaximum(99999)
+        price_spin.setDecimals(2)
+        price_spin.setPrefix("$")
+        price_spin.setValue(round(self._sell_price * 6, 2))
+        form.addRow("Sell Price *", price_spin)
+
+        lay.addLayout(form)
+        lay.addSpacing(4)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        ok_btn = QPushButton("Add  [Ctrl+S]")
+        ok_btn.setFixedHeight(32)
+        ok_btn.setStyleSheet(
+            "QPushButton { background: #1565c0; color: white; border: none; "
+            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
+            "QPushButton:hover { background: #1976d2; }"
+        )
+        cancel_btn = QPushButton("Cancel  [Esc]")
+        cancel_btn.setFixedHeight(32)
+        btns.addWidget(ok_btn)
+        btns.addWidget(cancel_btn)
+        lay.addLayout(btns)
+
+        def confirm():
+            label = lbl_input.text().strip()
+            if not label:
+                QMessageBox.warning(dlg, "Validation", "Label is required.")
+                return
+            barcode_val = bc_input.text().strip() or None
+            conn = _gc()
+            try:
+                plu_val = plu_input.text().strip() or None
+                conn.execute(
+                    "INSERT INTO product_selling_units "
+                    "(master_barcode, barcode, plu, label, unit_qty, sell_price) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (self.barcode, barcode_val, plu_val, label, qty_spin.value(), price_spin.value())
+                )
+                conn.commit()
+            except Exception as e:
+                QMessageBox.critical(dlg, "Error", str(e))
+                return
+            finally:
+                conn.close()
+            self._load_selling_units()
+            dlg.accept()
+
+        ok_btn.clicked.connect(confirm)
+        cancel_btn.clicked.connect(dlg.reject)
+        QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
+        QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
+
+        # Pre-fill price hint when qty changes
+        qty_spin.valueChanged.connect(
+            lambda v: price_spin.setValue(round(self._sell_price * v, 2))
+        )
+
+        lbl_input.setFocus()
+        dlg.exec()
+
+    def _edit_selling_unit_popup(self, su_id: int):
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        from database.connection import get_connection as _gc
+
+        conn = _gc()
+        try:
+            su = conn.execute(
+                "SELECT id, label, unit_qty, plu, barcode, sell_price "
+                "FROM product_selling_units WHERE id=?", (su_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not su:
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Edit Selling Unit")
+        dlg.setMinimumWidth(380)
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(10)
+        lay.setContentsMargins(16, 16, 16, 16)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        lbl_input = QLineEdit(su['label'])
+        form.addRow("Name *", lbl_input)
+
+        qty_spin = QDoubleSpinBox()
+        qty_spin.setMinimum(1)
+        qty_spin.setMaximum(9999)
+        qty_spin.setDecimals(0)
+        qty_spin.setValue(su['unit_qty'])
+        form.addRow("Units per pack *", qty_spin)
+
+        plu_input = QLineEdit(su['plu'] or '')
+        plu_input.setPlaceholderText("e.g. 134 (optional)")
+        form.addRow("PLU", plu_input)
+
+        bc_input = QLineEdit(su['barcode'] or '')
+        bc_input.setPlaceholderText("Scan or type (optional)")
+        form.addRow("Barcode", bc_input)
+
+        price_spin = QDoubleSpinBox()
+        price_spin.setMaximum(99999)
+        price_spin.setDecimals(2)
+        price_spin.setPrefix("$")
+        price_spin.setValue(su['sell_price'])
+        form.addRow("Sell Price *", price_spin)
+
+        lay.addLayout(form)
+        lay.addSpacing(4)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        ok_btn = QPushButton("Save  [Ctrl+S]")
+        ok_btn.setFixedHeight(32)
+        ok_btn.setStyleSheet(
+            "QPushButton { background: #1565c0; color: white; border: none; "
+            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
+            "QPushButton:hover { background: #1976d2; }"
+        )
+        cancel_btn = QPushButton("Cancel  [Esc]")
+        cancel_btn.setFixedHeight(32)
+        btns.addWidget(ok_btn)
+        btns.addWidget(cancel_btn)
+        lay.addLayout(btns)
+
+        def confirm():
+            label = lbl_input.text().strip()
+            if not label:
+                QMessageBox.warning(dlg, "Validation", "Name is required.")
+                return
+            barcode_val = bc_input.text().strip() or None
+            plu_val = plu_input.text().strip() or None
+            conn2 = _gc()
+            try:
+                conn2.execute(
+                    "UPDATE product_selling_units "
+                    "SET label=?, unit_qty=?, plu=?, barcode=?, sell_price=? WHERE id=?",
+                    (label, qty_spin.value(), plu_val, barcode_val, price_spin.value(), su_id)
+                )
+                conn2.commit()
+            except Exception as e:
+                QMessageBox.critical(dlg, "Error", str(e))
+                return
+            finally:
+                conn2.close()
+            self._load_selling_units()
+            dlg.accept()
+
+        ok_btn.clicked.connect(confirm)
+        cancel_btn.clicked.connect(dlg.reject)
+        QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
+        dlg.exec()
+
+    def _remove_selling_unit(self, su_id: int):
+        if QMessageBox.question(
+            self, "Remove", "Remove this selling unit?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        from database.connection import get_connection as _gc
+        conn = _gc()
+        try:
+            conn.execute("DELETE FROM product_selling_units WHERE id = ?", (su_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self._load_selling_units()
 
     def _view_history(self):
         from PyQt6.QtWidgets import (

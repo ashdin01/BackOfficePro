@@ -236,11 +236,17 @@ def parse_pdf(path):
 # ── Barcode resolution ────────────────────────────────────────────────────────
 
 def _resolve_barcode(conn, plu):
+    """
+    Returns (master_barcode, unit_qty) where unit_qty is the stock multiplier.
+    For regular products unit_qty=1. For selling units (case, 6-pack) unit_qty
+    reflects how many base units are consumed per sale.
+    """
     try:
         plu_int = int(str(plu).strip())
     except (ValueError, TypeError):
-        return None
+        return None, 1
 
+    barcode = None
     for query, params in [
         ("SELECT barcode FROM plu_barcode_map WHERE plu=?",               (plu_int,)),
         ("SELECT barcode FROM products WHERE sku=? AND active=1",          (str(plu_int),)),
@@ -249,9 +255,22 @@ def _resolve_barcode(conn, plu):
     ]:
         row = conn.execute(query, params).fetchone()
         if row:
-            return row[0]
+            barcode = row[0]
+            break
 
-    return None
+    if not barcode:
+        return None, 1
+
+    # Check if this barcode is a selling unit — if so return master + multiplier
+    su = conn.execute(
+        "SELECT master_barcode, unit_qty FROM product_selling_units "
+        "WHERE barcode=? AND active=1",
+        (barcode,)
+    ).fetchone()
+    if su:
+        return su['master_barcode'], su['unit_qty']
+
+    return barcode, 1
 
 
 def _create_sale_movement(conn, barcode, quantity, sale_date, plu, plu_name, source):
@@ -323,9 +342,10 @@ def _import_rows(rows, source):
             upserted += 1
 
             if r['quantity'] > 0:
-                barcode = _resolve_barcode(conn, r['plu'])
+                barcode, unit_qty = _resolve_barcode(conn, r['plu'])
                 if barcode:
-                    if _create_sale_movement(conn, barcode, r['quantity'],
+                    stock_qty = r['quantity'] * unit_qty
+                    if _create_sale_movement(conn, barcode, stock_qty,
                                              r['sale_date'], r['plu'],
                                              r['plu_name'], source):
                         movements_created += 1

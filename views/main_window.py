@@ -79,10 +79,12 @@ class MainWindow(QMainWindow):
             ("&Reports",         5),
             ("Stockta&ke",       6),
             ("Stock &Adjust",    7),
+            ("&Sales",           8),
+            ("Bun&dles",         9),
         ]
         is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
         # STAFF can only see: Home, Products, Reports, Sales
-        staff_allowed = {0, 1, 5}
+        staff_allowed = {0, 1, 5, 8}
 
         for label, index in nav_items:
             btn = QPushButton(label)
@@ -157,7 +159,7 @@ class MainWindow(QMainWindow):
         self._refresh_last_backup_label()
 
         sidebar_layout.addSpacing(8)
-        hint = QLabel("Hotkeys (outside text fields):\nH·P·S·D·O·R·K·A")
+        hint = QLabel("Hotkeys (outside text fields):\nH·P·S·D·O·R·K·A·L·B")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: grey; font-size: 10px;")
         sidebar_layout.addWidget(hint)
@@ -195,6 +197,8 @@ class MainWindow(QMainWindow):
         from views.reports.stock_on_hand import StockOnHandReport
         from views.stocktake.stocktake_list import StocktakeList
         from views.stock_adjust.stock_adjust_view import StockAdjustView
+        from views.reports.sales_report_view import SalesReportView
+        from views.bundles.bundle_list import BundleList
 
         screen_classes = [
             ("HomeScreen",        lambda: HomeScreen(on_navigate=self._switch)),
@@ -205,6 +209,8 @@ class MainWindow(QMainWindow):
             ("StockOnHandReport", lambda: StockOnHandReport()),
             ("StocktakeList",     lambda: StocktakeList()),
             ("StockAdjustView",   lambda: StockAdjustView(current_user=self.current_user)),
+            ("SalesReportView",   lambda: SalesReportView()),
+            ("BundleList",        lambda: BundleList()),
         ]
 
         self.screens = []
@@ -308,6 +314,8 @@ class MainWindow(QMainWindow):
             Qt.Key.Key_R:      5,
             Qt.Key.Key_K:      6,
             Qt.Key.Key_A:      7,
+            Qt.Key.Key_L:      8,
+            Qt.Key.Key_B:      9,
             Qt.Key.Key_Escape: 0,
         }
         if event.key() in nav:

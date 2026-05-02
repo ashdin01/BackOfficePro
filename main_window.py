@@ -61,10 +61,19 @@ class MainWindow(QMainWindow):
             ("Stockta&ke",       6),
             ("Stock &Adjust",    7),
             ("&Sales",           8),
+            ("Bun&dles",         9),
         ]
         is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
         # STAFF can only see: Home, Products, Reports, Sales
         staff_allowed = {0, 1, 5, 8}
+
+        # Nav buttons in a scroll area so they're never clipped on small screens
+        from PyQt6.QtWidgets import QScrollArea
+        nav_widget = QWidget()
+        nav_widget.setStyleSheet("background: transparent;")
+        nav_inner = QVBoxLayout(nav_widget)
+        nav_inner.setContentsMargins(0, 0, 0, 0)
+        nav_inner.setSpacing(8)
 
         for label, index in nav_items:
             btn = QPushButton(label)
@@ -75,10 +84,19 @@ class MainWindow(QMainWindow):
                 btn.setStyleSheet("color: #444; border-color: #2a3a4a;")
             else:
                 btn.clicked.connect(lambda _, i=index: self._switch(i))
-            sidebar_layout.addWidget(btn)
+            nav_inner.addWidget(btn)
             self.nav_buttons.append(btn)
 
-        sidebar_layout.addStretch()
+        nav_inner.addStretch()
+
+        nav_scroll = QScrollArea()
+        nav_scroll.setWidget(nav_widget)
+        nav_scroll.setWidgetResizable(True)
+        nav_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        nav_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        nav_scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollBar:vertical { width: 4px; }")
+        sidebar_layout.addWidget(nav_scroll, 1)
 
         # ── Settings button (admin only) ──────────────────────────────
         if is_admin:
@@ -177,6 +195,7 @@ class MainWindow(QMainWindow):
         from views.stocktake.stocktake_list import StocktakeList
         from views.stock_adjust.stock_adjust_view import StockAdjustView
         from views.reports.sales_report_view import SalesReportView
+        from views.bundles.bundle_list import BundleList
 
         self.screens = [
             HomeScreen(on_navigate=self._switch),   # index 0
@@ -188,6 +207,7 @@ class MainWindow(QMainWindow):
             StocktakeList(),                         # index 6
             StockAdjustView(current_user=self.current_user),  # index 7
             SalesReportView(),                       # index 8
+            BundleList(),                            # index 9
         ]
         for screen in self.screens:
             self.stack.addWidget(screen)

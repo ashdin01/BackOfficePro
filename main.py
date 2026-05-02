@@ -141,11 +141,28 @@ def _init_db_with_lock_recovery(app):
             # loop → retry init_db()
 
 
+def _start_api_server():
+    """Start the Flask REST API in a background daemon thread."""
+    import threading
+    def _run():
+        try:
+            from api_server import app as flask_app
+            logging.info("API server starting on 0.0.0.0:5050")
+            flask_app.run(host='0.0.0.0', port=5050, debug=False, use_reloader=False)
+        except OSError as e:
+            logging.warning(f"API server could not start (port already in use?): {e}")
+        except Exception as e:
+            logging.error(f"API server crashed: {e}", exc_info=True)
+    t = threading.Thread(target=_run, daemon=True, name="api-server")
+    t.start()
+
+
 def main():
     logging.info("main() called")
     from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
     _init_db_with_lock_recovery(app)
+    _start_api_server()
 
     import models.user as user_model
     from views.login_screen import LoginScreen, _SetupPinDialog

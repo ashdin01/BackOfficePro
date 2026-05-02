@@ -168,6 +168,22 @@ CREATE TABLE IF NOT EXISTS barcode_aliases (
     created_at     TEXT    DEFAULT (datetime('now'))
 );
 
+-- Alternate selling configurations: case, 6-pack, etc. all drawing from the same
+-- base-unit stock pool tracked on master_barcode.
+CREATE TABLE IF NOT EXISTS product_selling_units (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    master_barcode TEXT    NOT NULL REFERENCES products(barcode),
+    barcode        TEXT    UNIQUE,              -- scannable barcode (optional)
+    plu            TEXT,                        -- PLU number (optional)
+    label          TEXT    NOT NULL,            -- e.g. "Case (24×375ml)"
+    unit_qty       REAL    NOT NULL DEFAULT 1,  -- base units consumed per sale
+    sell_price     REAL    NOT NULL DEFAULT 0,
+    active         INTEGER NOT NULL DEFAULT 1,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_selling_units_master  ON product_selling_units(master_barcode);
+CREATE INDEX IF NOT EXISTS idx_selling_units_barcode ON product_selling_units(barcode);
+
 CREATE TABLE IF NOT EXISTS stocktake_sessions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     label           TEXT    NOT NULL,
@@ -192,6 +208,28 @@ CREATE TABLE IF NOT EXISTS stocktake_counts (
 
 CREATE INDEX IF NOT EXISTS idx_stocktake_counts_session ON stocktake_counts(session_id);
 CREATE INDEX IF NOT EXISTS idx_stocktake_counts_barcode ON stocktake_counts(barcode);
+
+CREATE TABLE IF NOT EXISTS bundles (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT    NOT NULL,
+    description  TEXT    DEFAULT '',
+    required_qty INTEGER NOT NULL DEFAULT 4,
+    price        REAL    NOT NULL DEFAULT 0,
+    active       INTEGER NOT NULL DEFAULT 1,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS bundle_eligible (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    bundle_id   INTEGER NOT NULL REFERENCES bundles(id),
+    barcode     TEXT    NOT NULL,
+    description TEXT    DEFAULT '',
+    unit_qty    INTEGER DEFAULT 1,
+    UNIQUE(bundle_id, barcode)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bundle_eligible_bundle ON bundle_eligible(bundle_id);
+CREATE INDEX IF NOT EXISTS idx_bundle_eligible_barcode ON bundle_eligible(barcode);
 
 CREATE TABLE IF NOT EXISTS plu_barcode_map (
     plu       INTEGER PRIMARY KEY,

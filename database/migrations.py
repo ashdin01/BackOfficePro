@@ -72,6 +72,12 @@ def apply_migrations():
         if current < 16:
             migrate_v16(conn)
             logging.info("Migration v16 applied: per-supplier SKU, pack_qty, pack_unit")
+        if current < 17:
+            migrate_v17(conn)
+            logging.info("Migration v17 applied: bundles and bundle_eligible tables")
+        if current < 18:
+            migrate_v18(conn)
+            logging.info("Migration v18 applied: unit_qty on bundle_eligible")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -292,4 +298,39 @@ def migrate_v16(conn):
         WHERE is_default = 1
     """)
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '16')")
+    conn.commit()
+
+
+def migrate_v18(conn):
+    """Add unit_qty to bundle_eligible for unit-aware bundle pricing."""
+    _add_column(conn, "ALTER TABLE bundle_eligible ADD COLUMN unit_qty INTEGER DEFAULT 1")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '18')")
+    conn.commit()
+
+
+def migrate_v17(conn):
+    """Add bundles and bundle_eligible tables for mixed-case selling."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS bundles (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT    NOT NULL,
+            description  TEXT    DEFAULT '',
+            required_qty INTEGER NOT NULL DEFAULT 4,
+            price        REAL    NOT NULL DEFAULT 0,
+            active       INTEGER NOT NULL DEFAULT 1,
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS bundle_eligible (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            bundle_id   INTEGER NOT NULL REFERENCES bundles(id),
+            barcode     TEXT    NOT NULL,
+            description TEXT    DEFAULT '',
+            UNIQUE(bundle_id, barcode)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_bundle_eligible_bundle  ON bundle_eligible(bundle_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_bundle_eligible_barcode ON bundle_eligible(barcode)")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '17')")
     conn.commit()

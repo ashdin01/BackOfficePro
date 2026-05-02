@@ -9,6 +9,7 @@ from views.reports.supplier_sales_report import SupplierSalesReport
 from views.reports.writeoff_report import WriteOffReport
 from views.reports.gst_report import GSTReport
 from views.reports.sales_report_view import SalesReportView
+from views.reports.liquor_report import LiquorReport
 
 
 class StockOnHandReport(QWidget):
@@ -25,5 +26,6 @@ class StockOnHandReport(QWidget):
         tabs.addTab(GPReport(),               "📊 Gross Profit")
         tabs.addTab(MovementHistoryReport(),  "📋 Movement History")
         tabs.addTab(SupplierSalesReport(),    "🏪 Supplier Sales")
-        tabs.addTab(WriteOffReport(),          "🗑  Write-Offs")
+        tabs.addTab(WriteOffReport(),         "🗑  Write-Offs")
+        tabs.addTab(LiquorReport(),           "🍺 Liquor Tracking")
         layout.addWidget(tabs)
