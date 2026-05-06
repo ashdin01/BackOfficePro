@@ -34,19 +34,22 @@ def update(line_id, ordered_qty, unit_cost, notes):
         conn.close()
 
 
-def receive(line_id, received_qty, actual_cost=None):
+def receive(line_id, received_qty, actual_cost=None, unit_cost=None, is_promo=None):
     conn = get_connection()
     try:
+        fields = ["received_qty=?"]
+        params = [received_qty]
         if actual_cost is not None:
-            conn.execute(
-                "UPDATE po_lines SET received_qty=?, actual_cost=? WHERE id=?",
-                (received_qty, actual_cost, line_id)
-            )
-        else:
-            conn.execute(
-                "UPDATE po_lines SET received_qty=? WHERE id=?",
-                (received_qty, line_id)
-            )
+            fields.append("actual_cost=?")
+            params.append(actual_cost)
+        if unit_cost is not None:
+            fields.append("unit_cost=?")
+            params.append(unit_cost)
+        if is_promo is not None:
+            fields.append("is_promo=?")
+            params.append(1 if is_promo else 0)
+        params.append(line_id)
+        conn.execute(f"UPDATE po_lines SET {', '.join(fields)} WHERE id=?", params)
         conn.commit()
     finally:
         conn.close()

@@ -9,12 +9,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
+from utils.error_dialog import show_error
 
 SPOILAGE_TYPES  = ['OD - Out of Date']
 SHRINKAGE_TYPES = ['IS - Incorrectly Sold', 'NS - Not on Shelf', 'DG', 'SE - Stocktake Error']
 ADMIN_TYPES     = ['IE - Invoice Error']
-ALL_WRITEOFF_TYPES = SPOILAGE_TYPES + SHRINKAGE_TYPES + ADMIN_TYPES
 
 def _category(movement_type):
     if movement_type in SPOILAGE_TYPES:
@@ -25,48 +25,6 @@ def _category(movement_type):
         return 'Admin'
     return 'Other'
 
-def get_departments():
-    conn = get_connection()
-    rows = conn.execute("SELECT id, name FROM departments WHERE active=1 ORDER BY name").fetchall()
-    conn.close()
-    return rows
-
-def get_writeoff_data(d_from, d_to, dept_id=None, category=None):
-    conn = get_connection()
-    placeholders = ','.join('?' for _ in ALL_WRITEOFF_TYPES)
-    sql = f"""
-        SELECT sm.id, sm.barcode, sm.movement_type, sm.quantity,
-               sm.notes, sm.created_at, sm.created_by,
-               p.description, p.cost_price,
-               d.name as dept_name, s.name as supplier_name
-        FROM stock_movements sm
-        LEFT JOIN products p ON p.barcode = sm.barcode
-        LEFT JOIN departments d ON d.id = p.department_id
-        LEFT JOIN suppliers s ON s.id = p.supplier_id
-        WHERE sm.movement_type IN ({placeholders})
-          AND DATE(sm.created_at) BETWEEN ? AND ?
-          AND sm.quantity < 0
-    """
-    params = list(ALL_WRITEOFF_TYPES) + [str(d_from), str(d_to)]
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
-    if category == 'Spoilage':
-        ph = ','.join('?' for _ in SPOILAGE_TYPES)
-        sql += f" AND sm.movement_type IN ({ph})"
-        params += SPOILAGE_TYPES
-    elif category == 'Shrinkage':
-        ph = ','.join('?' for _ in SHRINKAGE_TYPES)
-        sql += f" AND sm.movement_type IN ({ph})"
-        params += SHRINKAGE_TYPES
-    elif category == 'Admin':
-        ph = ','.join('?' for _ in ADMIN_TYPES)
-        sql += f" AND sm.movement_type IN ({ph})"
-        params += ADMIN_TYPES
-    sql += " ORDER BY sm.created_at DESC"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
 
 class NumItem(QTableWidgetItem):
     def __lt__(self, other):
@@ -141,7 +99,7 @@ class WriteOffReport(QWidget):
         filter_row.addWidget(QLabel("Department:"))
         self.dept_filter = QComboBox()
         self.dept_filter.addItem("All Departments", None)
-        for d in get_departments():
+        for d in report_ctrl.get_all_departments():
             self.dept_filter.addItem(d['name'], d['id'])
         self.dept_filter.currentIndexChanged.connect(self._load)
         filter_row.addWidget(self.dept_filter)
@@ -233,7 +191,7 @@ class WriteOffReport(QWidget):
         d_to     = self.date_to.date().toPyDate()
         dept_id  = self.dept_filter.currentData()
         category = self.cat_filter.currentData()
-        rows = get_writeoff_data(d_from, d_to, dept_id, category)
+        rows = report_ctrl.get_writeoff_data(d_from, d_to, dept_id, category)
 
         total_units = 0
         total_value = 0.0
@@ -361,10 +319,10 @@ class WriteOffReport(QWidget):
                     units = abs(int(row['quantity']))
                     cost  = float(row['cost_price']) if row['cost_price'] else 0.0
                     value = units * cost
-                    w.writerow([str(row['created_at'])[:16], row['barcode'],
+                    w.writerow([str(row['created_at'])[:16], f'="{row["barcode"]}"',
                                 row['description'] or '', row['dept_name'] or '',
                                 row['supplier_name'] or '', row['movement_type'],
                                 _category(row['movement_type']), units, f"${value:.2f}"])
             QMessageBox.information(self, "Exported", f"Saved to:\n{path}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            show_error(self, "Could not export write-off report.", e, title="Export Failed")

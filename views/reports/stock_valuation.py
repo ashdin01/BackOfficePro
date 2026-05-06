@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
 import csv, os
 
 
@@ -39,59 +39,6 @@ def _make_table(headers, stretch_col=1):
     return t
 
 
-def get_valuation(dept_id=None):
-    conn = get_connection()
-    sql = """
-        SELECT d.name as dept_name,
-               COUNT(p.barcode) as product_count,
-               SUM(COALESCE(s.quantity,0)) as total_units,
-               SUM(COALESCE(s.quantity,0) * p.cost_price) as cost_value,
-               SUM(COALESCE(s.quantity,0) * p.sell_price) as sell_value
-        FROM products p
-        LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
-        LEFT JOIN departments d ON p.department_id = d.id
-        WHERE p.active = 1
-    """
-    params = []
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
-    sql += " GROUP BY d.name ORDER BY d.name"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return rows
-
-
-def get_valuation_detail(dept_id=None):
-    conn = get_connection()
-    sql = """
-        SELECT p.barcode, p.description, d.name as dept_name,
-               p.unit, p.cost_price, p.sell_price,
-               COALESCE(s.quantity,0) as quantity,
-               COALESCE(s.quantity,0) * p.cost_price as cost_value,
-               COALESCE(s.quantity,0) * p.sell_price as sell_value
-        FROM products p
-        LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
-        LEFT JOIN departments d ON p.department_id = d.id
-        WHERE p.active = 1
-    """
-    params = []
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
-    sql += " ORDER BY d.name, p.description"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return rows
-
-
-def get_departments():
-    conn = get_connection()
-    rows = conn.execute("SELECT id, name FROM departments WHERE active=1 ORDER BY name").fetchall()
-    conn.close()
-    return rows
-
-
 class StockValuationReport(QWidget):
     def __init__(self):
         super().__init__()
@@ -105,7 +52,7 @@ class StockValuationReport(QWidget):
         filter_row.addWidget(QLabel("Department:"))
         self.dept_filter = QComboBox()
         self.dept_filter.addItem("All Departments", None)
-        for d in get_departments():
+        for d in report_ctrl.get_all_departments():
             self.dept_filter.addItem(d['name'], d['id'])
         self.dept_filter.currentIndexChanged.connect(self._load)
         filter_row.addWidget(self.dept_filter)
@@ -150,7 +97,7 @@ class StockValuationReport(QWidget):
             self.summary_table.show()
             self.detail_table.hide()
             self.summary_table.setSortingEnabled(False)
-            rows = get_valuation(dept_id)
+            rows = report_ctrl.get_stock_valuation_summary(dept_id)
             self.summary_table.setRowCount(0)
             total_cost = total_sell = 0
             for row in rows:
@@ -172,7 +119,7 @@ class StockValuationReport(QWidget):
             self.summary_table.hide()
             self.detail_table.show()
             self.detail_table.setSortingEnabled(False)
-            rows = get_valuation_detail(dept_id)
+            rows = report_ctrl.get_stock_valuation_detail(dept_id)
             self.detail_table.setRowCount(0)
             total_cost = total_sell = 0
             for row in rows:
@@ -198,11 +145,11 @@ class StockValuationReport(QWidget):
         if not path:
             return
         dept_id = self.dept_filter.currentData()
-        rows = get_valuation_detail(dept_id)
+        rows = report_ctrl.get_stock_valuation_detail(dept_id)
         with open(path, 'w', newline='') as f:
             w = csv.writer(f)
             w.writerow(["Barcode", "Description", "Department", "Unit", "Qty", "Cost Value", "Sell Value"])
             for row in rows:
-                w.writerow([row['barcode'], row['description'], row['dept_name'],
+                w.writerow([f'="{row["barcode"]}"', row['description'], row['dept_name'],
                              row['unit'], row['quantity'], row['cost_value'], row['sell_value']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

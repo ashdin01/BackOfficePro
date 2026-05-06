@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
+from utils.error_dialog import show_error
 import models.stocktake as stocktake_model
 import csv
 import os
@@ -227,15 +228,15 @@ class VarianceReport(QWidget):
                 writer = csv.writer(f)
                 writer.writerow(headers)
                 for r in range(self.table.rowCount()):
-                    writer.writerow([
-                        self.table.item(r, c).text() if self.table.item(r, c) else ""
-                        for c in range(cols)
-                    ])
+                    vals = [self.table.item(r, c).text() if self.table.item(r, c) else "" for c in range(cols)]
+                    if vals and vals[0]:
+                        vals[0] = f'="{vals[0]}"'
+                    writer.writerow(vals)
             QMessageBox.information(self, "Exported",
                 f"Exported {self.table.rowCount()} rows to:
 {path}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            show_error(self, "Could not export variance report.", e, title="Export Failed")
 
     def _apply_session(self):
         counted = sum(
@@ -272,4 +273,4 @@ class VarianceReport(QWidget):
                     self.on_apply()
                 self.close()
             except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
+                show_error(self, "Could not apply stocktake counts.", e)

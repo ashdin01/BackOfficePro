@@ -5,24 +5,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QIcon, QPixmap, QColor
-from config.settings import APP_NAME, APP_VERSION, DATABASE_PATH
+from config.settings import APP_NAME, APP_VERSION
+import controllers.backup_controller as backup_ctrl
 import logging
-import shutil
 import os
 import threading
 from datetime import datetime
-
-def _do_backup(dest_path):
-    """Copy the live DB to dest_path. Returns (success, message)."""
-    try:
-        dest_dir = os.path.dirname(dest_path)
-        if dest_dir:
-            os.makedirs(dest_dir, exist_ok=True)
-        shutil.copy2(DATABASE_PATH, dest_path)
-        size = os.path.getsize(dest_path)
-        return True, f"Backup saved:\n{dest_path}\n({size/1024:.1f} KB)"
-    except Exception as e:
-        return False, str(e)
 
 class MainWindow(QMainWindow):
     def __init__(self, current_user=None):
@@ -325,55 +313,23 @@ class MainWindow(QMainWindow):
 
     # ── Backup logic ──────────────────────────────────────────────────
     def _auto_backup_dir(self):
-        return os.path.join(os.path.expanduser("~"), "BackOfficeBackups")
+        return backup_ctrl.get_backup_dir()
 
     def _refresh_last_backup_label(self):
-        backup_dir = self._auto_backup_dir()
-        try:
-            files = sorted(
-                [f for f in os.listdir(backup_dir) if f.endswith(".db")],
-                reverse=True
-            )
-            if files:
-                ts = files[0].replace("supermarket_", "").replace(".db", "")
-                dt = datetime.strptime(ts, "%Y%m%d_%H%M%S")
-                self.last_backup_label.setText(
-                    f"Last backup:\n{dt.strftime('%d/%m %H:%M')}"
-                )
-            else:
-                self.last_backup_label.setText("No backups yet")
-        except Exception:
-            self.last_backup_label.setText("")
+        dt = backup_ctrl.get_last_backup_time()
+        if dt:
+            self.last_backup_label.setText(f"Last backup:\n{dt.strftime('%d/%m %H:%M')}")
+        else:
+            self.last_backup_label.setText("No backups yet")
 
     def _silent_auto_backup(self):
-        backup_dir = self._auto_backup_dir()
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = os.path.join(backup_dir, f"supermarket_{ts}.db")
-        ok, msg = _do_backup(dest)
-        if ok:
-            try:
-                files = sorted(
-                    [os.path.join(backup_dir, f)
-                     for f in os.listdir(backup_dir) if f.endswith(".db")]
-                )
-                for old in files[:-30]:
-                    os.remove(old)
-            except Exception:
-                pass
+        dest = backup_ctrl.silent_auto_backup()
+        if dest:
             return self._email_backup_async(dest)
         return None
 
     def _email_backup_async(self, backup_path):
-        from database.connection import get_connection
-        try:
-            conn = get_connection()
-            row = conn.execute("SELECT value FROM settings WHERE key='backup_email'").fetchone()
-            conn.close()
-            to_address = (row['value'] or '').strip() if row else ''
-        except Exception as e:
-            logging.error(f"Backup email: failed to read backup_email setting: {e}", exc_info=True)
-            return None
-
+        to_address = backup_ctrl.get_backup_email()
         logging.info(f"Backup email: to_address='{to_address}', path='{backup_path}'")
         if not to_address:
             logging.warning("Backup email: backup_email setting is empty — skipping.")
@@ -396,18 +352,17 @@ class MainWindow(QMainWindow):
 
     def _manual_backup(self):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_name = f"supermarket_{ts}.db"
-        default_dir = self._auto_backup_dir()
+        default_dir = backup_ctrl.get_backup_dir()
         os.makedirs(default_dir, exist_ok=True)
         dest, _ = QFileDialog.getSaveFileName(
             self,
             "Save Backup",
-            os.path.join(default_dir, default_name),
+            os.path.join(default_dir, f"supermarket_{ts}.db"),
             "Database Files (*.db);;All Files (*)"
         )
         if not dest:
             return
-        ok, msg = _do_backup(dest)
+        ok, msg = backup_ctrl.do_backup(dest)
         if ok:
             QMessageBox.information(self, "Backup Complete", msg)
             self._refresh_last_backup_label()
@@ -424,23 +379,16 @@ class MainWindow(QMainWindow):
         if not src_path:
             return
         try:
-            import sqlite3
-            conn = sqlite3.connect(src_path)
-            tables = [r[0] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()]
-            conn.close()
-            required = {"products", "suppliers", "departments", "purchase_orders"}
-            missing = required - set(tables)
-            if missing:
-                QMessageBox.critical(
-                    self, "Invalid Backup",
-                    f"This file does not appear to be a valid BackOfficePro database.\n\n"
-                    f"Missing tables: {', '.join(missing)}"
-                )
-                return
-        except Exception as e:
-            QMessageBox.critical(self, "Invalid File", f"Could not read file:\n{e}")
+            valid, missing = backup_ctrl.validate_backup_file(src_path)
+        except RuntimeError as e:
+            QMessageBox.critical(self, "Invalid File", str(e))
+            return
+        if not valid:
+            QMessageBox.critical(
+                self, "Invalid Backup",
+                f"This file does not appear to be a valid BackOfficePro database.\n\n"
+                f"Missing tables: {', '.join(missing)}"
+            )
             return
         reply = QMessageBox.warning(
             self, "Restore Backup",
@@ -459,7 +407,7 @@ class MainWindow(QMainWindow):
             self._auto_backup_dir(),
             f"supermarket_PRE_RESTORE_{ts}.db"
         )
-        ok, msg = _do_backup(safety_dest)
+        ok, msg = backup_ctrl.do_backup(safety_dest)
         if not ok:
             reply2 = QMessageBox.warning(
                 self, "Safety Backup Failed",
@@ -471,7 +419,7 @@ class MainWindow(QMainWindow):
             if reply2 != QMessageBox.StandardButton.Yes:
                 return
         try:
-            shutil.copy2(src_path, DATABASE_PATH)
+            backup_ctrl.restore_backup(src_path)
         except Exception as e:
             QMessageBox.critical(self, "Restore Failed", f"Could not restore backup:\n{e}")
             return

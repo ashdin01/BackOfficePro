@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
 
 class NumItem(QTableWidgetItem):
     """Sorts numerically, stripping $, %, commas and +/-."""
@@ -22,68 +22,6 @@ class NumItem(QTableWidgetItem):
 import csv
 
 
-def get_gp_data(dept_id=None, gp_filter="all"):
-    conn = get_connection()
-    sql = """
-        SELECT p.barcode, p.description, d.name as dept_name,
-               p.sell_price, p.cost_price,
-               CASE WHEN p.sell_price > 0
-                    THEN ROUND((1.0 - (p.cost_price * (1 + p.tax_rate / 100.0)) / p.sell_price) * 100, 1)
-                    ELSE 0 END as gp_pct,
-               p.sell_price - (p.cost_price * (1 + p.tax_rate / 100.0)) as gp_dollars
-        FROM products p
-        LEFT JOIN departments d ON p.department_id = d.id
-        WHERE p.active = 1 AND p.sell_price > 0
-    """
-    params = []
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
-    if gp_filter == "healthy":
-        sql += " AND (1.0 - p.cost_price / p.sell_price) * 100 >= 30"
-    elif gp_filter == "marginal":
-        sql += " AND (1.0 - p.cost_price / p.sell_price) * 100 >= 15 AND (1.0 - p.cost_price / p.sell_price) * 100 < 30"
-    elif gp_filter == "low":
-        sql += " AND (1.0 - p.cost_price / p.sell_price) * 100 < 15"
-    sql += " ORDER BY gp_pct ASC"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return rows
-
-
-def get_gp_summary(dept_id=None):
-    conn = get_connection()
-    sql = """
-        SELECT d.name as dept_name,
-               COUNT(*) as product_count,
-               ROUND(AVG(CASE WHEN p.sell_price > 0
-                    THEN (1.0 - p.cost_price / p.sell_price) * 100
-                    ELSE 0 END), 1) as avg_gp,
-               SUM(CASE WHEN (1.0 - p.cost_price/p.sell_price)*100 >= 30 THEN 1 ELSE 0 END) as healthy,
-               SUM(CASE WHEN (1.0 - p.cost_price/p.sell_price)*100 >= 15
-                         AND (1.0 - p.cost_price/p.sell_price)*100 < 30 THEN 1 ELSE 0 END) as marginal,
-               SUM(CASE WHEN (1.0 - p.cost_price/p.sell_price)*100 < 15 THEN 1 ELSE 0 END) as low_gp
-        FROM products p
-        LEFT JOIN departments d ON p.department_id = d.id
-        WHERE p.active = 1 AND p.sell_price > 0
-    """
-    params = []
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
-    sql += " GROUP BY d.name ORDER BY avg_gp ASC"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return rows
-
-
-def get_departments():
-    conn = get_connection()
-    rows = conn.execute("SELECT id, name FROM departments WHERE active=1 ORDER BY name").fetchall()
-    conn.close()
-    return rows
-
-
 class GPReport(QWidget):
     def __init__(self):
         super().__init__()
@@ -97,7 +35,7 @@ class GPReport(QWidget):
         filter_row.addWidget(QLabel("Department:"))
         self.dept_filter = QComboBox()
         self.dept_filter.addItem("All Departments", None)
-        for d in get_departments():
+        for d in report_ctrl.get_all_departments():
             self.dept_filter.addItem(d['name'], d['id'])
         self.dept_filter.currentIndexChanged.connect(self._load)
         filter_row.addWidget(self.dept_filter)
@@ -179,7 +117,7 @@ class GPReport(QWidget):
         if mode == "summary":
             self.detail_table.hide()
             self.summary_table.show()
-            rows = get_gp_summary(dept_id)
+            rows = report_ctrl.get_gp_summary(dept_id)
             self.summary_table.setSortingEnabled(False)
             self.summary_table.setRowCount(0)
             for row in rows:
@@ -202,7 +140,7 @@ class GPReport(QWidget):
         else:
             self.summary_table.hide()
             self.detail_table.show()
-            rows = get_gp_data(dept_id, gp_filter)
+            rows = report_ctrl.get_gp_data(dept_id, gp_filter)
             self.detail_table.setSortingEnabled(False)
             self.detail_table.setRowCount(0)
             low_count = marginal_count = healthy_count = 0
@@ -250,11 +188,11 @@ class GPReport(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "gp_report.csv"), "CSV (*.csv)")
         if not path:
             return
-        rows = get_gp_data(self.dept_filter.currentData(), self.gp_filter.currentData())
+        rows = report_ctrl.get_gp_data(self.dept_filter.currentData(), self.gp_filter.currentData())
         with open(path, 'w', newline='') as f:
             w = csv.writer(f)
             w.writerow(["Barcode", "Description", "Department", "Sell Price", "Cost Price", "GP %"])
             for row in rows:
-                w.writerow([row['barcode'], row['description'], row['dept_name'],
+                w.writerow([f'="{row["barcode"]}"', row['description'], row['dept_name'],
                              row['sell_price'], row['cost_price'], row['gp_pct']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

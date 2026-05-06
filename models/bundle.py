@@ -58,13 +58,15 @@ def get_eligible(bundle_id):
 
 
 def add_eligible(bundle_id, barcode, description, unit_qty=1):
+    """Insert a bundle eligible row and return its id."""
     conn = get_connection()
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO bundle_eligible (bundle_id, barcode, description, unit_qty) VALUES (?,?,?,?)",
             (bundle_id, barcode, description or '', int(unit_qty) if unit_qty else 1)
         )
         conn.commit()
+        return cur.lastrowid
     finally:
         conn.close()
 

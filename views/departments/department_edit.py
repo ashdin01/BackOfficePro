@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox
 )
 from utils.keyboard_mixin import KeyboardMixin
+from utils.error_dialog import show_error
 import models.department as dept_model
 
 
@@ -64,4 +65,4 @@ class DepartmentEdit(KeyboardMixin, QWidget):
                 self.on_save()
             self.close()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not save department.", e)

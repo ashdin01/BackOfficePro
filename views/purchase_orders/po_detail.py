@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QUrl, QDate
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
+from utils.error_dialog import show_error
 import models.purchase_order as po_model
 import models.po_lines as lines_model
 import models.product as product_model
@@ -225,7 +226,7 @@ class PODetail(QWidget):
         self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "Description", "Supplier Ctn Qty", "Supplier SKU", "On Hand", "Reorder Pt",
-            "Order Qty", "Unit Cost $", "Line Total $",
+            "Order Qty", "Unit Cost $ (ex. GST)", "Line Total $ (ex. GST)",
             "Sales: Last Week",
         ])
         hdr = self.table.horizontalHeader()
@@ -382,7 +383,7 @@ class PODetail(QWidget):
             QMessageBox.information(self, "PDF Exported", f"✓ Saved to:\n{path}")
         except Exception as e:
             logging.critical(f"PDF export failed: {e}", exc_info=True)
-            QMessageBox.critical(self, "PDF Export Failed", str(e))
+            QMessageBox.critical(self, "PDF Export Failed", f"Could not generate the PDF.\n\nDetail: {e}")
 
     def _email_po(self):
         import os
@@ -454,7 +455,7 @@ class PODetail(QWidget):
             QMessageBox.information(self, "Email Sent", f"✓ Purchase Order {po['po_number']} sent to:\n{supplier_email}")
         except Exception as e:
             logging.error(f"Email send failed: {e}", exc_info=True)
-            QMessageBox.critical(self, "Email Failed", str(e))
+            QMessageBox.critical(self, "Email Failed", f"Could not send the email.\n\nDetail: {e}")
 
     def _export_csv(self):
         if self.table.rowCount() == 0:
@@ -473,8 +474,6 @@ class PODetail(QWidget):
             return
         try:
             lines = lines_model.get_by_po(self.po_id)
-            fixed_total = 0.0
-            gst_total = 0.0
 
             with open(path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -482,50 +481,32 @@ class PODetail(QWidget):
                 writer.writerow(['Email', sup_email])
                 writer.writerow(['PO Number', po['po_number']])
                 writer.writerow(['Status', po['status']])
-                writer.writerow(['Delivery Date', po['delivery_date'] or ''])
                 writer.writerow([])
-                writer.writerow(['Barcode', 'Description', 'Supplier SKU', 'Order Qty (Cartons)',
-                                'Units per Carton', 'Total Units', 'On Hand', 'Unit Cost', 'Line Total'])
+                writer.writerow(['Barcode', 'Description', 'Units per Carton', 'Total Units',
+                                'SOH (Actual)', 'SOH (System)', 'Variance (Actual less System)'])
 
                 rows_written = 0
                 for line in lines:
                     product = product_model.get_by_barcode(line['barcode'])
                     pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
                     pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-                    sup_sku = (product['supplier_sku'] or '') if product else ''
-                    tax_rate = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
 
                     soh = stock_model.get_by_barcode(line['barcode'])
                     on_hand = int(soh['quantity']) if soh else 0
 
-                    cartons = int(line['ordered_qty'])
-                    total_units = cartons * pack_qty
-                    unit_cost = float(line['unit_cost'])
-                    line_total = total_units * unit_cost
+                    total_units = int(line['ordered_qty']) * pack_qty
 
-                    fixed_total += line_total
-                    if tax_rate > 0:
-                        gst_total += line_total - (line_total / (1 + tax_rate / 100))
-
-                    writer.writerow([line['barcode'], line['description'], sup_sku, cartons,
-                                    f'{pack_qty} x {pack_unit}', total_units, on_hand,
-                                    f'{unit_cost:.4f}', f'{line_total:.2f}'])
+                    writer.writerow([f'="{line["barcode"]}"', line['description'],
+                                    f'{pack_qty} x {pack_unit}', total_units, '', on_hand, ''])
                     rows_written += 1
-
-                subtotal = round(fixed_total - gst_total, 2)
-                gst = round(gst_total, 2)
-                writer.writerow([])
-                writer.writerow(['', '', '', '', '', '', '', 'Subtotal (ex GST)', f'{subtotal:.2f}'])
-                writer.writerow(['', '', '', '', '', '', '', 'GST', f'{gst:.2f}'])
-                writer.writerow(['', '', '', '', '', '', '', 'Order Total', f'{fixed_total:.2f}'])
 
                 if sup_notes:
                     writer.writerow([])
                     writer.writerow(['Supplier Notes', sup_notes])
 
-            QMessageBox.information(self, 'Export Complete', f'Exported {rows_written} lines to:\n{path}')
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
         except Exception as e:
-            QMessageBox.critical(self, 'Export Failed', str(e))
+            show_error(self, "Could not export CSV.", e, title="Export Failed")
 
     def _load(self):
         po = po_model.get_by_id(self.po_id)
@@ -853,7 +834,7 @@ class PODetail(QWidget):
         self._update_total()
 
     def _update_total(self):
-        fixed_total = 0.0
+        subtotal = 0.0   # ex. GST
         gst_total = 0.0
         var_lines = 0
         for r in range(self.table.rowCount()):
@@ -866,29 +847,30 @@ class PODetail(QWidget):
                 if lt_item.text().startswith("—"):
                     var_lines += 1
                     continue
-                line_total = float(lt_item.text().replace("$", "").replace(",", "").strip())
-                fixed_total += line_total
+                line_total_ex = float(lt_item.text().replace("$", "").replace(",", "").strip())
+                subtotal += line_total_ex
                 tax_rate = 0.0
                 if r < len(self._line_tax_rates) and self._line_tax_rates[r] is not None:
                     tax_rate = float(self._line_tax_rates[r])
                 if tax_rate > 0:
-                    gst_total += line_total - (line_total / (1 + tax_rate / 100))
+                    gst_total += line_total_ex * (tax_rate / 100)
             except (ValueError, AttributeError):
                 pass
 
-        subtotal = round(fixed_total - gst_total, 2)
-        gst = round(gst_total, 2)
+        subtotal   = round(subtotal, 2)
+        gst        = round(gst_total, 2)
+        order_total = round(subtotal + gst, 2)
 
         self.subtotal_label.setText(f"Subtotal (ex GST): ${subtotal:.2f}")
         self.gst_label.setText(f"GST: ${gst:.2f}")
 
         if var_lines:
             self.total_label.setText(
-                f"Order Total: ${fixed_total:.2f}"
+                f"Order Total (inc. GST): ${order_total:.2f}"
                 f"  +  {var_lines} variable weight line(s) invoiced at delivery"
             )
         else:
-            self.total_label.setText(f"Order Total: ${fixed_total:.2f}")
+            self.total_label.setText(f"Order Total (inc. GST): ${order_total:.2f}")
 
     def _add_line(self):
         po = po_model.get_by_id(self.po_id)
@@ -929,12 +911,14 @@ class PODetail(QWidget):
             return
         total = 0
         for r in range(self.table.rowCount()):
-            if self._line_ids[r] is None:
+            if r >= len(self._line_ids) or self._line_ids[r] is None:
                 continue
             try:
-                qty = float(self.table.item(r, 6).text())
+                qty  = float(self.table.item(r, 6).text())
                 cost = float(self.table.item(r, 7).text().replace("$", "").strip())
-                total += qty * cost
+                tax_rate = float(self._line_tax_rates[r]) if r < len(self._line_tax_rates) else 0.0
+                line_ex  = qty * cost
+                total   += line_ex * (1 + tax_rate / 100)
             except (ValueError, AttributeError):
                 pass
         if self._order_minimum > 0 and total < self._order_minimum:

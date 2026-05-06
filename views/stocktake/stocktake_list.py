@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
+from utils.error_dialog import show_error
 import models.stocktake as stocktake_model
 import models.department as dept_model
 
@@ -149,4 +150,4 @@ class NewSessionDialog(QDialog):
             )
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not create stocktake session.", e)

@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
 from datetime import date, timedelta
 
 RIGHT  = Qt.AlignmentFlag.AlignRight  | Qt.AlignmentFlag.AlignVCenter
@@ -200,15 +200,10 @@ class SupplierSalesReport(QWidget):
         root.addWidget(self.footer)
 
     def _load_suppliers(self):
-        conn = get_connection()
-        rows = conn.execute(
-            "SELECT id, name FROM suppliers WHERE active=1 ORDER BY name"
-        ).fetchall()
-        conn.close()
         self.supplier_combo.clear()
         self.supplier_combo.addItem("All Suppliers", None)
-        for r in rows:
-            self.supplier_combo.addItem(r[1], r[0])
+        for r in report_ctrl.get_all_suppliers():
+            self.supplier_combo.addItem(r['name'], r['id'])
 
     def _set_dates(self, d_from, d_to):
         self.date_from.setDate(QDate(d_from.year, d_from.month, d_from.day))
@@ -233,81 +228,20 @@ class SupplierSalesReport(QWidget):
         self._set_dates(date(2000, 1, 1), date.today()); self._load()
 
     def _load(self):
-        conn = get_connection()
-        supplier_id = self.supplier_combo.currentData()
-        today       = date.today()
-
-        lw_s, lw_e   = _week_bounds(0)
-        tw_s, tw_e   = _week_bounds(1)
-        thisw_s      = today - timedelta(days=today.weekday())
-        thisw_e      = today
-        tm_s         = today.replace(day=1)
-        lm_e         = tm_s - timedelta(days=1)
-        lm_s         = lm_e.replace(day=1)
-        fy_s, fy_e   = _fy_bounds()
-        pfy_s, pfy_e = _fy_bounds((today.year if today.month >= 7 else today.year - 1) - 1)
-
-        def qty(plu, d1, d2):
-            r = conn.execute("""
-                SELECT COALESCE(SUM(quantity), 0) FROM sales_daily
-                WHERE plu=? AND sale_date BETWEEN ? AND ?
-            """, (plu, str(d1), str(d2))).fetchone()
-            return int(r[0]) if r else 0
-
-        sup_filter = "AND p.supplier_id = ?" if supplier_id else ""
-        sup_params = [supplier_id] if supplier_id else []
-
-        db_rows = conn.execute(f"""
-            SELECT
-                p.barcode,
-                p.description,
-                s.name AS supplier_name,
-                COALESCE(pbm.plu, '') AS plu
-            FROM products p
-            JOIN suppliers s ON s.id = p.supplier_id
-            LEFT JOIN plu_barcode_map pbm ON pbm.barcode = p.barcode
-            WHERE p.active = 1
-              {sup_filter}
-            ORDER BY s.name, p.description
-        """, sup_params).fetchall()
-        computed = []
-        totals   = [0] * 8
-
-        for row in db_rows:
-            barcode     = row[0]
-            description = row[1]
-            sup_name    = row[2]
-            plu         = str(row[3]) if row[3] else None
-
-            vals = [
-                qty(plu, thisw_s, thisw_e),
-                qty(plu, lw_s,  lw_e),
-                qty(plu, tw_s,  tw_e),
-                qty(plu, tm_s,  today),
-                qty(plu, lm_s,  lm_e),
-                qty(plu, fy_s,  fy_e),
-                qty(plu, pfy_s, pfy_e),
-                qty(plu, date(2000, 1, 1), today),
-            ] if plu else [0] * 8
-
-            for i, v in enumerate(vals):
-                totals[i] += v
-
-            computed.append((barcode, description, sup_name, vals))
-
-        conn.close()
+        supplier_id       = self.supplier_combo.currentData()
+        computed, totals  = report_ctrl.get_supplier_sales(supplier_id)
 
         self.table.setSortingEnabled(False)
         self.table.clearContents()
         self.table.setRowCount(len(computed))
 
-        for r, (barcode, description, sup_name, vals) in enumerate(computed):
-            sup_item = _text_item(sup_name)
-            sup_item.setData(BARCODE_ROLE, barcode)
+        for r, row in enumerate(computed):
+            sup_item = _text_item(row['supplier_name'])
+            sup_item.setData(BARCODE_ROLE, row['barcode'])
             self.table.setItem(r, 0, sup_item)
-            self.table.setItem(r, 1, _text_item(barcode))
-            self.table.setItem(r, 2, _text_item(description))
-            for ci, val in enumerate(vals, start=3):
+            self.table.setItem(r, 1, _text_item(row['barcode']))
+            self.table.setItem(r, 2, _text_item(row['description']))
+            for ci, val in enumerate(row['qty'], start=3):
                 self.table.setItem(r, ci, _num_item(val))
 
         self.table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)

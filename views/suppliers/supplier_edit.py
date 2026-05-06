@@ -4,6 +4,8 @@ from PyQt6.QtWidgets import (
     QTextEdit, QDoubleSpinBox, QGroupBox
 )
 from utils.keyboard_mixin import KeyboardMixin
+from utils.validators import validate_abn, validate_email, validate_phone
+from utils.error_dialog import show_error
 import models.supplier as supplier_model
 
 
@@ -165,28 +167,72 @@ class SupplierEdit(KeyboardMixin, QWidget):
     def _save(self):
         code = self.code.text().strip()
         name = self.name.text().strip()
-        if not code or not name:
-            QMessageBox.warning(self, "Validation", "Code and Name are required.")
+
+        errors = []
+        if not code:
+            errors.append("Code is required.")
+        if not name:
+            errors.append("Company Name is required.")
+
+        # Validate optional fields — collect all errors before blocking save
+        abn = phone = rep_phone = ""
+        email_orders = email_admin = email_accounts = email_rep = ""
+        try:
+            abn = validate_abn(self.abn.text())
+        except ValueError as e:
+            errors.append(f"ABN: {e}")
+        try:
+            phone = validate_phone(self.phone.text())
+        except ValueError as e:
+            errors.append(f"Phone: {e}")
+        try:
+            rep_phone = validate_phone(self.rep_phone.text())
+        except ValueError as e:
+            errors.append(f"Rep Phone: {e}")
+        try:
+            email_orders = validate_email(self.email_orders.text())
+        except ValueError as e:
+            errors.append(f"Orders Email: {e}")
+        try:
+            email_admin = validate_email(self.email_admin.text())
+        except ValueError as e:
+            errors.append(f"Admin Email: {e}")
+        try:
+            email_accounts = validate_email(self.email_accounts.text())
+        except ValueError as e:
+            errors.append(f"Accounts Email: {e}")
+        try:
+            email_rep = validate_email(self.email_rep.text())
+        except ValueError as e:
+            errors.append(f"Rep Email: {e}")
+
+        if errors:
+            QMessageBox.warning(self, "Validation", "\n".join(errors))
             return
+
+        # Normalise ABN display (formatted value written back to widget)
+        if abn:
+            self.abn.setText(abn)
+
         try:
             if self.supplier_id:
                 supplier_model.update(
                     self.supplier_id, code, name,
                     self.contact.text().strip(),
-                    self.phone.text().strip(),
+                    phone,
                     self.account.text().strip(),
                     self.terms.text().strip(),
                     self.address.toPlainText().strip(),
                     self.notes.toPlainText().strip(),
                     int(self.active.isChecked()),
-                    abn=self.abn.text().strip(),
+                    abn=abn,
                     rep_name=self.rep_name.text().strip(),
-                    rep_phone=self.rep_phone.text().strip(),
+                    rep_phone=rep_phone,
                     order_minimum=self.order_minimum.value(),
-                    email_orders=self.email_orders.text().strip(),
-                    email_admin=self.email_admin.text().strip(),
-                    email_accounts=self.email_accounts.text().strip(),
-                    email_rep=self.email_rep.text().strip(),
+                    email_orders=email_orders,
+                    email_admin=email_admin,
+                    email_accounts=email_accounts,
+                    email_rep=email_rep,
                     online_order=int(self.online_order.isChecked()),
                     online_order_note=self.online_order_note.toPlainText().strip(),
                 )
@@ -194,19 +240,19 @@ class SupplierEdit(KeyboardMixin, QWidget):
                 supplier_model.add(
                     code, name,
                     self.contact.text().strip(),
-                    self.phone.text().strip(),
+                    phone,
                     self.account.text().strip(),
                     self.terms.text().strip(),
                     self.address.toPlainText().strip(),
                     self.notes.toPlainText().strip(),
-                    abn=self.abn.text().strip(),
+                    abn=abn,
                     rep_name=self.rep_name.text().strip(),
-                    rep_phone=self.rep_phone.text().strip(),
+                    rep_phone=rep_phone,
                     order_minimum=self.order_minimum.value(),
-                    email_orders=self.email_orders.text().strip(),
-                    email_admin=self.email_admin.text().strip(),
-                    email_accounts=self.email_accounts.text().strip(),
-                    email_rep=self.email_rep.text().strip(),
+                    email_orders=email_orders,
+                    email_admin=email_admin,
+                    email_accounts=email_accounts,
+                    email_rep=email_rep,
                     online_order=int(self.online_order.isChecked()),
                     online_order_note=self.online_order_note.toPlainText().strip(),
                 )
@@ -214,4 +260,4 @@ class SupplierEdit(KeyboardMixin, QWidget):
                 self.on_save()
             self.close()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not save supplier.", e)

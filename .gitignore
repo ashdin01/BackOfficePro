@@ -1,10 +1,12 @@
-# Database — never commit real store data
+# Database and store data — never commit
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/images/
 *.db
 *.db-shm
 *.db-wal
+plu_audit*.csv
 
 # Backups
 backups/

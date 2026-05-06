@@ -61,11 +61,13 @@ def get_by_barcode(barcode):
         conn.close()
 
 
-def search(term, active_only=True):
+def search(term, active_only=True, limit=None, offset=0):
     """
     Multi-word search: splits term into words and requires ALL words
-    to appear somewhere in description, barcode, or brand.
+    to appear somewhere in description, barcode, brand, department, supplier, or PLU.
     e.g. "oasis dip" finds "OASIS BEETROOT DIP" and "OASIS GARLIC DIP"
+
+    Optional limit/offset for paginated callers (e.g. the REST API).
     """
     words = [w.strip() for w in term.strip().split() if w.strip()]
     if not words:
@@ -84,6 +86,9 @@ def search(term, active_only=True):
         params.extend([like, like, like, like, like, like])
 
     where = " AND ".join(word_clauses)
+    limit_clause = "LIMIT ? OFFSET ?" if limit is not None else ""
+    if limit is not None:
+        params.extend([int(limit), int(offset)])
 
     conn = get_connection()
     try:
@@ -97,6 +102,7 @@ def search(term, active_only=True):
             WHERE {where}
             {active_clause}
             ORDER BY p.active DESC, p.description
+            {limit_clause}
         """, params).fetchall()
     finally:
         conn.close()

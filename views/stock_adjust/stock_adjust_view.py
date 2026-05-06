@@ -554,6 +554,8 @@ class StockAdjustView(QWidget):
         self.apply_btn.setText("✓  Apply Adjustment")
         self.clear_btn.setEnabled(True)
         self.stock_changed.emit()
+        self.qty_spin.setFocus()
+        self.qty_spin.selectAll()
 
     def _on_adjust_error(self, msg):
         QMessageBox.critical(self, "Error", msg)

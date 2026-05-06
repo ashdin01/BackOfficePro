@@ -13,6 +13,7 @@ from flask import Flask, request, jsonify, send_file
 from database.connection import get_connection
 from models import stocktake
 from models.barcode_alias import resolve as resolve_alias
+import models.product as product_model
 
 app = Flask(__name__)
 
@@ -69,36 +70,23 @@ def list_products():
     except (TypeError, ValueError):
         return jsonify({"error": "limit and offset must be integers"}), 400
 
+    if search:
+        rows = product_model.search(search, active_only=True, limit=limit, offset=offset)
+        return jsonify(_rows(rows))
+
     conn = get_connection()
     try:
-        base_select = """
+        rows = conn.execute("""
             SELECT p.barcode, p.plu, p.description, p.brand, p.unit,
                    p.sell_price, p.tax_rate, d.name AS dept_name,
                    g.name AS group_name
             FROM products p
-            LEFT JOIN departments d     ON p.department_id = d.id
-            LEFT JOIN product_groups g  ON p.group_id = g.id
-        """
-        if search:
-            words = search.split()
-            clauses, params = [], []
-            for word in words:
-                like = f"%{word}%"
-                clauses.append(
-                    "(p.description LIKE ? OR p.barcode LIKE ? OR p.plu LIKE ? OR p.brand LIKE ?)"
-                )
-                params.extend([like, like, like, like])
-            where = "WHERE (" + " AND ".join(clauses) + ") AND p.active = 1"
-            params.extend([limit, offset])
-            rows = conn.execute(
-                f"{base_select} {where} ORDER BY p.description LIMIT ? OFFSET ?",
-                params
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                f"{base_select} WHERE p.active = 1 ORDER BY p.description LIMIT ? OFFSET ?",
-                (limit, offset)
-            ).fetchall()
+            LEFT JOIN departments d    ON p.department_id = d.id
+            LEFT JOIN product_groups g ON p.group_id = g.id
+            WHERE p.active = 1
+            ORDER BY p.description
+            LIMIT ? OFFSET ?
+        """, (limit, offset)).fetchall()
         return jsonify(_rows(rows))
     finally:
         conn.close()

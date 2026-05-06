@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox, QComboBox
 )
 from PyQt6.QtGui import QKeySequence, QShortcut
+from utils.error_dialog import show_error
 import models.group as group_model
 import models.department as dept_model
 
@@ -93,4 +94,4 @@ class GroupEdit(QWidget):
                 self.on_save()
             self.close()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not save product group.", e)

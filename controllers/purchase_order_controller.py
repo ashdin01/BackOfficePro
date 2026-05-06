@@ -160,6 +160,68 @@ def get_sales_for_barcode_range(barcode, date_from, date_to):
         return None
 
 
+def get_received_line_count(po_id):
+    """Number of po_lines with at least one unit received."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_qty > 0",
+            (po_id,)
+        ).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def get_po_with_supplier(po_id):
+    """Return the PO row joined with supplier name as a dict, or None."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT po.*, s.name AS supplier_name "
+            "FROM purchase_orders po "
+            "JOIN suppliers s ON s.id = po.supplier_id "
+            "WHERE po.id=?",
+            (po_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_unreceived_lines(po_id):
+    """Lines where received_qty < ordered_qty. Returns list of dicts."""
+    conn = get_connection()
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT id, description, ordered_qty, received_qty "
+            "FROM po_lines WHERE po_id=? AND received_qty < ordered_qty",
+            (po_id,)
+        ).fetchall()]
+    finally:
+        conn.close()
+
+
+def close_po_force(po_id, unreceived_line_ids, reason):
+    """Mark listed lines NOT SUPPLIED and set PO status to RECEIVED atomically."""
+    conn = get_connection()
+    try:
+        note = f"NOT SUPPLIED: {reason}"
+        for line_id in unreceived_line_ids:
+            conn.execute("UPDATE po_lines SET notes=? WHERE id=?", (note, line_id))
+        conn.execute(
+            "UPDATE purchase_orders SET status='RECEIVED', "
+            "received_at=CURRENT_TIMESTAMP WHERE id=?",
+            (po_id,)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def cartons_needed(reorder_qty, pack_qty):
     pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
     return max(1, math.ceil(reorder_qty / pack_qty))

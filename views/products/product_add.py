@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
+from utils.error_dialog import show_error
 import models.product as product_model
 import models.department as dept_model
 import models.supplier as supplier_model
@@ -219,4 +220,4 @@ class ProductAdd(KeyboardMixin, QWidget):
                 self.on_save()
             self.close()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not add product.", e)

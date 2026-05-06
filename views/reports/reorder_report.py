@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
 
 class NumItem(QTableWidgetItem):
     """Sorts numerically, stripping $, %, commas and +/-."""
@@ -20,60 +20,6 @@ class NumItem(QTableWidgetItem):
 
 
 import csv
-
-
-def get_reorder_items(dept_id=None, supplier_id=None):
-    conn = get_connection()
-    sql = """
-        SELECT p.barcode, p.description, d.name as dept_name,
-               sup.name as supplier_name,
-               COALESCE(s.quantity, 0) as on_hand,
-               p.reorder_point,
-               COALESCE(p.reorder_max, 0) as reorder_max,
-               p.unit, p.cost_price,
-               CASE
-                   WHEN COALESCE(p.reorder_max, 0) > 0
-                   THEN MAX(1, COALESCE(p.reorder_max, 0) - COALESCE(s.quantity, 0))
-                   ELSE 0
-               END as suggested_qty,
-               CASE
-                   WHEN COALESCE(p.reorder_max, 0) > 0
-                   THEN MAX(1, COALESCE(p.reorder_max, 0) - COALESCE(s.quantity, 0)) * p.cost_price
-                   ELSE 0
-               END as order_cost
-        FROM products p
-        LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
-        LEFT JOIN departments d ON p.department_id = d.id
-        LEFT JOIN suppliers sup ON p.supplier_id = sup.id
-        WHERE p.active = 1
-          AND COALESCE(s.quantity, 0) <= p.reorder_point
-          AND p.reorder_point > 0
-    """
-    params = []
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
-    if supplier_id:
-        sql += " AND p.supplier_id = ?"
-        params.append(supplier_id)
-    sql += " ORDER BY sup.name, d.name, p.description"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return rows
-
-
-def get_departments():
-    conn = get_connection()
-    rows = conn.execute("SELECT id, name FROM departments WHERE active=1 ORDER BY name").fetchall()
-    conn.close()
-    return rows
-
-
-def get_suppliers():
-    conn = get_connection()
-    rows = conn.execute("SELECT id, name FROM suppliers WHERE active=1 ORDER BY name").fetchall()
-    conn.close()
-    return rows
 
 
 class ReorderReport(QWidget):
@@ -90,7 +36,7 @@ class ReorderReport(QWidget):
         filter_row.addWidget(QLabel("Department:"))
         self.dept_filter = QComboBox()
         self.dept_filter.addItem("All Departments", None)
-        for d in get_departments():
+        for d in report_ctrl.get_all_departments():
             self.dept_filter.addItem(d['name'], d['id'])
         self.dept_filter.currentIndexChanged.connect(self._load)
         filter_row.addWidget(self.dept_filter)
@@ -98,7 +44,7 @@ class ReorderReport(QWidget):
         filter_row.addWidget(QLabel("Supplier:"))
         self.sup_filter = QComboBox()
         self.sup_filter.addItem("All Suppliers", None)
-        for s in get_suppliers():
+        for s in report_ctrl.get_all_suppliers():
             self.sup_filter.addItem(s['name'], s['id'])
         self.sup_filter.currentIndexChanged.connect(self._load)
         filter_row.addWidget(self.sup_filter)
@@ -134,7 +80,7 @@ class ReorderReport(QWidget):
     def _load(self):
         dept_id = self.dept_filter.currentData()
         sup_id = self.sup_filter.currentData()
-        rows = get_reorder_items(dept_id, sup_id)
+        rows = report_ctrl.get_reorder_items(dept_id, sup_id)
 
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
@@ -179,13 +125,13 @@ class ReorderReport(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "reorder_report.csv"), "CSV (*.csv)")
         if not path:
             return
-        rows = get_reorder_items(self.dept_filter.currentData(), self.sup_filter.currentData())
+        rows = report_ctrl.get_reorder_items(self.dept_filter.currentData(), self.sup_filter.currentData())
         with open(path, 'w', newline='') as f:
             w = csv.writer(f)
             w.writerow(["Barcode", "Description", "Department", "Supplier",
                         "On Hand", "Reorder Point", "Order Qty", "Unit Cost", "Order Cost"])
             for row in rows:
-                w.writerow([row['barcode'], row['description'], row['dept_name'],
+                w.writerow([f'="{row["barcode"]}"', row['description'], row['dept_name'],
                              row['supplier_name'], row['on_hand'], row['reorder_point'],
                              row['cost_price'], row['order_cost']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

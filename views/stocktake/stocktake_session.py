@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
+from utils.error_dialog import show_error
 import models.stocktake as stocktake_model
 import models.product as product_model
 import models.stock_on_hand as soh_model
@@ -213,7 +214,7 @@ class StocktakeSession(QWidget):
             self._show_import_result(imported, skipped, errors, path)
             self._load()
         except Exception as e:
-            QMessageBox.critical(self, "Import Failed", str(e))
+            show_error(self, "Could not import stocktake from CSV.", e, title="Import Failed")
 
     def _import_sqlite(self):
         if self._session['status'] != 'OPEN':
@@ -232,7 +233,7 @@ class StocktakeSession(QWidget):
             self._show_import_result(imported, skipped, errors, path)
             self._load()
         except Exception as e:
-            QMessageBox.critical(self, "Import Failed", str(e))
+            show_error(self, "Could not import stocktake from database file.", e, title="Import Failed")
 
     def _show_import_result(self, imported, skipped, errors, path):
         import os
@@ -384,7 +385,7 @@ class StocktakeSession(QWidget):
                 if self.on_close:
                     self.on_close()
             except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
+                show_error(self, "Could not apply stocktake counts.", e)
 
 
 import os

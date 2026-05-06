@@ -11,6 +11,7 @@ import models.purchase_order as po_model
 import models.po_lines as lines_model
 import models.stock_on_hand as stock_model
 import models.product as product_model
+import controllers.product_controller as product_ctrl
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
 
 
@@ -458,7 +459,7 @@ class POReceive(QWidget):
             # ── Col 5: Receiving Now (always items, always integer) ──
             qty_input = QSpinBox()
             qty_input.setMinimum(0)
-            qty_input.setMaximum(99999)
+            qty_input.setMaximum(max(0, remaining_units))
             qty_input.setSingleStep(pack_qty)
             qty_input.setValue(0)
             self.table.setCellWidget(r, 5, qty_input)
@@ -676,7 +677,16 @@ class POReceive(QWidget):
             qty_input.setValue(remaining_units)
 
     def _confirm(self):
-        po_number = po_model.get_by_id(self.po_id)['po_number']
+        po = po_model.get_by_id(self.po_id)
+        po_number = po['po_number']
+
+        if po['status'] in ('RECEIVED', 'REVERSED', 'CANCELLED'):
+            QMessageBox.warning(
+                self, "Cannot Receive",
+                f"{po_number} has status '{po['status']}' and cannot be received again."
+            )
+            return
+
         promo_count = sum(
             1 for entry in self._inputs
             if entry[4].isChecked() and entry[2].value() > 0
@@ -703,19 +713,14 @@ class POReceive(QWidget):
             if qty > 0:
                 cartons = max(1, math.ceil(qty / pack_qty))
 
-                # Update po_line received qty and cost
-                lines_model.receive(line['id'],
-                                    line['received_qty'] + cartons,
-                                    cost if cost > 0 else None)
-
-                from database.connection import get_connection
-                conn = get_connection()
-                conn.execute(
-                    "UPDATE po_lines SET unit_cost=?, is_promo=? WHERE id=?",
-                    (cost, 1 if is_promo else 0, line['id'])
+                # Update po_line received qty, cost and promo flag in one call
+                lines_model.receive(
+                    line['id'],
+                    line['received_qty'] + cartons,
+                    actual_cost=cost if cost > 0 else None,
+                    unit_cost=cost,
+                    is_promo=is_promo,
                 )
-                conn.commit()
-                conn.close()
 
                 # Stock on hand — always adjusts by NUMBER OF ITEMS
                 stock_model.adjust(
@@ -726,18 +731,10 @@ class POReceive(QWidget):
                 )
 
                 # Update product cost price (unless promo)
+                # For weighed items cost = per kg rate; for standard = per unit —
+                # both are stored directly as cost_price in the product master.
                 if cost > 0 and not is_promo:
-                    from database.connection import get_connection
-                    conn = get_connection()
-                    # For weighed items cost = per kg rate; for standard = per unit — both
-                    # are stored directly as cost_price in the product master.
-                    conn.execute(
-                        "UPDATE products SET cost_price=?, updated_at=CURRENT_TIMESTAMP "
-                        "WHERE barcode=?",
-                        (cost, line['barcode'])
-                    )
-                    conn.commit()
-                    conn.close()
+                    product_ctrl.update_cost_price(line['barcode'], cost)
 
             total_received_cartons = line['received_qty'] + (
                 max(1, math.ceil(qty / pack_qty)) if qty > 0 else 0

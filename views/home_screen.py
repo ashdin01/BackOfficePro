@@ -4,10 +4,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QDateTime
 from PyQt6.QtGui import QFont
-from database.connection import get_connection
+import controllers.dashboard_controller as dash_ctrl
 import os
 import sys
 import importlib.util
+import logging
 from datetime import date, timedelta
 
 
@@ -69,20 +70,6 @@ def _run_import(parent, paths):
     except Exception as e:
         return False, str(e)
 
-
-def _last_import_date():
-    """Return the most recent sale_date in sales_daily, or None."""
-    try:
-        conn = get_connection()
-        row = conn.execute(
-            "SELECT MAX(sale_date) FROM sales_daily"
-        ).fetchone()
-        conn.close()
-        if row and row[0]:
-            return date.fromisoformat(row[0])
-    except Exception:
-        pass
-    return None
 
 
 class HomeScreen(QWidget):
@@ -265,7 +252,7 @@ class HomeScreen(QWidget):
 
     def _update_import_status(self):
         """Check last import date and update status label and flash indicator."""
-        last = _last_import_date()
+        last = dash_ctrl.get_last_import_date()
         yesterday = date.today() - timedelta(days=1)
         today = date.today()
 
@@ -306,56 +293,22 @@ class HomeScreen(QWidget):
             self._refresh()
 
     def _refresh(self):
-        conn = get_connection()
         try:
-            # Store name
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key='store_name'"
-            ).fetchone()
-            self._store_lbl.setText(row[0] if row and row[0] else "My Supermarket")
-
-            # Today's sales
-            today = QDateTime.currentDateTime().toString("yyyy-MM-dd")
-            sales = conn.execute(
-                "SELECT COALESCE(SUM(sales_dollars),0) FROM sales_daily WHERE sale_date=?",
-                (today,)
-            ).fetchone()
-            self._val_sales.setText(f"${(sales[0] or 0):,.2f}")
-
-            # Open POs (DRAFT or SENT)
-            open_pos = conn.execute(
-                "SELECT COUNT(*) FROM purchase_orders WHERE status IN ('DRAFT','SENT')"
-            ).fetchone()
-            self._val_pos.setText(str(open_pos[0] or 0))
-
-            # Low stock
-            low = conn.execute("""
-                SELECT COUNT(*) FROM products p
-                LEFT JOIN stock_on_hand s ON s.barcode = p.barcode
-                WHERE p.active = 1
-                  AND p.reorder_point > 0
-                  AND COALESCE(s.quantity, 0) <= p.reorder_point
-            """).fetchone()
-            low_count = low[0] or 0
-            self._val_low.setText(str(low_count))
+            stats = dash_ctrl.get_dashboard_stats()
+            self._store_lbl.setText(stats['store_name'])
+            self._val_sales.setText(f"${stats['today_sales']:,.2f}")
+            self._val_pos.setText(str(stats['open_po_count']))
+            self._val_low.setText(str(stats['low_stock_count']))
+            self._val_products.setText(f"{stats['active_product_count']:,}")
+            low_color = "#f85149" if stats['low_stock_count'] > 0 else "#FF9800"
             self._card_low.setStyleSheet(f"""
                 QFrame {{
                     background: #1e2a38;
                     border-radius: 10px;
-                    border-left: 4px solid {"#f85149" if low_count > 0 else "#FF9800"};
+                    border-left: 4px solid {low_color};
                 }}
             """)
-
-            # Active products
-            prods = conn.execute(
-                "SELECT COUNT(*) FROM products WHERE active=1"
-            ).fetchone()
-            self._val_products.setText(f"{prods[0] or 0:,}")
-
         except Exception as e:
-            print(f"[HomeScreen] refresh error: {e}")
-        finally:
-            conn.close()
+            logging.warning("HomeScreen refresh error: %s", e, exc_info=True)
 
-        # Update import status separately
         self._update_import_status()

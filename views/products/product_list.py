@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QObject, QEvent, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.keyboard_mixin import KeyboardMixin
+from utils.error_dialog import show_error
 import models.stock_on_hand as soh_model
 import models.product as product_model
 import csv
@@ -284,11 +285,11 @@ class ProductList(KeyboardMixin, QWidget):
                 writer = csv.writer(f)
                 writer.writerow(headers)
                 for r in range(row_count):
-                    writer.writerow([
-                        self.table.item(r, c).text() if self.table.item(r, c) else ""
-                        for c in range(col_count)
-                    ])
+                    vals = [self.table.item(r, c).text() if self.table.item(r, c) else "" for c in range(col_count)]
+                    if vals and vals[0]:
+                        vals[0] = f'="{vals[0]}"'
+                    writer.writerow(vals)
             QMessageBox.information(self, "Export Complete",
                 f"Exported {row_count} products to:\n{path}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            show_error(self, "Could not export product list.", e, title="Export Failed")

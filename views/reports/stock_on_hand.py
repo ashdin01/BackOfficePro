@@ -10,6 +10,7 @@ from views.reports.writeoff_report import WriteOffReport
 from views.reports.gst_report import GSTReport
 from views.reports.sales_report_view import SalesReportView
 from views.reports.liquor_report import LiquorReport
+from views.products.plu_manager import PLUManager
 
 
 class StockOnHandReport(QWidget):
@@ -28,4 +29,5 @@ class StockOnHandReport(QWidget):
         tabs.addTab(SupplierSalesReport(),    "🏪 Supplier Sales")
         tabs.addTab(WriteOffReport(),         "🗑  Write-Offs")
         tabs.addTab(LiquorReport(),           "🍺 Liquor Tracking")
+        tabs.addTab(PLUManager(),             "🏷  PLU Manager")
         layout.addWidget(tabs)

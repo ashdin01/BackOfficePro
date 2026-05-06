@@ -8,8 +8,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate, QTimer
 from PyQt6.QtGui import QColor, QAction, QKeySequence, QShortcut
-from database.connection import get_connection
-import csv, os, subprocess, sys
+import csv, os, subprocess, sys, logging
+import controllers.sales_report_controller as sales_ctrl
+from utils.error_dialog import show_error
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,170 +69,16 @@ def _stat_card(label, value, color="#2196F3"):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DB helpers
+# DB helpers — thin delegates to sales_report_controller
 # ─────────────────────────────────────────────────────────────────────────────
-def _ensure_plu_map_table():
-    """Create plu_barcode_map if it doesn't exist yet (safe to call every run)."""
-    conn = get_connection()
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS plu_barcode_map (
-                plu     INTEGER PRIMARY KEY,
-                barcode TEXT    NOT NULL,
-                mapped_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _save_plu_map(plu, barcode: str):
-    """Persist a PLU→barcode mapping so future PDF imports resolve automatically."""
-    try:
-        plu_int = int(str(plu).strip())
-    except (ValueError, TypeError):
-        return
-    conn = get_connection()
-    try:
-        conn.execute(
-            "INSERT OR REPLACE INTO plu_barcode_map (plu, barcode, mapped_at) "
-            "VALUES (?, ?, CURRENT_TIMESTAMP)",
-            (plu_int, barcode)
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    # Backfill any historical sales movements now that PLU is mapped
-    _backfill_sale_movements(plu, barcode)
-
-
-def _backfill_sale_movements(plu, barcode: str):
-    """
-    After a PLU→barcode mapping is saved, retroactively create stock movements
-    for any historical sales_daily records that were imported before the mapping
-    existed.
-    """
-    try:
-        plu_str = str(plu).strip()
-        conn = get_connection()
-        try:
-            # Find all sales_daily rows for this PLU with no existing movement
-            orphaned = conn.execute("""
-                SELECT sd.sale_date, sd.plu, sd.plu_name, sd.quantity
-                FROM sales_daily sd
-                WHERE sd.plu = ?
-                AND NOT EXISTS (
-                    SELECT 1 FROM stock_movements sm
-                    WHERE sm.barcode = ?
-                    AND sm.reference = 'SALE-' || sd.sale_date || '-PLU' || sd.plu
-                )
-                ORDER BY sd.sale_date
-            """, (plu_str, barcode)).fetchall()
-
-            if not orphaned:
-                return
-
-            backfilled = 0
-            for row in orphaned:
-                reference = f"SALE-{row['sale_date']}-PLU{row['plu']}"
-                quantity  = float(row['quantity'])
-                plu_name  = row['plu_name'] or ""
-
-                # Create movement
-                conn.execute("""
-                    INSERT INTO stock_movements
-                        (barcode, movement_type, quantity, reference, notes, created_by)
-                    VALUES (?, 'SALE', ?, ?, ?, 'PDF Import (backfill)')
-                """, (barcode, -quantity, reference,
-                      f"Backfill: {plu_name} ({quantity} units)"))
-
-                # Update SOH — creates row if not exists
-                conn.execute("""
-                    INSERT INTO stock_on_hand (barcode, quantity)
-                    VALUES (?, ?)
-                    ON CONFLICT(barcode) DO UPDATE SET
-                        quantity = quantity + excluded.quantity,
-                        last_updated = CURRENT_TIMESTAMP
-                """, (barcode, -quantity))
-
-                backfilled += 1
-
-            conn.commit()
-            if backfilled:
-                print(f"  Backfilled {backfilled} sale movements for PLU {plu} → {barcode}")
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"  Backfill error: {e}")
-
-
-def _load_plu_map() -> dict:
-    """Return {plu_int: barcode} from the persistent map table."""
-    conn = get_connection()
-    try:
-        rows = conn.execute("SELECT plu, barcode FROM plu_barcode_map").fetchall()
-        return {row[0]: row[1] for row in rows}
-    except Exception:
-        return {}
-    finally:
-        conn.close()
-
-
-def _get_departments():
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            "SELECT id, name FROM departments WHERE active=1 ORDER BY name"
-        ).fetchall()
-        return [dict(r) for r in rows]
-    except Exception:
-        return []
-    finally:
-        conn.close()
-
-
-def _get_suppliers():
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            "SELECT id, name FROM suppliers WHERE active=1 ORDER BY name"
-        ).fetchall()
-        return [dict(r) for r in rows]
-    except Exception:
-        return []
-    finally:
-        conn.close()
-
-
-def _barcode_exists(barcode: str) -> bool:
-    conn = get_connection()
-    try:
-        return conn.execute(
-            "SELECT 1 FROM products WHERE barcode=?", (barcode,)
-        ).fetchone() is not None
-    finally:
-        conn.close()
-
-
-def _get_all_products():
-    conn = get_connection()
-    try:
-        rows = conn.execute("""
-            SELECT p.barcode, p.description, p.brand,
-                   COALESCE(p.plu, '') as plu,
-                   d.name as dept_name, d.id as dept_id,
-                   s.name as supplier_name, s.id as supplier_id,
-                   p.sell_price, p.cost_price, p.unit
-            FROM products p
-            LEFT JOIN departments d ON p.department_id = d.id
-            LEFT JOIN suppliers   s ON p.supplier_id   = s.id
-            WHERE p.active = 1
-            ORDER BY p.description
-        """).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+def _ensure_plu_map_table():   sales_ctrl.ensure_plu_map_table()
+def _save_plu_map(plu, bc):    sales_ctrl.save_plu_map(plu, bc)
+def _backfill_sale_movements(plu, bc): sales_ctrl.backfill_sale_movements(plu, bc)
+def _load_plu_map():           return sales_ctrl.load_plu_map()
+def _get_departments():        return sales_ctrl.get_departments()
+def _get_suppliers():          return sales_ctrl.get_suppliers()
+def _barcode_exists(bc):       return sales_ctrl.barcode_exists(bc)
+def _get_all_products():       return sales_ctrl.get_all_products()
 
 
 import re as _re
@@ -447,7 +294,7 @@ class _AddProductDialog(QDialog):
             self.saved_barcode = barcode
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "Database Error", str(e))
+            show_error(self, "Could not add product.", e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -680,7 +527,7 @@ class _MatchItemDialog(QDialog):
             try:
                 self._update_barcode(existing_bc, sales_bc)
             except Exception as e:
-                QMessageBox.critical(self, "Error", str(e)); return
+                show_error(self, "Could not update barcode.", e); return
             # Persist the PLU → new barcode mapping
             _save_plu_map(self.sales_row.get("plu"), sales_bc)
             QMessageBox.information(self, "Matched",
@@ -694,31 +541,7 @@ class _MatchItemDialog(QDialog):
         self.accept()
 
     def _update_barcode(self, old_bc: str, new_bc: str):
-        conn = get_connection()
-        try:
-            conn.execute("""
-                INSERT INTO products
-                    (barcode,base_sku,description,department_id,supplier_id,
-                     brand,unit,unit_size,units_per_carton,sell_price,cost_price,
-                     carton_price,tax_rate,reorder_point,variable_weight,
-                     expected,active,notes,created_at,updated_at)
-                SELECT ?,base_sku,description,department_id,supplier_id,
-                     brand,unit,unit_size,units_per_carton,sell_price,cost_price,
-                     carton_price,tax_rate,reorder_point,variable_weight,
-                     expected,active,notes,created_at,CURRENT_TIMESTAMP
-                FROM products WHERE barcode=?
-            """, (new_bc, old_bc))
-            conn.execute("""
-                INSERT OR IGNORE INTO stock_on_hand (barcode,quantity)
-                SELECT ?,quantity FROM stock_on_hand WHERE barcode=?
-            """, (new_bc, old_bc))
-            conn.execute("DELETE FROM stock_on_hand WHERE barcode=?", (old_bc,))
-            conn.execute("DELETE FROM products WHERE barcode=?", (old_bc,))
-            conn.commit()
-        except Exception:
-            conn.rollback(); raise
-        finally:
-            conn.close()
+        sales_ctrl.update_product_barcode(old_bc, new_bc)
 
     def _add_new(self):
         prefill = {
@@ -866,81 +689,43 @@ class SalesReportView(QWidget):
                 self.date_to.date().toString("yyyy-MM-dd"))
 
     def _load_groups(self):
-        conn = get_connection()
         try:
-            rows = conn.execute(
-                "SELECT DISTINCT sub_group FROM sales_daily "
-                "WHERE sub_group IS NOT NULL ORDER BY sub_group"
-            ).fetchall()
+            groups = sales_ctrl.get_sales_groups()
             current = self.group_filter.currentData()
             self.group_filter.blockSignals(True)
             self.group_filter.clear()
             self.group_filter.addItem("All Groups", None)
-            for r in rows:
-                self.group_filter.addItem(r[0], r[0])
+            for g in groups:
+                self.group_filter.addItem(g, g)
             idx = self.group_filter.findData(current)
-            if idx >= 0: self.group_filter.setCurrentIndex(idx)
+            if idx >= 0:
+                self.group_filter.setCurrentIndex(idx)
             self.group_filter.blockSignals(False)
         except Exception:
             pass
-        conn.close()
 
     def _load(self):
-        conn = get_connection()
-        exists = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='sales_daily'"
-        ).fetchone()
-        if not exists:
-            conn.close()
+        if not sales_ctrl.sales_table_exists():
             self.footer_label.setText(
                 "No sales data yet — import a CSV or PDF using the ⬆ Import Sales button.")
             return
 
         d_from, d_to = self._get_dates()
         group = self.group_filter.currentData()
-        where  = "WHERE sale_date BETWEEN ? AND ?"
-        params = [d_from, d_to]
-        if group:
-            where += " AND sub_group = ?"
-            params.append(group)
 
-        # Stats
-        stats = conn.execute(f"""
-            SELECT SUM(sales_dollars) + SUM(discount), SUM(quantity), COUNT(DISTINCT sale_date)
-            FROM sales_daily {where}
-        """, params).fetchone()
-        total_rev  = stats[0] or 0
-        total_qty  = stats[1] or 0
-        total_days = stats[2] or 0
-
-        top = conn.execute(f"""
-            SELECT plu_name, SUM(sales_dollars) as s
-            FROM sales_daily {where}
-            GROUP BY plu ORDER BY s DESC LIMIT 1
-        """, params).fetchone()
+        stats      = sales_ctrl.get_sales_stats(d_from, d_to, group)
+        total_rev  = stats['total_rev']
+        total_qty  = stats['total_qty']
+        total_days = stats['total_days']
 
         self._val_revenue.setText(f"${total_rev:,.2f}")
         self._val_qty.setText(f"{int(total_qty):,}")
         self._val_days.setText(str(total_days))
-        self._val_top.setText(f"${top[1]:,.2f}" if top else "—")
-        self._lbl_top.setText(top[0][:30] if top else "Top Seller")
+        self._val_top.setText(f"${stats['top_sales']:,.2f}" if stats['top_sales'] is not None else "—")
+        self._lbl_top.setText(stats['top_name'] if stats['top_name'] else "Top Seller")
 
         # ── By Product ────────────────────────────────────────────────────────
-        # Load ALL products from DB keyed by PLU (zero-padded barcode)
-        # so we can join full product data onto each sales row.
-        all_prods_rows = conn.execute("""
-            SELECT p.barcode, p.plu, p.description, p.brand,
-                   d.name  AS dept_name,
-                   s.name  AS supplier_name,
-                   p.unit, p.sell_price, p.cost_price,
-                   COALESCE(soh.quantity, 0) AS on_hand
-            FROM products p
-            LEFT JOIN departments  d   ON p.department_id = d.id
-            LEFT JOIN suppliers    s   ON p.supplier_id   = s.id
-            LEFT JOIN stock_on_hand soh ON soh.barcode    = p.barcode
-            WHERE p.active = 1
-        """).fetchall()
-        all_prods = [dict(r) for r in all_prods_rows]
+        all_prods = sales_ctrl.get_products_with_stock()
 
         # Build lookup: plu_int → product dict
         # Barcode format in this store is zero-padded PLU, e.g. PLU 39 → barcode "0200039"
@@ -973,30 +758,18 @@ class SalesReportView(QWidget):
         saved_plu_map = _load_plu_map()   # {plu_int: barcode}
 
         # Sales aggregates per PLU
-        products = conn.execute(f"""
-            SELECT
-                sd.plu,
-                sd.plu_name,
-                sd.sub_group,
-                SUM(sd.quantity)      AS qty,
-                SUM(sd.sales_dollars) AS sales,
-                SUM(sd.sales_dollars) / NULLIF(COUNT(DISTINCT sd.sale_date),0) AS avg_day
-            FROM sales_daily sd
-            {where}
-            GROUP BY sd.plu
-            ORDER BY sales DESC
-        """, params).fetchall()
+        products = sales_ctrl.get_sales_by_product(d_from, d_to, group)
 
         self.product_table.setSortingEnabled(False)
         self.product_table.setRowCount(0)
 
         for row in products:
-            plu      = row[0] or ""
-            plu_name = row[1] or ""
-            sub_grp  = row[2] or ""
-            qty      = row[3] or 0
-            sales    = row[4] or 0
-            avg_day  = row[5] or 0
+            plu      = row['plu']       or ""
+            plu_name = row['plu_name']  or ""
+            sub_grp  = row['sub_group'] or ""
+            qty      = row['qty']       or 0
+            sales    = row['sales']     or 0
+            avg_day  = row['avg_day']   or 0
             pct      = (sales / total_rev * 100) if total_rev else 0
 
             # ── Product lookup (priority order) ──────────────────────────
@@ -1085,43 +858,31 @@ class SalesReportView(QWidget):
         self.product_table.setSortingEnabled(True)
 
         # By Day
-        days = conn.execute(f"""
-            SELECT sale_date, SUM(quantity), SUM(sales_dollars),
-                   SUM(discount), SUM(sales_dollars)+SUM(discount)
-            FROM sales_daily {where}
-            GROUP BY sale_date ORDER BY sale_date DESC
-        """, params).fetchall()
-
+        days = sales_ctrl.get_sales_by_day(d_from, d_to, group)
         self.day_table.setSortingEnabled(False)
         self.day_table.setRowCount(0)
         for row in days:
             r = self.day_table.rowCount(); self.day_table.insertRow(r)
-            self.day_table.setItem(r, 0, _item(row[0] or ""))
-            self.day_table.setItem(r, 1, _item(f"{row[1]:.0f}", RIGHT, numeric=True))
-            self.day_table.setItem(r, 2, _item(f"${row[2]:.2f}", RIGHT, numeric=True))
-            self.day_table.setItem(r, 3, _item(f"${abs(row[3]):.2f}", RIGHT, numeric=True))
-            self.day_table.setItem(r, 4, _item(f"${row[4]:.2f}", RIGHT, numeric=True))
+            self.day_table.setItem(r, 0, _item(row['sale_date'] or ""))
+            self.day_table.setItem(r, 1, _item(f"{row['quantity']:.0f}", RIGHT, numeric=True))
+            self.day_table.setItem(r, 2, _item(f"${row['sales_dollars']:.2f}", RIGHT, numeric=True))
+            self.day_table.setItem(r, 3, _item(f"${abs(row['discount']):.2f}", RIGHT, numeric=True))
+            self.day_table.setItem(r, 4, _item(f"${row['net_sales']:.2f}", RIGHT, numeric=True))
         self.day_table.setSortingEnabled(True)
 
         # By Group
-        groups = conn.execute(f"""
-            SELECT sub_group, SUM(quantity), SUM(sales_dollars)
-            FROM sales_daily {where}
-            GROUP BY sub_group ORDER BY SUM(sales_dollars) DESC
-        """, params).fetchall()
-
+        groups = sales_ctrl.get_sales_by_group(d_from, d_to, group)
         self.group_table.setSortingEnabled(False)
         self.group_table.setRowCount(0)
         for row in groups:
             r = self.group_table.rowCount(); self.group_table.insertRow(r)
-            pct = (row[2] / total_rev * 100) if total_rev else 0
-            self.group_table.setItem(r, 0, _item(row[0] or ""))
-            self.group_table.setItem(r, 1, _item(f"{row[1]:.0f}", RIGHT, numeric=True))
-            self.group_table.setItem(r, 2, _item(f"${row[2]:.2f}", RIGHT, numeric=True))
+            pct = (row['sales_dollars'] / total_rev * 100) if total_rev else 0
+            self.group_table.setItem(r, 0, _item(row['sub_group'] or ""))
+            self.group_table.setItem(r, 1, _item(f"{row['quantity']:.0f}", RIGHT, numeric=True))
+            self.group_table.setItem(r, 2, _item(f"${row['sales_dollars']:.2f}", RIGHT, numeric=True))
             self.group_table.setItem(r, 3, _item(f"{pct:.1f}%", RIGHT, numeric=True))
         self.group_table.setSortingEnabled(True)
 
-        conn.close()
         self._load_groups()
         self.footer_label.setText(
             f"Showing data from {d_from} to {d_to}  |  "
@@ -1249,7 +1010,7 @@ class SalesReportView(QWidget):
                 QMessageBox.information(self, "Import Complete",
                     f"Imported {len(paths)} file(s).\nDashboard will now refresh.")
         except Exception as e:
-            QMessageBox.critical(self, "Import Failed", str(e))
+            show_error(self, "Could not import sales file.", e, title="Import Failed")
             return
 
         self._load()
@@ -1268,47 +1029,12 @@ class SalesReportView(QWidget):
             where += " AND sd.sub_group = ?"
             params.append(group)
 
-        conn = get_connection()
+        stats      = sales_ctrl.get_sales_stats(d_from, d_to, group)
+        total_rev  = stats['total_rev']
+        total_days = stats['total_days'] or 1
 
-        # ── Total revenue for % of sales calculation ──────────────────
-        total_rev = conn.execute(
-            f"SELECT COALESCE(SUM(sales_dollars),0) FROM sales_daily sd {where}",
-            params
-        ).fetchone()[0] or 0
-
-        total_days = conn.execute(
-            f"SELECT COUNT(DISTINCT sale_date) FROM sales_daily sd {where}",
-            params
-        ).fetchone()[0] or 1
-
-        # ── Same aggregation query as the screen ──────────────────────
-        agg_rows = conn.execute(f"""
-            SELECT
-                sd.plu,
-                sd.plu_name,
-                sd.sub_group,
-                SUM(sd.quantity)      AS qty,
-                SUM(sd.sales_dollars) AS sales,
-                SUM(sd.sales_dollars) / NULLIF(COUNT(DISTINCT sd.sale_date), 0) AS avg_day
-            FROM sales_daily sd
-            {where}
-            GROUP BY sd.plu
-            ORDER BY sales DESC
-        """, params).fetchall()
-
-        # ── Build product lookups (same as _load) ─────────────────────
-        all_prods_rows = conn.execute("""
-            SELECT p.barcode, p.plu, p.description,
-                   d.name AS dept_name,
-                   COALESCE(soh.quantity, 0) AS on_hand
-            FROM products p
-            LEFT JOIN departments   d   ON p.department_id = d.id
-            LEFT JOIN stock_on_hand soh ON soh.barcode     = p.barcode
-            WHERE p.active = 1
-        """).fetchall()
-        conn.close()
-
-        all_prods   = [dict(r) for r in all_prods_rows]
+        agg_rows  = sales_ctrl.get_sales_by_product(d_from, d_to, group)
+        all_prods = sales_ctrl.get_products_with_stock()
         bc_to_prod  = {p["barcode"]: p for p in all_prods}
         plu_to_prod = {}
         for p in all_prods:
@@ -1340,12 +1066,12 @@ class SalesReportView(QWidget):
             ])
 
             for row in agg_rows:
-                plu      = row[0] or ""
-                plu_name = row[1] or ""
-                sub_grp  = row[2] or ""
-                qty      = row[3] or 0
-                sales    = row[4] or 0
-                avg_day  = row[5] or 0
+                plu      = row['plu']       or ""
+                plu_name = row['plu_name']  or ""
+                sub_grp  = row['sub_group'] or ""
+                qty      = row['qty']       or 0
+                sales    = row['sales']     or 0
+                avg_day  = row['avg_day']   or 0
                 pct      = (sales / total_rev * 100) if total_rev else 0
 
                 # Resolve product — same priority order as screen
@@ -1369,7 +1095,7 @@ class SalesReportView(QWidget):
                 matched   = "Yes" if prod else "No"
 
                 w.writerow([
-                    barcode,
+                    f'="{barcode}"' if barcode else "",
                     plu,
                     desc,
                     sub_grp,
@@ -1384,9 +1110,9 @@ class SalesReportView(QWidget):
 
         matched_count   = sum(1 for r in agg_rows
                               if saved_plu_map.get(
-                                  int(str(r[0]).strip()) if str(r[0]).strip().isdigit() else -1
+                                  int(str(r['plu']).strip()) if str(r['plu']).strip().isdigit() else -1
                               ) or plu_to_prod.get(
-                                  int(str(r[0]).strip()) if str(r[0]).strip().isdigit() else -1
+                                  int(str(r['plu']).strip()) if str(r['plu']).strip().isdigit() else -1
                               ))
         unmatched_count = len(agg_rows) - matched_count
         QMessageBox.information(

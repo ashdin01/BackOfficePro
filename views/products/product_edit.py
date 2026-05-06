@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from utils.keyboard_mixin import KeyboardMixin
+from utils.error_dialog import show_error
 import os, shutil
 import controllers.product_controller as product_controller
 import models.product as product_model
@@ -36,27 +37,10 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.setup_keyboard()
 
     def _check_selling_unit(self):
-        from database.connection import get_connection as _gc
-        conn = _gc()
-        try:
-            row = conn.execute(
-                """
-                SELECT su.master_barcode, su.label, su.unit_qty,
-                       p.description AS master_desc
-                FROM product_selling_units su
-                JOIN products p ON su.master_barcode = p.barcode
-                WHERE su.barcode = ? AND su.active = 1
-                """,
-                (self.barcode,)
-            ).fetchone()
-            if row:
-                self._is_selling_unit = True
-                self._su_master = dict(row)
-            else:
-                self._is_selling_unit = False
-                self._su_master = None
-        finally:
-            conn.close()
+        import controllers.product_controller as _pc
+        master = _pc.get_selling_unit_master(self.barcode)
+        self._is_selling_unit = master is not None
+        self._su_master = master
 
     def _selling_unit_guard(self) -> bool:
         """Returns True (and shows warning) if this product is a selling unit — caller should abort edit."""
@@ -360,7 +344,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         except ValueError as e:
             QMessageBox.warning(self, "Barcode Exists", str(e))
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not update barcode.", e)
 
     def _edit_description(self):
         if self._selling_unit_guard(): return
@@ -830,7 +814,6 @@ class ProductEdit(KeyboardMixin, QWidget):
     # ── Selling Units ─────────────────────────────────────────────────
 
     def _build_selling_units_section(self) -> 'QGroupBox':
-        from database.connection import get_connection as _gc
         grp = QGroupBox("Selling Units  (case, 6-pack, etc.)")
         lay = QVBoxLayout(grp)
         lay.setSpacing(6)
@@ -875,17 +858,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         return grp
 
     def _load_selling_units(self):
-        from database.connection import get_connection as _gc
-        conn = _gc()
-        try:
-            rows = conn.execute(
-                "SELECT id, label, unit_qty, plu, barcode, sell_price "
-                "FROM product_selling_units WHERE master_barcode=? ORDER BY unit_qty",
-                (self.barcode,)
-            ).fetchall()
-        finally:
-            conn.close()
-
+        rows = product_controller.get_selling_units(self.barcode)
         self._su_table.setRowCount(0)
         for su in rows:
             r = self._su_table.rowCount()
@@ -923,7 +896,6 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _add_selling_unit_popup(self):
         from PyQt6.QtGui import QShortcut, QKeySequence
-        from database.connection import get_connection as _gc
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Add Selling Unit")
@@ -985,21 +957,15 @@ class ProductEdit(KeyboardMixin, QWidget):
                 QMessageBox.warning(dlg, "Validation", "Label is required.")
                 return
             barcode_val = bc_input.text().strip() or None
-            conn = _gc()
+            plu_val = plu_input.text().strip() or None
             try:
-                plu_val = plu_input.text().strip() or None
-                conn.execute(
-                    "INSERT INTO product_selling_units "
-                    "(master_barcode, barcode, plu, label, unit_qty, sell_price) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (self.barcode, barcode_val, plu_val, label, qty_spin.value(), price_spin.value())
+                product_controller.add_selling_unit(
+                    self.barcode, barcode_val, plu_val, label,
+                    qty_spin.value(), price_spin.value()
                 )
-                conn.commit()
             except Exception as e:
-                QMessageBox.critical(dlg, "Error", str(e))
+                show_error(dlg, "Could not save selling unit.", e)
                 return
-            finally:
-                conn.close()
             self._load_selling_units()
             dlg.accept()
 
@@ -1018,16 +984,8 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _edit_selling_unit_popup(self, su_id: int):
         from PyQt6.QtGui import QShortcut, QKeySequence
-        from database.connection import get_connection as _gc
 
-        conn = _gc()
-        try:
-            su = conn.execute(
-                "SELECT id, label, unit_qty, plu, barcode, sell_price "
-                "FROM product_selling_units WHERE id=?", (su_id,)
-            ).fetchone()
-        finally:
-            conn.close()
+        su = product_controller.get_selling_unit_by_id(su_id)
         if not su:
             return
 
@@ -1091,19 +1049,13 @@ class ProductEdit(KeyboardMixin, QWidget):
                 return
             barcode_val = bc_input.text().strip() or None
             plu_val = plu_input.text().strip() or None
-            conn2 = _gc()
             try:
-                conn2.execute(
-                    "UPDATE product_selling_units "
-                    "SET label=?, unit_qty=?, plu=?, barcode=?, sell_price=? WHERE id=?",
-                    (label, qty_spin.value(), plu_val, barcode_val, price_spin.value(), su_id)
+                product_controller.update_selling_unit(
+                    su_id, label, qty_spin.value(), plu_val, barcode_val, price_spin.value()
                 )
-                conn2.commit()
             except Exception as e:
-                QMessageBox.critical(dlg, "Error", str(e))
+                show_error(dlg, "Could not update selling unit.", e)
                 return
-            finally:
-                conn2.close()
             self._load_selling_units()
             dlg.accept()
 
@@ -1119,13 +1071,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             QMessageBox.StandardButton.No
         ) != QMessageBox.StandardButton.Yes:
             return
-        from database.connection import get_connection as _gc
-        conn = _gc()
-        try:
-            conn.execute("DELETE FROM product_selling_units WHERE id = ?", (su_id,))
-            conn.commit()
-        finally:
-            conn.close()
+        product_controller.delete_selling_unit(su_id)
         self._load_selling_units()
 
     def _view_history(self):
@@ -1261,7 +1207,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         except ValueError as e:
             QMessageBox.warning(self, "Validation", str(e))
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not save product.", e)
 
 
 # ── Reusable popup dialogs ────────────────────────────────────────────

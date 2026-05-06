@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor, QFont
 
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
 
 _HEADER_BG  = "#1e3a5f"
 _HEADER_FG  = "#90caf9"
@@ -127,15 +127,8 @@ class LiquorReport(QWidget):
         layout.addWidget(self._status_lbl)
 
     def _populate_depts(self):
-        conn = get_connection()
-        try:
-            rows = conn.execute(
-                "SELECT id, code, name FROM departments WHERE active=1 ORDER BY name"
-            ).fetchall()
-        finally:
-            conn.close()
         self._dept_cb.addItem("— All Departments —", None)
-        for r in rows:
+        for r in report_ctrl.get_all_departments():
             self._dept_cb.addItem(f"{r['code']}  —  {r['name']}", r['id'])
             if r['code'] == 'LIQ':
                 self._dept_cb.setCurrentIndex(self._dept_cb.count() - 1)
@@ -150,49 +143,9 @@ class LiquorReport(QWidget):
             self._status_lbl.setText("Start date must be before end date.")
             return
 
-        conn = get_connection()
-        try:
-            where = "p.active = 1"
-            params = [end, start, end]
-            if dept_id is not None:
-                where += " AND p.department_id = ?"
-                params.append(dept_id)
-
-            rows = conn.execute(f"""
-                SELECT
-                    p.barcode,
-                    p.description,
-                    COALESCE(p.unit, 'EA')                   AS unit,
-                    COALESCE(g.name, '(No Group)')           AS group_name,
-                    COALESCE(soh.quantity, 0)                AS current_soh,
-                    COALESCE(after_end.qty,    0)            AS after_end_net,
-                    COALESCE(in_per.qty_in,    0)            AS period_in,
-                    COALESCE(in_per.qty_out,   0)            AS period_out,
-                    COALESCE(in_per.net,       0)            AS period_net
-                FROM products p
-                LEFT JOIN product_groups g    ON p.group_id      = g.id
-                LEFT JOIN stock_on_hand  soh  ON soh.barcode     = p.barcode
-                LEFT JOIN (
-                    SELECT barcode, SUM(quantity) AS qty
-                    FROM stock_movements
-                    WHERE date(created_at) > ?
-                    GROUP BY barcode
-                ) after_end ON after_end.barcode = p.barcode
-                LEFT JOIN (
-                    SELECT barcode,
-                        SUM(CASE WHEN quantity > 0 THEN  quantity  ELSE 0        END) AS qty_in,
-                        SUM(CASE WHEN quantity < 0 THEN -quantity  ELSE 0        END) AS qty_out,
-                        SUM(quantity)                                                  AS net
-                    FROM stock_movements
-                    WHERE date(created_at) BETWEEN ? AND ?
-                    GROUP BY barcode
-                ) in_per ON in_per.barcode = p.barcode
-                WHERE {where}
-                ORDER BY group_name, p.description
-            """, params).fetchall()
-        finally:
-            conn.close()
-
+        rows = report_ctrl.get_liquor_tracking(
+            dept_id=dept_id, date_from=start, date_to=end
+        )
         movement_only = self._movement_only_cb.isChecked()
         self._populate_table(rows, start, end, movement_only)
 

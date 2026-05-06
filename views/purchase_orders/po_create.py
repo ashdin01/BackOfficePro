@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QDate
 from PyQt6.QtGui import QKeySequence, QShortcut
+from utils.error_dialog import show_error
 import models.purchase_order as po_model
 import models.supplier as supplier_model
 
@@ -105,4 +106,4 @@ class POCreate(QWidget):
             self.detail_win.show()
             self.close()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not create purchase order.", e)

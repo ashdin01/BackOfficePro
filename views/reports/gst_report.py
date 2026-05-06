@@ -13,10 +13,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
-from database.connection import get_connection
 from datetime import date, timedelta
 import csv
 import os
+import controllers.report_controller as report_ctrl
+from utils.error_dialog import show_error
 
 RIGHT  = Qt.AlignmentFlag.AlignRight  | Qt.AlignmentFlag.AlignVCenter
 CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
@@ -69,98 +70,6 @@ def _money_item(value: float, color=None, bold=False):
     if bold:
         f = i.font(); f.setBold(True); i.setFont(f)
     return i
-
-
-# ── GST Calculations ──────────────────────────────────────────────────────────
-
-def _calc_gst_collected(conn, d_from: date, d_to: date) -> dict:
-    """
-    Calculate GST collected on sales for a date range.
-    Joins sales_daily → plu_barcode_map → products to find taxable PLUs.
-    sales_dollars is GST-inclusive; GST = sales_dollars / 11.
-    Returns dict with taxable_sales, exempt_sales, gst_collected, total_sales.
-    """
-    rows = conn.execute("""
-        SELECT
-            sd.sale_date,
-            sd.plu,
-            sd.plu_name,
-            sd.sales_dollars,
-            COALESCE(p.tax_rate, 0) AS tax_rate
-        FROM sales_daily sd
-        LEFT JOIN plu_barcode_map pbm ON CAST(sd.plu AS TEXT) = CAST(pbm.plu AS TEXT)
-        LEFT JOIN products p ON pbm.barcode = p.barcode
-        WHERE sd.sale_date BETWEEN ? AND ?
-          AND sd.sales_dollars > 0
-    """, (str(d_from), str(d_to))).fetchall()
-
-    taxable_sales  = 0.0
-    exempt_sales   = 0.0
-    gst_collected  = 0.0
-
-    for row in rows:
-        dollars   = float(row['sales_dollars'])
-        tax_rate  = float(row['tax_rate']) if row['tax_rate'] else 0.0
-        if tax_rate > 0:
-            taxable_sales += dollars
-            gst_collected += dollars / (1 + tax_rate / 100) * (tax_rate / 100)
-        else:
-            exempt_sales  += dollars
-
-    return {
-        'taxable_sales':  round(taxable_sales,  2),
-        'exempt_sales':   round(exempt_sales,   2),
-        'total_sales':    round(taxable_sales + exempt_sales, 2),
-        'gst_collected':  round(gst_collected,  2),
-        'sales_ex_gst':   round(taxable_sales - gst_collected, 2),
-    }
-
-
-def _calc_gst_paid(conn, d_from: date, d_to: date) -> dict:
-    """
-    Calculate GST paid on purchases (received POs only) for a date range.
-    Uses po_lines unit_cost × qty × pack_qty and product tax_rate.
-    Returns dict with taxable_purchases, exempt_purchases, gst_paid, total_purchases.
-    """
-    rows = conn.execute("""
-        SELECT
-            pol.ordered_qty,
-            pol.unit_cost,
-            pol.barcode,
-            COALESCE(p.tax_rate, 0)  AS tax_rate,
-            COALESCE(p.pack_qty, 1)  AS pack_qty,
-            po.received_at
-        FROM po_lines pol
-        JOIN purchase_orders po  ON po.id = pol.po_id
-        LEFT JOIN products p     ON p.barcode = pol.barcode
-        WHERE po.status = 'RECEIVED'
-          AND DATE(po.received_at) BETWEEN ? AND ?
-    """, (str(d_from), str(d_to))).fetchall()
-
-    taxable_purchases = 0.0
-    exempt_purchases  = 0.0
-    gst_paid          = 0.0
-
-    for row in rows:
-        cartons   = int(row['ordered_qty'] or 0)
-        pack_qty  = int(row['pack_qty']    or 1)
-        unit_cost = float(row['unit_cost'] or 0)
-        tax_rate  = float(row['tax_rate']  or 0)
-        line_total = cartons * pack_qty * unit_cost
-
-        if tax_rate > 0:
-            taxable_purchases += line_total
-            gst_paid += line_total / (1 + tax_rate / 100) * (tax_rate / 100)
-        else:
-            exempt_purchases  += line_total
-
-    return {
-        'taxable_purchases':  round(taxable_purchases, 2),
-        'exempt_purchases':   round(exempt_purchases,  2),
-        'total_purchases':    round(taxable_purchases + exempt_purchases, 2),
-        'gst_paid':           round(gst_paid,          2),
-        'purchases_ex_gst':   round(taxable_purchases - gst_paid, 2),
-    }
 
 
 # ── Main Widget ───────────────────────────────────────────────────────────────
@@ -360,12 +269,9 @@ class GSTReport(QWidget):
         d_from = self.date_from.date().toPyDate()
         d_to   = self.date_to.date().toPyDate()
 
-        conn = get_connection()
-        try:
-            sales = _calc_gst_collected(conn, d_from, d_to)
-            purch = _calc_gst_paid(conn, d_from, d_to)
-        finally:
-            conn.close()
+        result = report_ctrl.get_gst_report(d_from, d_to)
+        sales  = result['sales']
+        purch  = result['purchases']
 
         net_gst = round(sales['gst_collected'] - purch['gst_paid'], 2)
         period  = f"{d_from.strftime('%d/%m/%Y')} – {d_to.strftime('%d/%m/%Y')}"
@@ -494,4 +400,4 @@ class GSTReport(QWidget):
 
             QMessageBox.information(self, "Exported", f"GST report saved to:\n{path}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            show_error(self, "Could not export GST report.", e, title="Export Failed")

@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut, QColor
 import models.purchase_order as po_model
 from config.constants import PO_STATUSES
+import controllers.purchase_order_controller as po_ctrl
 
 
 class POList(QWidget):
@@ -158,13 +159,7 @@ class POList(QWidget):
         if po_id is None or status != "PARTIAL":
             self.btn_update_po.setEnabled(False)
             return
-        from database.connection import get_connection
-        conn = get_connection()
-        received_count = conn.execute(
-            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_qty > 0",
-            (po_id,)
-        ).fetchone()[0]
-        conn.close()
+        received_count = po_ctrl.get_received_line_count(po_id)
         self.btn_update_po.setEnabled(received_count > 0)
 
     def _on_tab_changed(self, idx):
@@ -294,19 +289,8 @@ class POList(QWidget):
                 "Only PARTIAL orders can be updated to Received."
             )
             return
-        # Check at least one line has been received
-        from database.connection import get_connection
-        conn = get_connection()
-        po = conn.execute(
-            "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
-            "JOIN suppliers s ON s.id = po.supplier_id WHERE po.id=?",
-            (po_id,)
-        ).fetchone()
-        received_count = conn.execute(
-            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_qty > 0",
-            (po_id,)
-        ).fetchone()[0]
-        conn.close()
+        po = po_ctrl.get_po_with_supplier(po_id)
+        received_count = po_ctrl.get_received_line_count(po_id)
         if received_count == 0:
             QMessageBox.warning(
                 self, "Cannot Update",
@@ -373,23 +357,12 @@ class POList(QWidget):
                 "SENT orders must be received first.")
             return
 
-        from database.connection import get_connection
         from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit,
                                       QHBoxLayout, QFrame, QPushButton)
         from PyQt6.QtGui import QKeySequence, QShortcut
 
-        conn = get_connection()
-        po = conn.execute(
-            "SELECT p.po_number, s.name as supplier_name "
-            "FROM purchase_orders p JOIN suppliers s ON p.supplier_id=s.id WHERE p.id=?",
-            (po_id,)
-        ).fetchone()
-        unreceived = conn.execute(
-            "SELECT id, description, ordered_qty, received_qty FROM po_lines "
-            "WHERE po_id=? AND received_qty < ordered_qty",
-            (po_id,)
-        ).fetchall()
-        conn.close()
+        po = po_ctrl.get_po_with_supplier(po_id)
+        unreceived = po_ctrl.get_unreceived_lines(po_id)
 
         if not unreceived:
             import models.purchase_order as po_model
@@ -453,21 +426,7 @@ class POList(QWidget):
 
         reason = reason_input.text().strip() or "Not supplied — PO closed"
 
-        conn = get_connection()
-        try:
-            for r in unreceived:
-                conn.execute(
-                    "UPDATE po_lines SET notes=? WHERE id=?",
-                    (f"NOT SUPPLIED: {reason}", r['id'])
-                )
-            conn.execute(
-                "UPDATE purchase_orders SET status='RECEIVED', "
-                "received_at=CURRENT_TIMESTAMP WHERE id=?",
-                (po_id,)
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        po_ctrl.close_po_force(po_id, [r['id'] for r in unreceived], reason)
 
         QMessageBox.information(self, "PO Closed",
             f"PO closed.\n{len(unreceived)} unreceived line(s) marked:\n\"{reason}\"")

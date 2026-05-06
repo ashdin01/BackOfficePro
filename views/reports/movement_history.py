@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
 
 class NumItem(QTableWidgetItem):
     """Sorts numerically, stripping $, %, commas and +/-."""
@@ -20,35 +20,6 @@ class NumItem(QTableWidgetItem):
 
 
 import csv
-
-
-def get_movements(barcode=None, move_type=None, date_from=None, date_to=None, limit=2000):
-    conn = get_connection()
-    sql = """
-        SELECT sm.id, sm.barcode, p.description, sm.movement_type,
-               sm.quantity, sm.reference, sm.notes, sm.created_at
-        FROM stock_movements sm
-        LEFT JOIN products p ON sm.barcode = p.barcode
-        WHERE 1=1
-    """
-    params = []
-    if barcode:
-        sql += " AND (sm.barcode LIKE ? OR p.description LIKE ?)"
-        params.append(f"%{barcode}%")
-        params.append(f"%{barcode}%")
-    if move_type and move_type != "ALL":
-        sql += " AND sm.movement_type = ?"
-        params.append(move_type)
-    if date_from:
-        sql += " AND date(sm.created_at) >= ?"
-        params.append(date_from)
-    if date_to:
-        sql += " AND date(sm.created_at) <= ?"
-        params.append(date_to)
-    sql += f" ORDER BY sm.created_at DESC LIMIT {limit}"
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return rows
 
 
 class MovementHistoryReport(QWidget):
@@ -124,7 +95,7 @@ class MovementHistoryReport(QWidget):
         layout.addWidget(self.status_label)
 
     def _load(self):
-        rows = get_movements(
+        rows = report_ctrl.get_stock_movements(
             barcode=self.search.text().strip() or None,
             move_type=self.type_filter.currentText(),
             date_from=self.date_from.date().toString("yyyy-MM-dd"),
@@ -176,7 +147,7 @@ class MovementHistoryReport(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "movements.csv"), "CSV (*.csv)")
         if not path:
             return
-        rows = get_movements(
+        rows = report_ctrl.get_stock_movements(
             barcode=self.search.text().strip() or None,
             move_type=self.type_filter.currentText(),
             date_from=self.date_from.date().toString("yyyy-MM-dd"),
@@ -187,6 +158,6 @@ class MovementHistoryReport(QWidget):
             w = csv.writer(f)
             w.writerow(["Date/Time", "Barcode", "Description", "Type", "Qty", "Reference", "Notes"])
             for row in rows:
-                w.writerow([row['created_at'], row['barcode'], row['description'],
+                w.writerow([row['created_at'], f'="{row["barcode"]}"', row['description'],
                              row['movement_type'], row['quantity'], row['reference'], row['notes']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

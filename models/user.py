@@ -78,6 +78,48 @@ def create(username: str, full_name: str, role: str, pin: str):
         conn.close()
 
 
+def get_all():
+    """Return all users including inactive, ordered by full_name."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, username, full_name, role, active FROM users ORDER BY full_name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update(user_id: int, username: str, full_name: str, role: str):
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET username=?, full_name=?, role=? WHERE id=?",
+            (username, full_name, role, user_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_active(user_id: int, active: bool):
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_pin_by_id(user_id: int, pin: str):
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE users SET pin=? WHERE id=?", (_hash_pin(pin), user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def has_any_pin_set() -> bool:
     """True if at least one active user has a PIN configured."""
     conn = get_connection()

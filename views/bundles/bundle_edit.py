@@ -172,18 +172,7 @@ class BundleEdit(QWidget):
 
         if self.bundle_id:
             # Saved bundle — persist immediately
-            bundle_model.add_eligible(self.bundle_id, barcode, description, unit_qty)
-            row_id = None
-            from database.connection import get_connection
-            conn = get_connection()
-            try:
-                r = conn.execute(
-                    "SELECT id FROM bundle_eligible WHERE bundle_id=? AND barcode=?",
-                    (self.bundle_id, barcode)
-                ).fetchone()
-                row_id = r['id'] if r else None
-            finally:
-                conn.close()
+            row_id = bundle_model.add_eligible(self.bundle_id, barcode, description, unit_qty)
             self._add_eligible_row(row_id, barcode, description, unit_qty)
         else:
             # New bundle — buffer in table with sentinel id=-1
