@@ -260,14 +260,6 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     ]))
     story.append(totals_tbl)
 
-    # ── Supplier notes ────────────────────────────────────────────────────────
-    if po["supplier_notes"]:
-        story.append(Spacer(1, 10))
-        story.append(HRFlowable(width="100%", thickness=0.5,
-                                color=C_BORDER, spaceAfter=4))
-        story.append(Paragraph(
-            f'<b>Supplier Notes:</b> {po["supplier_notes"]}', st["small"]))
-
     # ── Footer ────────────────────────────────────────────────────────────────
     story.append(Spacer(1, 14))
     story.append(HRFlowable(width="100%", thickness=0.5,

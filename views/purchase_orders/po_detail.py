@@ -161,6 +161,15 @@ class PODetail(QWidget):
         self.rec_banner.setStyleSheet("color: steelblue; padding: 4px;")
         layout.addWidget(self.rec_banner)
 
+        self.supplier_notes_banner = QLabel("")
+        self.supplier_notes_banner.setWordWrap(True)
+        self.supplier_notes_banner.setStyleSheet(
+            "color: #e6c84e; background: #2a2200; border: 1px solid #6b5500;"
+            "border-radius: 4px; padding: 6px 10px;"
+        )
+        self.supplier_notes_banner.hide()
+        layout.addWidget(self.supplier_notes_banner)
+
         # ── Sales period selector ─────────────────────────────────────────
         period_row = QHBoxLayout()
         period_row.setSpacing(6)
@@ -465,7 +474,6 @@ class PODetail(QWidget):
         supplier = getattr(self, '_supplier', None)
         sup_name = po['supplier_name'] or ''
         sup_email = (supplier['email_orders'] or '') if supplier and supplier['email_orders'] else ''
-        sup_notes = (supplier['notes'] or '') if supplier and supplier['notes'] else ''
 
         default_name = f"{po['po_number']}_{sup_name.replace(' ', '_')}.csv"
         default_path = os.path.join(os.path.expanduser("~/Downloads"), default_name)
@@ -500,10 +508,6 @@ class PODetail(QWidget):
                                     f'{pack_qty} x {pack_unit}', total_units, '', on_hand, ''])
                     rows_written += 1
 
-                if sup_notes:
-                    writer.writerow([])
-                    writer.writerow(['Supplier Notes', sup_notes])
-
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
         except Exception as e:
             show_error(self, "Could not export CSV.", e, title="Export Failed")
@@ -517,6 +521,14 @@ class PODetail(QWidget):
         self._supplier = supplier
         self._order_minimum = float(supplier['order_minimum']) if supplier and supplier['order_minimum'] else 0
         min_str = f"  |  Order Min: <b>${self._order_minimum:.2f}</b>" if self._order_minimum else ""
+
+        sup_notes = (supplier['notes'] or '').strip() if supplier else ''
+        if sup_notes:
+            self.supplier_notes_banner.setText(f"⚠️  Supplier notes: {sup_notes}")
+            self.supplier_notes_banner.show()
+        else:
+            self.supplier_notes_banner.hide()
+
         self.header.setText(
             f"<b>{po['po_number']}</b> — {po['supplier_name']} — "
             f"Status: <b>{po['status']}</b> — "
