@@ -340,6 +340,17 @@ def apply_session(session_id):
     """Write counted quantities to stock_on_hand and log movements."""
     conn = get_connection()
     try:
+        session = conn.execute(
+            "SELECT status FROM stocktake_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        if not session:
+            raise ValueError(f"Stocktake session {session_id} not found")
+        if session['status'] != 'OPEN':
+            raise ValueError(
+                f"Stocktake session {session_id} cannot be applied — "
+                f"status is '{session['status']}' (expected OPEN)"
+            )
+
         counts = conn.execute(
             "SELECT * FROM stocktake_counts WHERE session_id=?", (session_id,)
         ).fetchall()
@@ -369,5 +380,8 @@ def apply_session(session_id):
             WHERE id=?
         """, (session_id,))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
