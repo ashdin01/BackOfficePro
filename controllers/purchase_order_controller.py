@@ -104,13 +104,12 @@ def get_sales_for_barcode(barcode):
     month_start = today.replace(day=1)
     year_start  = today.replace(month=1, day=1)
 
+    conn = get_connection()
     try:
-        conn = get_connection()
         plu_row = conn.execute(
             "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
         ).fetchone()
         if not plu_row:
-            conn.close()
             return None
 
         plu = str(plu_row[0])
@@ -123,16 +122,16 @@ def get_sales_for_barcode(barcode):
             """, (plu, str(d_from), str(d_to))).fetchone()
             return int(row[0]) if row else 0
 
-        result = {
+        return {
             "last_week":   _qty(last_week_start, last_week_end),
             "two_weeks":   _qty(two_weeks_start, two_weeks_end),
             "this_month":  _qty(month_start, today),
             "ytd":         _qty(year_start, today),
         }
-        conn.close()
-        return result
     except Exception:
         return None
+    finally:
+        conn.close()
 
 
 def get_sales_for_barcode_range(barcode, date_from, date_to):
@@ -140,13 +139,12 @@ def get_sales_for_barcode_range(barcode, date_from, date_to):
     Return total sales quantity for barcode between date_from and date_to (inclusive).
     Returns None if no PLU mapping exists, otherwise an int.
     """
+    conn = get_connection()
     try:
-        conn = get_connection()
         plu_row = conn.execute(
             "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
         ).fetchone()
         if not plu_row:
-            conn.close()
             return None
         plu = str(plu_row[0])
         row = conn.execute("""
@@ -154,10 +152,11 @@ def get_sales_for_barcode_range(barcode, date_from, date_to):
             FROM sales_daily
             WHERE plu = ? AND sale_date BETWEEN ? AND ?
         """, (plu, str(date_from), str(date_to))).fetchone()
-        conn.close()
         return int(row[0]) if row else 0
     except Exception:
         return None
+    finally:
+        conn.close()
 
 
 def get_sales_for_barcodes_range(barcodes, date_from, date_to):
