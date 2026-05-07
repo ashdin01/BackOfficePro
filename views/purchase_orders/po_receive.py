@@ -12,6 +12,7 @@ import models.po_lines as lines_model
 import models.stock_on_hand as stock_model
 import models.product as product_model
 import controllers.product_controller as product_ctrl
+import controllers.purchase_order_controller as po_ctrl
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
 
 
@@ -692,50 +693,43 @@ class POReceive(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        all_received = True
+        line_receipts = []
+        all_received  = True
 
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
                 lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
 
             qty      = qty_input.value()
-            cost     = cost_input.value()     # per unit OR per kg
+            cost     = cost_input.value()
             is_promo = promo_cb.isChecked()
 
-            if qty > 0:
-                cartons = max(1, math.ceil(qty / pack_qty))
-
-                # Update po_line received qty, cost and promo flag in one call
-                lines_model.receive(
-                    line['id'],
-                    line['received_qty'] + cartons,
-                    actual_cost=cost if cost > 0 else None,
-                    unit_cost=cost,
-                    is_promo=is_promo,
-                )
-
-                # Stock on hand — always adjusts by NUMBER OF ITEMS
-                stock_model.adjust(
-                    barcode=line['barcode'],
-                    quantity=qty,
-                    movement_type=MOVE_RECEIPT,
-                    reference=po_number,
-                )
-
-                # Update product cost price (unless promo)
-                # For weighed items cost = per kg rate; for standard = per unit —
-                # both are stored directly as cost_price in the product master.
-                if cost > 0 and not is_promo:
-                    product_ctrl.update_cost_price(line['barcode'], cost)
-
-            total_received_cartons = line['received_qty'] + (
-                max(1, math.ceil(qty / pack_qty)) if qty > 0 else 0
-            )
+            cartons = max(1, math.ceil(qty / pack_qty)) if qty > 0 else 0
+            total_received_cartons = line['received_qty'] + cartons
             if total_received_cartons < line['ordered_qty']:
                 all_received = False
 
+            if qty > 0:
+                line_receipts.append({
+                    'line_id':          line['id'],
+                    'barcode':          line['barcode'],
+                    'new_received_qty': line['received_qty'] + cartons,
+                    'actual_cost':      cost if cost > 0 else None,
+                    'unit_cost':        cost if cost > 0 else None,
+                    'is_promo':         is_promo,
+                    'qty_units':        qty,
+                })
+
         status = PO_STATUS_RECEIVED if all_received else PO_STATUS_PARTIAL
-        po_model.update_status(self.po_id, status)
+
+        try:
+            po_ctrl.receive_po_atomic(self.po_id, po_number, line_receipts, status)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Receipt Failed",
+                f"An error occurred — no changes were saved.\n\n{exc}"
+            )
+            return
 
         if self.on_save:
             self.on_save()

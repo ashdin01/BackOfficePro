@@ -257,6 +257,69 @@ def close_po_force(po_id, unreceived_line_ids, reason):
         conn.close()
 
 
+def receive_po_atomic(po_id, po_number, line_receipts, final_status):
+    """
+    Apply a full PO receipt in one atomic transaction.
+
+    line_receipts is a list of dicts:
+        line_id, barcode, new_received_qty,
+        actual_cost, unit_cost, is_promo,
+        qty_units   (number of individual units being received, for SOH)
+
+    Raises on any error; the caller must not catch silently.
+    """
+    MOVE_RECEIPT = 'RECEIPT'
+    conn = get_connection()
+    try:
+        for r in line_receipts:
+            fields = ["received_qty=?"]
+            params = [r['new_received_qty']]
+            if r['actual_cost'] is not None:
+                fields.append("actual_cost=?")
+                params.append(r['actual_cost'])
+            if r['unit_cost'] is not None:
+                fields.append("unit_cost=?")
+                params.append(r['unit_cost'])
+            fields.append("is_promo=?")
+            params.append(1 if r['is_promo'] else 0)
+            params.append(r['line_id'])
+            conn.execute(
+                f"UPDATE po_lines SET {', '.join(fields)} WHERE id=?", params
+            )
+
+            conn.execute("""
+                INSERT INTO stock_on_hand (barcode, quantity)
+                VALUES (?, ?)
+                ON CONFLICT(barcode) DO UPDATE SET
+                    quantity = quantity + excluded.quantity,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (r['barcode'], r['qty_units']))
+            conn.execute("""
+                INSERT INTO stock_movements
+                    (barcode, movement_type, quantity, reference, notes, created_by)
+                VALUES (?, ?, ?, ?, '', '')
+            """, (r['barcode'], MOVE_RECEIPT, r['qty_units'], po_number))
+
+            if r['unit_cost'] and r['unit_cost'] > 0 and not r['is_promo']:
+                conn.execute(
+                    "UPDATE products SET cost_price=?, updated_at=CURRENT_TIMESTAMP"
+                    " WHERE barcode=?",
+                    (r['unit_cost'], r['barcode'])
+                )
+
+        conn.execute(
+            "UPDATE purchase_orders SET status=?, updated_at=CURRENT_TIMESTAMP"
+            " WHERE id=?",
+            (final_status, po_id)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def cartons_needed(reorder_qty, pack_qty):
     pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
     return max(1, math.ceil(reorder_qty / pack_qty))
