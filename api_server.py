@@ -4,6 +4,7 @@ Run alongside the desktop app:
     python api_server.py [--host 0.0.0.0] [--port 5050]
 """
 import argparse
+import re
 import sys
 import os
 
@@ -262,9 +263,20 @@ def delete_count(session_id, count_id):
     return jsonify({"ok": True}), 200
 
 
+def _safe_barcode(barcode):
+    """Return sanitised barcode or None if it contains path-traversal characters."""
+    barcode = os.path.basename(barcode)
+    if not re.match(r'^[\w\-\.]+$', barcode):
+        return None
+    return barcode
+
+
 @app.route("/api/v1/products/<barcode>/image")
 def get_product_image(barcode):
     """Serve the product image file. Returns 404 if no image exists."""
+    barcode = _safe_barcode(barcode)
+    if not barcode:
+        return jsonify({"error": "Invalid barcode"}), 400
     from config.settings import DATA_DIR
     img_dir = os.path.join(DATA_DIR, 'images')
     for ext in ('jpg', 'jpeg', 'png', 'webp'):
@@ -278,6 +290,9 @@ def get_product_image(barcode):
 @app.route("/api/v1/products/<barcode>/image", methods=["DELETE"])
 def delete_product_image(barcode):
     """Remove a product image (used by BackOfficePro desktop — not RetailPOSPro)."""
+    barcode = _safe_barcode(barcode)
+    if not barcode:
+        return jsonify({"error": "Invalid barcode"}), 400
     from config.settings import DATA_DIR
     img_dir = os.path.join(DATA_DIR, 'images')
     deleted = False
