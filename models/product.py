@@ -61,6 +61,27 @@ def get_by_barcode(barcode):
         conn.close()
 
 
+def get_by_barcodes(barcodes):
+    """Return {barcode: row} for a list of barcodes in a single query."""
+    if not barcodes:
+        return {}
+    conn = get_connection()
+    try:
+        placeholders = ','.join('?' * len(barcodes))
+        rows = conn.execute(f"""
+            SELECT p.*, d.name as dept_name, s.name as supplier_name,
+                   g.name as group_name, g.id as group_id_val
+            FROM products p
+            LEFT JOIN departments d    ON p.department_id = d.id
+            LEFT JOIN suppliers s      ON p.supplier_id   = s.id
+            LEFT JOIN product_groups g ON p.group_id      = g.id
+            WHERE p.barcode IN ({placeholders})
+        """, barcodes).fetchall()
+        return {r['barcode']: r for r in rows}
+    finally:
+        conn.close()
+
+
 def search(term, active_only=True, limit=None, offset=0):
     """
     Multi-word search: splits term into words and requires ALL words

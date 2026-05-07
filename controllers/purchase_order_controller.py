@@ -160,6 +160,42 @@ def get_sales_for_barcode_range(barcode, date_from, date_to):
         return None
 
 
+def get_sales_for_barcodes_range(barcodes, date_from, date_to):
+    """
+    Bulk version of get_sales_for_barcode_range.
+    Returns {barcode: int|None} — None means no PLU mapping exists.
+    """
+    if not barcodes:
+        return {}
+    try:
+        conn = get_connection()
+        ph = ','.join('?' * len(barcodes))
+        plu_rows = conn.execute(
+            f"SELECT barcode, plu FROM plu_barcode_map WHERE barcode IN ({ph})",
+            barcodes
+        ).fetchall()
+        barcode_to_plu = {r['barcode']: str(r['plu']) for r in plu_rows}
+
+        result = {b: None for b in barcodes}
+        if barcode_to_plu:
+            all_plus = list(barcode_to_plu.values())
+            ph2 = ','.join('?' * len(all_plus))
+            sales_rows = conn.execute(f"""
+                SELECT plu, COALESCE(SUM(quantity), 0) AS total
+                FROM sales_daily
+                WHERE plu IN ({ph2}) AND sale_date BETWEEN ? AND ?
+                GROUP BY plu
+            """, all_plus + [str(date_from), str(date_to)]).fetchall()
+            plu_to_qty = {r['plu']: int(r['total']) for r in sales_rows}
+            for barcode, plu in barcode_to_plu.items():
+                result[barcode] = plu_to_qty.get(plu, 0)
+
+        conn.close()
+        return result
+    except Exception:
+        return {b: None for b in barcodes}
+
+
 def get_received_line_count(po_id):
     """Number of po_lines with at least one unit received."""
     conn = get_connection()
