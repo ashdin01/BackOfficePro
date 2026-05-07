@@ -184,7 +184,8 @@ def get_product(barcode):
         if not su:
             return jsonify({"error": "Product not found"}), 404
 
-        soh_in_units = int(su['master_soh'] // su['unit_qty']) if su['unit_qty'] > 0 else 0
+        unit_qty = su['unit_qty'] or 0
+        soh_in_units = int(su['master_soh'] // unit_qty) if unit_qty > 0 else 0
         return jsonify({
             'barcode':        resolved,
             'master_barcode': su['master_barcode'],
@@ -361,7 +362,7 @@ def record_pos_sale():
             ).fetchone()
             if su:
                 stock_barcode = su['master_barcode']
-                stock_qty     = qty * su['unit_qty']
+                stock_qty     = qty * (su['unit_qty'] or 1)
             else:
                 stock_barcode = barcode
                 stock_qty     = qty
