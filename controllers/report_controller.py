@@ -207,19 +207,21 @@ def _gst_collected(conn, d_from, d_to) -> dict:
 
 def _gst_paid(conn, d_from, d_to) -> dict:
     rows = conn.execute("""
-        SELECT pol.ordered_qty, pol.unit_cost,
+        SELECT pol.received_qty,
+               COALESCE(NULLIF(pol.actual_cost, 0), pol.unit_cost) AS unit_cost,
                COALESCE(p.tax_rate, 0) AS tax_rate,
                COALESCE(p.pack_qty, 1) AS pack_qty
         FROM po_lines pol
         JOIN purchase_orders po ON po.id = pol.po_id
         LEFT JOIN products p    ON p.barcode = pol.barcode
-        WHERE po.status = 'RECEIVED'
+        WHERE po.status IN ('RECEIVED', 'PARTIAL')
+          AND pol.received_qty > 0
           AND DATE(po.received_at) BETWEEN ? AND ?
     """, (str(d_from), str(d_to))).fetchall()
 
     taxable_purchases = exempt_purchases = gst_paid = 0.0
     for row in rows:
-        line_total = (int(row['ordered_qty'] or 0)
+        line_total = (int(row['received_qty'] or 0)
                       * int(row['pack_qty'] or 1)
                       * float(row['unit_cost'] or 0))
         tax_rate = float(row['tax_rate'] or 0)
