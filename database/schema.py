@@ -121,8 +121,9 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     FOREIGN KEY (barcode) REFERENCES products(barcode)
 );
 
-CREATE INDEX IF NOT EXISTS idx_movements_barcode ON stock_movements(barcode);
-CREATE INDEX IF NOT EXISTS idx_movements_type    ON stock_movements(movement_type);
+CREATE INDEX IF NOT EXISTS idx_movements_barcode  ON stock_movements(barcode);
+CREATE INDEX IF NOT EXISTS idx_movements_type     ON stock_movements(movement_type);
+CREATE INDEX IF NOT EXISTS idx_movements_created  ON stock_movements(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

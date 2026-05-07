@@ -189,7 +189,7 @@ def get_movement_history(barcode, move_type=None):
         if move_type and move_type != "ALL":
             sql += " AND movement_type = ?"
             params.append(move_type)
-        sql += " ORDER BY created_at ASC"
+        sql += " ORDER BY created_at DESC"
         return conn.execute(sql, params).fetchall()
     finally:
         conn.close()
