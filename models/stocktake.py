@@ -208,6 +208,14 @@ def import_from_csv(session_id, filepath):
     return imported, skipped, errors
 
 
+def _check_identifier(name):
+    """Raise ValueError if name contains characters that break bracket-quoted SQL identifiers."""
+    if ']' in name:
+        raise ValueError(
+            f"Unsafe identifier in SQLite file: {name!r} — contains ']'"
+        )
+
+
 def import_from_sqlite(session_id, filepath):
     """
     Import counts from an external SQLite database.
@@ -219,7 +227,8 @@ def import_from_sqlite(session_id, filepath):
     skipped  = 0
     errors   = []
 
-    ext_conn = sqlite3.connect(filepath)
+    # Open read-only — we never write to the external file
+    ext_conn = sqlite3.connect(f"file:{filepath}?mode=ro", uri=True)
     ext_conn.row_factory = sqlite3.Row
     try:
         tables = [
@@ -231,11 +240,12 @@ def import_from_sqlite(session_id, filepath):
 
         target_table = barcode_col = qty_col = None
         for table in tables:
-            cols = [r[1].lower() for r in ext_conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            _check_identifier(table)
+            cols = [r[1].lower() for r in ext_conn.execute(f"PRAGMA table_info([{table}])").fetchall()]
             bc = next((c for c in cols if c in ('barcode', 'ean', 'code', 'upc', 'barcode/ean')), None)
             qc = next((c for c in cols if c in ('qty', 'quantity', 'count', 'counted', 'counted_qty')), None)
             if bc and qc:
-                orig = [r[1] for r in ext_conn.execute(f"PRAGMA table_info({table})").fetchall()]
+                orig = [r[1] for r in ext_conn.execute(f"PRAGMA table_info([{table}])").fetchall()]
                 target_table = table
                 barcode_col  = next(c for c in orig if c.lower() == bc)
                 qty_col      = next(c for c in orig if c.lower() == qc)
@@ -246,6 +256,9 @@ def import_from_sqlite(session_id, filepath):
                 f"No suitable table found. Tables: {tables}\n"
                 "Need a table with barcode and qty columns."
             )
+
+        _check_identifier(barcode_col)
+        _check_identifier(qty_col)
 
         rows = ext_conn.execute(
             f"SELECT [{barcode_col}], [{qty_col}] FROM [{target_table}]"
