@@ -15,10 +15,6 @@ a = Analysis(
         'flask',
         'werkzeug',
         'werkzeug.serving',
-        # PDF import pipeline
-        'pdfplumber',
-        'pdfplumber.utils',
-        'pdfplumber.page',
         # Image handling
         'PIL',
         'PIL.Image',
@@ -62,7 +58,6 @@ a = Analysis(
         'tkinter',
         '_tkinter',
         'unittest',
-        'email',
         'xmlrpc',
         'distutils',
         'setuptools',

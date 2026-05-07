@@ -61,7 +61,7 @@ def _run_import(parent, paths):
         errors = []
         for path in paths:
             try:
-                module.import_file(path)
+                module.import_csv(path)
             except Exception as e:
                 errors.append(f"{os.path.basename(path)}: {e}")
         if errors:
@@ -281,7 +281,7 @@ class HomeScreen(QWidget):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Select Daily PLU Sales File(s)",
             os.path.expanduser("~/Downloads"),
-            "Sales Files (*.csv *.pdf);;CSV Files (*.csv);;PDF Files (*.pdf)")
+            "CSV Files (*.csv)")
         if not paths:
             return
         success, message = _run_import(self, paths)
