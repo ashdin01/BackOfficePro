@@ -575,16 +575,8 @@ class POReceive(QWidget):
             first_qty.setFocus()
             first_qty.selectAll()
 
-    def _get_promo_cb(self, row):
-        container = self.table.cellWidget(row, 9)
-        if container:
-            for child in container.children():
-                if isinstance(child, QCheckBox):
-                    return child
-        return None
-
     def _refresh_promo_colour(self, row):
-        cb = self._get_promo_cb(row)
+        cb = self._inputs[row][4] if row < len(self._inputs) else None
         is_promo = cb and cb.isChecked()
         for col in [0, 1, 2, 3, 4, 10, 11]:
             item = self.table.item(row, col)
