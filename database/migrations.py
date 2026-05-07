@@ -307,27 +307,6 @@ def migrate_v16(conn):
     conn.commit()
 
 
-def migrate_v18(conn):
-    """Add unit_qty to bundle_eligible for unit-aware bundle pricing."""
-    _add_column(conn, "ALTER TABLE bundle_eligible ADD COLUMN unit_qty INTEGER DEFAULT 1")
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '18')")
-    conn.commit()
-
-
-def migrate_v20(conn):
-    """Add index on sales_daily(plu, sale_date) for per-PLU sales range queries."""
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_daily_plu_date ON sales_daily(plu, sale_date)")
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '20')")
-    conn.commit()
-
-
-def migrate_v19(conn):
-    """Add index on stock_movements(created_at) for date-range history queries."""
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_movements_created ON stock_movements(created_at DESC)")
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '19')")
-    conn.commit()
-
-
 def migrate_v17(conn):
     """Add bundles and bundle_eligible tables for mixed-case selling."""
     conn.execute("""
@@ -353,4 +332,25 @@ def migrate_v17(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_bundle_eligible_bundle  ON bundle_eligible(bundle_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_bundle_eligible_barcode ON bundle_eligible(barcode)")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '17')")
+    conn.commit()
+
+
+def migrate_v18(conn):
+    """Add unit_qty to bundle_eligible for unit-aware bundle pricing."""
+    _add_column(conn, "ALTER TABLE bundle_eligible ADD COLUMN unit_qty INTEGER DEFAULT 1")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '18')")
+    conn.commit()
+
+
+def migrate_v19(conn):
+    """Add index on stock_movements(created_at) for date-range history queries."""
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_movements_created ON stock_movements(created_at DESC)")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '19')")
+    conn.commit()
+
+
+def migrate_v20(conn):
+    """Add index on sales_daily(plu, sale_date) for per-PLU sales range queries."""
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_daily_plu_date ON sales_daily(plu, sale_date)")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '20')")
     conn.commit()
