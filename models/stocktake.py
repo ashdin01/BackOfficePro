@@ -1,3 +1,5 @@
+import logging
+
 from database.connection import get_connection
 
 
@@ -197,6 +199,12 @@ def import_from_csv(session_id, filepath):
         finally:
             conn.close()
 
+    logging.info(
+        "Stocktake CSV import: session=%s file=%r imported=%d skipped=%d errors=%d",
+        session_id, filepath, imported, skipped, len(errors),
+    )
+    if errors:
+        logging.warning("Stocktake CSV import errors: %s", errors)
     return imported, skipped, errors
 
 
@@ -293,6 +301,12 @@ def import_from_sqlite(session_id, filepath):
     finally:
         conn.close()
 
+    logging.info(
+        "Stocktake SQLite import: session=%s file=%r imported=%d skipped=%d errors=%d",
+        session_id, filepath, imported, skipped, len(errors),
+    )
+    if errors:
+        logging.warning("Stocktake SQLite import errors: %s", errors)
     return imported, skipped, errors
 
 
@@ -380,6 +394,10 @@ def apply_session(session_id):
             WHERE id=?
         """, (session_id,))
         conn.commit()
+        logging.info(
+            "Stocktake session %s applied: %d lines written to stock_on_hand",
+            session_id, len(counts),
+        )
     except Exception:
         conn.rollback()
         raise

@@ -29,8 +29,10 @@ def do_backup(dest_path):
             dest.close()
             src.close()
         size = os.path.getsize(dest_path)
+        logging.info("Backup created: %s (%.1f KB)", dest_path, size / 1024)
         return True, f"Backup saved:\n{dest_path}\n({size/1024:.1f} KB)"
     except Exception as e:
+        logging.error("Backup failed to %s: %s", dest_path, e)
         return False, str(e)
 
 
@@ -110,4 +112,10 @@ def restore_backup(src_path):
     Copy src_path over the live database. Raises on failure.
     Call validate_backup_file first.
     """
+    size_kb = os.path.getsize(src_path) / 1024
+    logging.warning(
+        "Database restore initiated: source=%s (%.1f KB) -> dest=%s",
+        src_path, size_kb, DATABASE_PATH,
+    )
     shutil.copy2(src_path, DATABASE_PATH)
+    logging.warning("Database restore complete: %s", src_path)
