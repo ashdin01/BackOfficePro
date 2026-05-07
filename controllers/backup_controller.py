@@ -1,6 +1,5 @@
 import logging
 import os
-import shutil
 import sqlite3
 from datetime import datetime
 
@@ -109,13 +108,31 @@ def validate_backup_file(path):
 
 def restore_backup(src_path):
     """
-    Copy src_path over the live database. Raises on failure.
-    Call validate_backup_file first.
+    Restore src_path over the live database using the SQLite backup API.
+    Re-validates required tables on the same connection used to copy,
+    eliminating any window between the caller's validation and the write.
+    Raises RuntimeError on validation failure, or any sqlite3 error on copy failure.
     """
     size_kb = os.path.getsize(src_path) / 1024
     logging.warning(
         "Database restore initiated: source=%s (%.1f KB) -> dest=%s",
         src_path, size_kb, DATABASE_PATH,
     )
-    shutil.copy2(src_path, DATABASE_PATH)
+    src = sqlite3.connect(src_path)
+    try:
+        tables = {r[0] for r in src.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        missing = _REQUIRED_TABLES - tables
+        if missing:
+            raise RuntimeError(
+                f"Backup file failed re-validation (missing tables: {', '.join(sorted(missing))})"
+            )
+        dest = sqlite3.connect(DATABASE_PATH)
+        try:
+            src.backup(dest)
+        finally:
+            dest.close()
+    finally:
+        src.close()
     logging.warning("Database restore complete: %s", src_path)
