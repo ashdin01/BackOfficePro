@@ -81,6 +81,9 @@ def apply_migrations():
         if current < 19:
             migrate_v19(conn)
             logging.info("Migration v19 applied: index on stock_movements(created_at)")
+        if current < 20:
+            migrate_v20(conn)
+            logging.info("Migration v20 applied: index on sales_daily(plu, sale_date)")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -308,6 +311,13 @@ def migrate_v18(conn):
     """Add unit_qty to bundle_eligible for unit-aware bundle pricing."""
     _add_column(conn, "ALTER TABLE bundle_eligible ADD COLUMN unit_qty INTEGER DEFAULT 1")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '18')")
+    conn.commit()
+
+
+def migrate_v20(conn):
+    """Add index on sales_daily(plu, sale_date) for per-PLU sales range queries."""
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_daily_plu_date ON sales_daily(plu, sale_date)")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '20')")
     conn.commit()
 
 

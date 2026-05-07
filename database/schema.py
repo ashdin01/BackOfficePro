@@ -255,6 +255,8 @@ CREATE TABLE IF NOT EXISTS sales_daily (
     UNIQUE(sale_date, plu)
 );
 
+CREATE INDEX IF NOT EXISTS idx_sales_daily_plu_date ON sales_daily(plu, sale_date);
+
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     username        TEXT    NOT NULL UNIQUE,
