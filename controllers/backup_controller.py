@@ -17,10 +17,17 @@ def get_backup_dir():
 
 
 def do_backup(dest_path):
-    """Copy the live DB to dest_path. Returns (success: bool, message: str)."""
+    """Snapshot the live DB to dest_path using the SQLite online backup API.
+    Returns (success: bool, message: str)."""
     try:
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        shutil.copy2(DATABASE_PATH, dest_path)
+        src  = sqlite3.connect(DATABASE_PATH)
+        dest = sqlite3.connect(dest_path)
+        try:
+            src.backup(dest)
+        finally:
+            dest.close()
+            src.close()
         size = os.path.getsize(dest_path)
         return True, f"Backup saved:\n{dest_path}\n({size/1024:.1f} KB)"
     except Exception as e:
