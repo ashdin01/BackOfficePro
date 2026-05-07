@@ -38,10 +38,12 @@ CREATE TABLE IF NOT EXISTS suppliers (
     rep_name        TEXT    DEFAULT '',
     rep_phone       TEXT    DEFAULT '',
     order_minimum   REAL    DEFAULT 0,
-    email_orders    TEXT    DEFAULT '',
-    email_admin     TEXT    DEFAULT '',
-    email_accounts  TEXT    DEFAULT '',
-    email_rep       TEXT    DEFAULT ''
+    email_orders        TEXT    DEFAULT '',
+    email_admin         TEXT    DEFAULT '',
+    email_accounts      TEXT    DEFAULT '',
+    email_rep           TEXT    DEFAULT '',
+    online_order        INTEGER NOT NULL DEFAULT 0,
+    online_order_note   TEXT    DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS product_suppliers (
@@ -287,5 +289,5 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('po_prefix',      'PO',             'Purchase order number prefix'),
     ('po_next_number', '1',              'Next PO sequence number'),
     ('po_pdf_path',    '',               'Folder path for exported PO PDFs'),
-    ('schema_version', '14',             'Database schema version');
+    ('schema_version', '20',             'Database schema version');
 """
