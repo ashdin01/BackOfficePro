@@ -274,6 +274,7 @@ class MainWindow(QMainWindow):
                 logging.info(f"Backup email thread: sent successfully to {to_address}")
             except Exception as e:
                 logging.error(f"Backup email thread: send failed: {e}", exc_info=True)
+                self._email_send_error = str(e)
 
         t = threading.Thread(target=_send, daemon=True)
         t.start()
@@ -363,6 +364,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         event.ignore()
         self.hide()
+        self._email_send_error = None
 
         def _backup_work():
             try:
@@ -381,4 +383,12 @@ class MainWindow(QMainWindow):
     def _on_close_poll(self):
         if not self._close_worker.is_alive():
             self._close_poll.stop()
+            if self._email_send_error:
+                self.show()
+                QMessageBox.warning(
+                    self, "Backup Email Failed",
+                    f"The backup was saved locally but could not be emailed:\n\n"
+                    f"{self._email_send_error}\n\n"
+                    f"Check your Email configuration in Settings."
+                )
             QApplication.instance().quit()
