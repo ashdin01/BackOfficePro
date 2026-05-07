@@ -388,27 +388,42 @@ def get_supplier_sales(supplier_id=None):
             ORDER BY s.name, p.description
         """, sup_params).fetchall()
 
-        def qty(plu, d1, d2):
-            r = conn.execute("""
-                SELECT COALESCE(SUM(quantity), 0) FROM sales_daily
-                WHERE plu=? AND sale_date BETWEEN ? AND ?
-            """, (plu, str(d1), str(d2))).fetchone()
-            return int(r[0]) if r else 0
+        # Fetch all sales rows for relevant PLUs in one query, aggregate in Python
+        all_plus = [str(r['plu']) for r in db_rows if r['plu']]
+        sales_by_plu: dict = {}
+        if all_plus:
+            placeholders = ','.join('?' * len(all_plus))
+            raw = conn.execute(f"""
+                SELECT plu, sale_date, quantity FROM sales_daily
+                WHERE plu IN ({placeholders})
+            """, all_plus).fetchall()
+            for sr in raw:
+                sales_by_plu.setdefault(sr['plu'], []).append(
+                    (sr['sale_date'], sr['quantity'])
+                )
+
+        periods = [
+            (str(thisw_s),        str(today)),
+            (str(lw_s),           str(lw_e)),
+            (str(tw_s),           str(tw_e)),
+            (str(tm_s),           str(today)),
+            (str(lm_s),           str(lm_e)),
+            (str(fy_s),           str(fy_e)),
+            (str(pfy_s),          str(pfy_e)),
+            ('2000-01-01',        str(today)),
+        ]
+
+        def qty_from_cache(plu, d1, d2):
+            return int(sum(
+                q for sd, q in sales_by_plu.get(plu, [])
+                if d1 <= sd <= d2
+            ))
 
         rows   = []
         totals = [0] * 8
         for row in db_rows:
             plu = str(row['plu']) if row['plu'] else None
-            vals = [
-                qty(plu, thisw_s, today),
-                qty(plu, lw_s,   lw_e),
-                qty(plu, tw_s,   tw_e),
-                qty(plu, tm_s,   today),
-                qty(plu, lm_s,   lm_e),
-                qty(plu, fy_s,   fy_e),
-                qty(plu, pfy_s,  pfy_e),
-                qty(plu, date(2000, 1, 1), today),
-            ] if plu else [0] * 8
+            vals = [qty_from_cache(plu, d1, d2) for d1, d2 in periods] if plu else [0] * 8
             for i, v in enumerate(vals):
                 totals[i] += v
             rows.append({
