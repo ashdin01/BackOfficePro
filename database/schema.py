@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS po_lines (
     description     TEXT    NOT NULL,
     ordered_qty     REAL    NOT NULL,
     received_qty    REAL    NOT NULL DEFAULT 0,
+    pack_qty        INTEGER NOT NULL DEFAULT 1,
     unit_cost       REAL    NOT NULL DEFAULT 0,
     notes           TEXT,
     actual_cost     REAL    DEFAULT 0,
@@ -289,5 +290,5 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('po_prefix',      'PO',             'Purchase order number prefix'),
     ('po_next_number', '1',              'Next PO sequence number'),
     ('po_pdf_path',    '',               'Folder path for exported PO PDFs'),
-    ('schema_version', '20',             'Database schema version');
+    ('schema_version', '21',             'Database schema version');
 """

@@ -106,7 +106,6 @@ def reverse(po_id, reversed_by=''):
     - Sets PO status to REVERSED
     """
     from models.stock_on_hand import adjust
-    from models.product import get_by_barcode
     from config.constants import MOVE_REVERSAL
 
     conn = get_connection()
@@ -130,8 +129,7 @@ def reverse(po_id, reversed_by=''):
         received = int(line['received_qty'] or 0)
         if received <= 0:
             continue
-        product  = get_by_barcode(line['barcode'])
-        pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
+        pack_qty = int(line['pack_qty']) if line['pack_qty'] else 1
         adjust(
             barcode=line['barcode'],
             quantity=-(received * pack_qty),

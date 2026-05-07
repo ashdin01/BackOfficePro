@@ -84,6 +84,9 @@ def apply_migrations():
         if current < 20:
             migrate_v20(conn)
             logging.info("Migration v20 applied: index on sales_daily(plu, sale_date)")
+        if current < 21:
+            migrate_v21(conn)
+            logging.info("Migration v21 applied: pack_qty column on po_lines")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -353,4 +356,11 @@ def migrate_v20(conn):
     """Add index on sales_daily(plu, sale_date) for per-PLU sales range queries."""
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_daily_plu_date ON sales_daily(plu, sale_date)")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '20')")
+    conn.commit()
+
+
+def migrate_v21(conn):
+    """Add pack_qty to po_lines so reversals use the value recorded at order time."""
+    conn.execute("ALTER TABLE po_lines ADD COLUMN pack_qty INTEGER NOT NULL DEFAULT 1")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '21')")
     conn.commit()

@@ -562,6 +562,7 @@ class PODetail(QWidget):
                 ordered_qty=cartons,
                 unit_cost=r['cost_price'],
                 notes=note,
+                pack_qty=pack_qty,
             )
         # ── Also add any auto_reorder products not already on PO ─────
         auto_rows = po_controller.get_auto_reorder_items(self._po['supplier_id'])
@@ -570,7 +571,8 @@ class PODetail(QWidget):
         for ar in auto_rows:
             if ar['barcode'] in existing_barcodes:
                 continue
-            note = _carton_note(ar['pack_qty'], ar['pack_unit'], ar['barcode'])
+            auto_pack_qty = int(ar['pack_qty']) if ar['pack_qty'] else 1
+            note = _carton_note(auto_pack_qty, ar['pack_unit'], ar['barcode'])
             lines_model.add(
                 po_id=self.po_id,
                 barcode=ar['barcode'],
@@ -578,6 +580,7 @@ class PODetail(QWidget):
                 ordered_qty=1,
                 unit_cost=ar['cost_price'],
                 notes=note,
+                pack_qty=auto_pack_qty,
             )
             auto_added += 1
         _banner = f"💡 {len(recs)} line(s) auto-loaded from reorder points."
@@ -608,6 +611,7 @@ class PODetail(QWidget):
                 ordered_qty=cartons,
                 unit_cost=r['cost_price'],
                 notes=note,
+                pack_qty=pack_qty,
             )
         self.rec_banner.setText(f"✓ {len(new_recs)} additional line(s) added.")
         lines = lines_model.get_by_po(self.po_id)
@@ -1170,5 +1174,6 @@ class AddLineDialog(QDialog):
             ordered_qty=cartons,
             unit_cost=self.unit_cost.value(),
             notes=note,
+            pack_qty=self._pack_qty,
         )
         self.accept()

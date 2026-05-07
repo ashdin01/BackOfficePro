@@ -11,13 +11,13 @@ def get_by_po(po_id):
         conn.close()
 
 
-def add(po_id, barcode, description, ordered_qty, unit_cost=0, notes=''):
+def add(po_id, barcode, description, ordered_qty, unit_cost=0, notes='', pack_qty=1):
     conn = get_connection()
     try:
         conn.execute("""
-            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, unit_cost, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (po_id, barcode, description, ordered_qty, unit_cost, notes))
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, unit_cost, notes, pack_qty)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (po_id, barcode, description, ordered_qty, unit_cost, notes, max(1, int(pack_qty or 1))))
         conn.commit()
     finally:
         conn.close()
