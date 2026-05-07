@@ -15,6 +15,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from database.connection import get_connection
 from utils.validators import validate_abn, validate_email, validate_phone
 from utils.error_dialog import show_error
+from utils.secret_store import get_secret, set_secret
 import models.user as user_model
 
 SETTINGS_FIELDS = [
@@ -395,6 +396,19 @@ class SettingsScreen(QWidget):
         settings = _load_settings()
         for key, edit in self._fields.items():
             edit.setText(settings.get(key, ""))
+
+        # Migrate legacy plaintext secret from DB into keystore, then clear DB entry
+        db_secret = settings.get("graph_client_secret", "")
+        keyring_secret = get_secret("graph_client_secret")
+        if db_secret and not keyring_secret:
+            set_secret("graph_client_secret", db_secret)
+            keyring_secret = db_secret
+            conn = get_connection()
+            conn.execute("UPDATE settings SET value='' WHERE key='graph_client_secret'")
+            conn.commit()
+            conn.close()
+
+        self._fields["graph_client_secret"].setText(keyring_secret)
         self._load_users()
 
     def _save(self):
@@ -447,7 +461,9 @@ class SettingsScreen(QWidget):
             self._fields["store_abn"].setText(abn_val)
 
         for key, edit in self._fields.items():
-            if key == "store_abn" and abn_val:
+            if key == "graph_client_secret":
+                set_secret("graph_client_secret", edit.text().strip())
+            elif key == "store_abn" and abn_val:
                 _save_setting(key, abn_val)
             elif key == "store_phone" and phone_val:
                 _save_setting(key, phone_val)
@@ -462,7 +478,11 @@ class SettingsScreen(QWidget):
     def _test_graph(self):
         graph_keys = {key for key, _, _ in GRAPH_FIELDS}
         for key, edit in self._fields.items():
-            if key in graph_keys:
+            if key not in graph_keys:
+                continue
+            if key == "graph_client_secret":
+                set_secret("graph_client_secret", edit.text().strip())
+            else:
                 _save_setting(key, edit.text().strip())
         try:
             from utils.email_graph import test_graph_connection

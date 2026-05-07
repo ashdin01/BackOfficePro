@@ -33,6 +33,9 @@ a = Analysis(
         'msal',
         'msal.application',
         'requests',
+        # OS keystore for secure credential storage
+        'keyring',
+        'keyring.backends',
     ],
     hookspath=[],
     runtime_hooks=[],
