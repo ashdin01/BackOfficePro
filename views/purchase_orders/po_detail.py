@@ -435,7 +435,7 @@ class PODetail(QWidget):
             supplier_email = email.strip()
 
         from config.constants import PO_DOC_TITLES
-        _doc_title = PO_DOC_TITLES.get(po.get('po_type', 'PO') or 'PO', 'PURCHASE ORDER').title()
+        _doc_title = PO_DOC_TITLES.get(po['po_type'] or 'PO', 'PURCHASE ORDER').title()
         reply = QMessageBox.question(
             self, "Confirm Email",
             f"Email {_doc_title} {po['po_number']} to:\n\n{po['supplier_name']}\n{supplier_email}"
@@ -518,7 +518,7 @@ class PODetail(QWidget):
         po = po_model.get_by_id(self.po_id)
         self._po = po
         from config.constants import PO_DOC_TITLES, PO_TYPES
-        _po_type   = po.get('po_type', 'PO') or 'PO'
+        _po_type   = po['po_type'] or 'PO'
         _doc_title = PO_DOC_TITLES.get(_po_type, 'PURCHASE ORDER')
         self.setWindowTitle(f"{_doc_title}: {po['po_number']}")
         from models.supplier import get_by_id as get_supplier
@@ -541,7 +541,7 @@ class PODetail(QWidget):
         )
         lines = lines_model.get_by_po(self.po_id)
 
-        _po_type = po.get('po_type', 'PO') or 'PO'
+        _po_type = po['po_type'] or 'PO'
         if len(lines) == 0 and not self._blank and _po_type == 'PO':
             self._auto_load_recommendations()
             lines = lines_model.get_by_po(self.po_id)
