@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QPushButton, QFileDialog, QMessageBox
+    QPushButton, QFileDialog, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, QDateTime
 from PyQt6.QtGui import QFont
@@ -196,9 +196,30 @@ class HomeScreen(QWidget):
         sep_ord.setStyleSheet("color: #2a3a4a;")
         root.addWidget(sep_ord)
 
-        self._order_today_container = QVBoxLayout()
+        self._order_today_hdr = QLabel()
+        self._order_today_hdr.setStyleSheet(
+            "font-size: 12px; color: #6e7681; letter-spacing: 1px; background: transparent;")
+        root.addWidget(self._order_today_hdr)
+
+        # Cards go inside a scroll area so many suppliers don't squash the layout
+        self._order_today_inner = QWidget()
+        self._order_today_inner.setStyleSheet("background: #1a2332;")
+        self._order_today_container = QVBoxLayout(self._order_today_inner)
         self._order_today_container.setSpacing(6)
-        root.addLayout(self._order_today_container)
+        self._order_today_container.setContentsMargins(0, 2, 0, 2)
+
+        self._order_today_scroll = QScrollArea()
+        self._order_today_scroll.setWidget(self._order_today_inner)
+        self._order_today_scroll.setWidgetResizable(True)
+        self._order_today_scroll.setMaximumHeight(210)
+        self._order_today_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._order_today_scroll.setStyleSheet(
+            "QScrollArea{border:none;background:#1a2332;}"
+            "QScrollBar:vertical{background:#1e2a38;width:8px;border-radius:4px;margin:0;}"
+            "QScrollBar::handle:vertical{background:#2a3a4a;border-radius:4px;min-height:20px;}"
+            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}")
+        root.addWidget(self._order_today_scroll)
 
         # ── Quick nav buttons ─────────────────────────────────────────
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
@@ -317,15 +338,13 @@ class HomeScreen(QWidget):
             return
 
         today_name = _date.today().strftime('%A')
-        header = QLabel(f"Orders Due Today  —  {today_name}")
-        header.setStyleSheet(
-            "font-size: 12px; color: #6e7681; letter-spacing: 1px; background: transparent;")
-        self._order_today_container.addWidget(header)
+        self._order_today_hdr.setText(f"Orders Due Today  —  {today_name}")
 
         if not due:
             none_lbl = QLabel("No orders scheduled for today")
             none_lbl.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
             self._order_today_container.addWidget(none_lbl)
+            self._order_today_container.addStretch()
             return
 
         for supplier in due:
@@ -356,6 +375,8 @@ class HomeScreen(QWidget):
             frame_layout.setContentsMargins(12, 6, 12, 6)
             frame_layout.addLayout(row)
             self._order_today_container.addWidget(frame)
+
+        self._order_today_container.addStretch()
 
     def _new_po_for(self, supplier_id):
         from views.purchase_orders.po_create import POCreate
