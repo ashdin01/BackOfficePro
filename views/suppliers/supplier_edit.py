@@ -15,17 +15,28 @@ class SupplierEdit(KeyboardMixin, QWidget):
         self.supplier_id = supplier_id
         self.on_save = on_save
         self.setWindowTitle("Edit Supplier" if supplier_id else "Add Supplier")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(880)
         self._build_ui()
         self.setup_keyboard()
         if supplier_id:
             self._populate()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(12)
 
-        # ── Supplier Details ──────────────────────────────────────────
+        # ── Two-column body ───────────────────────────────────────────
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+        columns.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        left  = QVBoxLayout()
+        left.setSpacing(12)
+        right = QVBoxLayout()
+        right.setSpacing(12)
+
+        # ── LEFT: Supplier Details ────────────────────────────────────
         details_group = QGroupBox("Supplier Details")
         details_form = QFormLayout(details_group)
         details_form.setSpacing(8)
@@ -59,9 +70,10 @@ class SupplierEdit(KeyboardMixin, QWidget):
         details_form.addRow("Address",        self.address)
         details_form.addRow("Notes",          self.notes)
         details_form.addRow("",               self.active)
-        layout.addWidget(details_group)
+        left.addWidget(details_group)
+        left.addStretch()
 
-        # ── Sales Rep ─────────────────────────────────────────────────
+        # ── RIGHT: Sales Rep ──────────────────────────────────────────
         rep_group = QGroupBox("Sales Representative")
         rep_form = QFormLayout(rep_group)
         rep_form.setSpacing(8)
@@ -74,9 +86,9 @@ class SupplierEdit(KeyboardMixin, QWidget):
         rep_form.addRow("Rep Name",  self.rep_name)
         rep_form.addRow("Rep Phone", self.rep_phone)
         rep_form.addRow("Rep Email", self.email_rep)
-        layout.addWidget(rep_group)
+        right.addWidget(rep_group)
 
-        # ── Email Addresses ───────────────────────────────────────────
+        # ── RIGHT: Email Addresses ────────────────────────────────────
         email_group = QGroupBox("Email Addresses")
         email_form = QFormLayout(email_group)
         email_form.setSpacing(8)
@@ -92,9 +104,9 @@ class SupplierEdit(KeyboardMixin, QWidget):
         email_form.addRow("Orders",   self.email_orders)
         email_form.addRow("Admin",    self.email_admin)
         email_form.addRow("Accounts", self.email_accounts)
-        layout.addWidget(email_group)
+        right.addWidget(email_group)
 
-        # ── Order Days ────────────────────────────────────────────────
+        # ── RIGHT: Order Days ─────────────────────────────────────────
         order_group = QGroupBox("Order Days")
         order_form = QFormLayout(order_group)
         order_form.setSpacing(8)
@@ -113,9 +125,9 @@ class SupplierEdit(KeyboardMixin, QWidget):
         order_hint.setStyleSheet("color:#8b949e; font-size:11px;")
         order_form.addRow("", order_hint)
         order_form.addRow("Days", days_row)
-        layout.addWidget(order_group)
+        right.addWidget(order_group)
 
-        # ── Online Ordering ───────────────────────────────────────────
+        # ── RIGHT: Online Ordering ────────────────────────────────────
         online_group = QGroupBox("Online Ordering")
         online_form = QFormLayout(online_group)
         online_form.setSpacing(8)
@@ -131,7 +143,12 @@ class SupplierEdit(KeyboardMixin, QWidget):
 
         online_form.addRow("", self.online_order)
         online_form.addRow("Instructions", self.online_order_note)
-        layout.addWidget(online_group)
+        right.addWidget(online_group)
+        right.addStretch()
+
+        columns.addLayout(left,  stretch=1)
+        columns.addLayout(right, stretch=1)
+        root.addLayout(columns)
 
         # ── Buttons ───────────────────────────────────────────────────
         btns = QHBoxLayout()
@@ -148,7 +165,8 @@ class SupplierEdit(KeyboardMixin, QWidget):
         cancel_btn.clicked.connect(self.close)
         btns.addWidget(save_btn)
         btns.addWidget(cancel_btn)
-        layout.addLayout(btns)
+        btns.addStretch()
+        root.addLayout(btns)
 
     def _populate(self):
         s = supplier_model.get_by_id(self.supplier_id)
