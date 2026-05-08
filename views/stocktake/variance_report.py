@@ -245,16 +245,10 @@ class VarianceReport(QWidget):
             1 for c in self._rows if c['counted_qty'] is None
         )
         msg = (
-            f"Apply stocktake to stock on hand?
-
-"
-            f"  Counted products:     {counted}
-"
-            f"  Not counted products: {not_cnt}
-
-"
-            "Products not counted will keep their current SOH.
-"
+            f"Apply stocktake to stock on hand?\n\n"
+            f"  Counted products:     {counted}\n"
+            f"  Not counted products: {not_cnt}\n\n"
+            "Products not counted will keep their current SOH.\n"
             "This cannot be undone."
         )
         reply = QMessageBox.question(
