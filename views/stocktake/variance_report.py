@@ -233,8 +233,7 @@ class VarianceReport(QWidget):
                         vals[0] = f'="{vals[0]}"'
                     writer.writerow(vals)
             QMessageBox.information(self, "Exported",
-                f"Exported {self.table.rowCount()} rows to:
-{path}")
+                f"Exported {self.table.rowCount()} rows to:\n{path}")
         except Exception as e:
             show_error(self, "Could not export variance report.", e, title="Export Failed")
 
