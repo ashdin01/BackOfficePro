@@ -1119,11 +1119,11 @@ class ProductEdit(KeyboardMixin, QWidget):
             tbl.setRowCount(0)
             balance = 0.0
             display_rows = []
-            for row in rows:
+            for row in reversed(rows):  # oldest first so balance builds correctly
                 balance += row["quantity"]
                 display_rows.append((row, balance))
 
-            for row, bal in reversed(display_rows):
+            for row, bal in display_rows:
                 r = tbl.rowCount()
                 tbl.insertRow(r)
                 tbl.setItem(r, 0, QTableWidgetItem(str(row["created_at"])[:16]))
