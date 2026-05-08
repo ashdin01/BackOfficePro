@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
     email_accounts      TEXT    DEFAULT '',
     email_rep           TEXT    DEFAULT '',
     online_order        INTEGER NOT NULL DEFAULT 0,
-    online_order_note   TEXT    DEFAULT ''
+    online_order_note   TEXT    DEFAULT '',
+    order_days          TEXT    DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS product_suppliers (

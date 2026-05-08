@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QPushButton,
     QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox,
-    QTextEdit, QDoubleSpinBox, QGroupBox
+    QTextEdit, QDoubleSpinBox, QGroupBox, QLabel
 )
 from utils.keyboard_mixin import KeyboardMixin
 from utils.validators import validate_abn, validate_email, validate_phone
@@ -94,6 +94,27 @@ class SupplierEdit(KeyboardMixin, QWidget):
         email_form.addRow("Accounts", self.email_accounts)
         layout.addWidget(email_group)
 
+        # ── Order Days ────────────────────────────────────────────────
+        order_group = QGroupBox("Order Days")
+        order_form = QFormLayout(order_group)
+        order_form.setSpacing(8)
+
+        days_row = QHBoxLayout()
+        days_row.setSpacing(12)
+        self._day_checks = {}
+        for code, label in [('MON','Mon'), ('TUE','Tue'), ('WED','Wed'),
+                             ('THU','Thu'), ('FRI','Fri'), ('SAT','Sat'), ('SUN','Sun')]:
+            cb = QCheckBox(label)
+            self._day_checks[code] = cb
+            days_row.addWidget(cb)
+        days_row.addStretch()
+
+        order_hint = QLabel("Days an order should be placed with this supplier")
+        order_hint.setStyleSheet("color:#8b949e; font-size:11px;")
+        order_form.addRow("", order_hint)
+        order_form.addRow("Days", days_row)
+        layout.addWidget(order_group)
+
         # ── Online Ordering ───────────────────────────────────────────
         online_group = QGroupBox("Online Ordering")
         online_form = QFormLayout(online_group)
@@ -164,6 +185,10 @@ class SupplierEdit(KeyboardMixin, QWidget):
         self.online_order_note.setEnabled(is_online)
         self.online_order_note.setText(s['online_order_note'] if 'online_order_note' in keys else '')
 
+        saved_days = (s['order_days'] if 'order_days' in keys and s['order_days'] else '').upper()
+        for code, cb in self._day_checks.items():
+            cb.setChecked(code in saved_days.split(','))
+
     def _save(self):
         code = self.code.text().strip()
         name = self.name.text().strip()
@@ -214,6 +239,8 @@ class SupplierEdit(KeyboardMixin, QWidget):
         if abn:
             self.abn.setText(abn)
 
+        order_days = ','.join(c for c, cb in self._day_checks.items() if cb.isChecked())
+
         try:
             if self.supplier_id:
                 supplier_model.update(
@@ -235,6 +262,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     email_rep=email_rep,
                     online_order=int(self.online_order.isChecked()),
                     online_order_note=self.online_order_note.toPlainText().strip(),
+                    order_days=order_days,
                 )
             else:
                 supplier_model.add(
@@ -255,6 +283,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     email_rep=email_rep,
                     online_order=int(self.online_order.isChecked()),
                     online_order_note=self.online_order_note.toPlainText().strip(),
+                    order_days=order_days,
                 )
             if self.on_save:
                 self.on_save()

@@ -191,6 +191,15 @@ class HomeScreen(QWidget):
         import_row.addStretch()
         root.addLayout(import_row)
 
+        # ── Order Today section ───────────────────────────────────────
+        sep_ord = QFrame(); sep_ord.setFrameShape(QFrame.Shape.HLine)
+        sep_ord.setStyleSheet("color: #2a3a4a;")
+        root.addWidget(sep_ord)
+
+        self._order_today_container = QVBoxLayout()
+        self._order_today_container.setSpacing(6)
+        root.addLayout(self._order_today_container)
+
         # ── Quick nav buttons ─────────────────────────────────────────
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet("color: #2a3a4a;")
@@ -292,6 +301,67 @@ class HomeScreen(QWidget):
             QMessageBox.warning(self, "Import Issue", message)
             self._refresh()
 
+    def _refresh_order_today(self):
+        import models.supplier as supplier_model
+        from datetime import date as _date
+
+        # Clear previous widgets from the layout
+        while self._order_today_container.count():
+            item = self._order_today_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        try:
+            due = supplier_model.get_order_due_today()
+        except Exception:
+            return
+
+        today_name = _date.today().strftime('%A')
+        header = QLabel(f"Orders Due Today  —  {today_name}")
+        header.setStyleSheet(
+            "font-size: 12px; color: #6e7681; letter-spacing: 1px; background: transparent;")
+        self._order_today_container.addWidget(header)
+
+        if not due:
+            none_lbl = QLabel("No orders scheduled for today")
+            none_lbl.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+            self._order_today_container.addWidget(none_lbl)
+            return
+
+        for supplier in due:
+            row = QHBoxLayout()
+            row.setSpacing(12)
+
+            name_lbl = QLabel(f"🛒  {supplier['name']}")
+            name_lbl.setStyleSheet(
+                "font-size: 13px; font-weight: bold; color: #e6edf3; background: transparent;")
+            row.addWidget(name_lbl)
+            row.addStretch()
+
+            po_btn = QPushButton("New PO →")
+            po_btn.setFixedHeight(30)
+            po_btn.setStyleSheet(
+                "QPushButton{background:#1565c0;color:white;border:none;"
+                "border-radius:4px;padding:0 14px;font-weight:bold;font-size:12px;}"
+                "QPushButton:hover{background:#1976d2;}")
+            sid = supplier['id']
+            po_btn.clicked.connect(lambda _, s=sid: self._new_po_for(s))
+            row.addWidget(po_btn)
+
+            frame = QFrame()
+            frame.setStyleSheet(
+                "QFrame{background:#1e2a38;border-radius:6px;"
+                "border-left:4px solid #1565c0;}")
+            frame_layout = QHBoxLayout(frame)
+            frame_layout.setContentsMargins(12, 6, 12, 6)
+            frame_layout.addLayout(row)
+            self._order_today_container.addWidget(frame)
+
+    def _new_po_for(self, supplier_id):
+        from views.purchase_orders.po_create import POCreate
+        self._po_create_win = POCreate(on_save=self._refresh, supplier_id=supplier_id)
+        self._po_create_win.show()
+
     def _refresh(self):
         try:
             stats = dash_ctrl.get_dashboard_stats()
@@ -312,3 +382,4 @@ class HomeScreen(QWidget):
             logging.warning("HomeScreen refresh error: %s", e, exc_info=True)
 
         self._update_import_status()
+        self._refresh_order_today()

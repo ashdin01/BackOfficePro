@@ -90,6 +90,9 @@ def apply_migrations():
         if current < 22:
             migrate_v22(conn)
             logging.info("Migration v22 applied: po_type column on purchase_orders")
+        if current < 23:
+            migrate_v23(conn)
+            logging.info("Migration v23 applied: order_days column on suppliers")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -373,4 +376,11 @@ def migrate_v22(conn):
     """Add po_type to purchase_orders to support Credit/Return and Invoice Only orders."""
     conn.execute("ALTER TABLE purchase_orders ADD COLUMN po_type TEXT NOT NULL DEFAULT 'PO'")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '22')")
+    conn.commit()
+
+
+def migrate_v23(conn):
+    """Add order_days to suppliers for home-screen order prompts."""
+    _add_column(conn, "ALTER TABLE suppliers ADD COLUMN order_days TEXT DEFAULT ''")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '23')")
     conn.commit()

@@ -25,7 +25,7 @@ def get_by_id(supplier_id):
 def add(code, name, contact_name='', phone='', account_number='',
         payment_terms='', address='', notes='', abn='', rep_name='', rep_phone='',
         order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
-        online_order=0, online_order_note=''):
+        online_order=0, online_order_note='', order_days=''):
     conn = get_connection()
     try:
         conn.execute("""
@@ -33,13 +33,13 @@ def add(code, name, contact_name='', phone='', account_number='',
                 code, name, contact_name, phone, account_number,
                 payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
                 email_orders, email_admin, email_accounts, email_rep,
-                online_order, online_order_note
+                online_order, online_order_note, order_days
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
               email_orders, email_admin, email_accounts, email_rep,
-              online_order, online_order_note))
+              online_order, online_order_note, order_days))
         conn.commit()
     finally:
         conn.close()
@@ -48,7 +48,7 @@ def add(code, name, contact_name='', phone='', account_number='',
 def update(supplier_id, code, name, contact_name, phone, account_number,
            payment_terms, address, notes, active, abn='', rep_name='', rep_phone='',
            order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
-           online_order=0, online_order_note=''):
+           online_order=0, online_order_note='', order_days=''):
     conn = get_connection()
     try:
         conn.execute("""
@@ -57,14 +57,28 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
                 account_number=?, payment_terms=?, address=?, notes=?, active=?,
                 abn=?, rep_name=?, rep_phone=?, order_minimum=?,
                 email_orders=?, email_admin=?, email_accounts=?, email_rep=?,
-                online_order=?, online_order_note=?
+                online_order=?, online_order_note=?, order_days=?
             WHERE id=?
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, active, abn, rep_name, rep_phone,
               order_minimum, email_orders, email_admin, email_accounts, email_rep,
-              online_order, online_order_note,
+              online_order, online_order_note, order_days,
               supplier_id))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_order_due_today():
+    """Return active suppliers whose order_days includes today's weekday abbreviation."""
+    from datetime import date
+    today = date.today().strftime('%a').upper()  # 'MON','TUE','WED','THU','FRI','SAT','SUN'
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM suppliers WHERE active=1 AND order_days != '' ORDER BY name"
+        ).fetchall()
+        return [r for r in rows if today in (r['order_days'] or '').upper().split(',')]
     finally:
         conn.close()
 

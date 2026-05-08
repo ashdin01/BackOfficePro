@@ -89,11 +89,12 @@ class _TypeLookup(QDialog):
 
 
 class POCreate(QWidget):
-    def __init__(self, on_save=None):
+    def __init__(self, on_save=None, supplier_id=None):
         super().__init__()
         self.setWindowTitle("New Purchase Order")
         self.setMinimumWidth(440)
         self.on_save = on_save
+        self._preset_supplier_id = supplier_id
         self._build_ui()
 
     def _build_ui(self):
@@ -149,6 +150,11 @@ class POCreate(QWidget):
         suppliers = supplier_model.get_all()
         for s in suppliers:
             self.supplier.addItem(s['name'], s['id'])
+        if self._preset_supplier_id:
+            for i in range(self.supplier.count()):
+                if self.supplier.itemData(i) == self._preset_supplier_id:
+                    self.supplier.setCurrentIndex(i)
+                    break
 
         self.delivery_date = QDateEdit()
         self.delivery_date.setCalendarPopup(True)
