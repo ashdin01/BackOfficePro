@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox,
     QTextEdit, QDoubleSpinBox, QGroupBox, QLabel
 )
+from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
 from utils.validators import validate_abn, validate_email, validate_phone
 from utils.error_dialog import show_error
