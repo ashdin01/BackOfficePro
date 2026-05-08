@@ -38,7 +38,7 @@ def get_all(status=None, archived=False):
                 SELECT po.*, s.name as supplier_name
                 FROM purchase_orders po
                 JOIN suppliers s ON po.supplier_id = s.id
-                WHERE po.status IN ('RECEIVED', 'CANCELLED', 'REVERSED')
+                WHERE po.status IN ('RECEIVED', 'CANCELLED', 'REVERSED', 'CLOSED')
                 ORDER BY po.created_at DESC
             """
             return conn.execute(query).fetchall()
@@ -68,14 +68,15 @@ def get_by_id(po_id):
         conn.close()
 
 
-def create(supplier_id, delivery_date=None, notes='', created_by=''):
+def create(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO'):
     conn = get_connection()
     try:
         po_number = _next_po_number(conn)
         conn.execute("""
-            INSERT INTO purchase_orders (po_number, supplier_id, delivery_date, notes, created_by)
-            VALUES (?, ?, ?, ?, ?)
-        """, (po_number, supplier_id, delivery_date, notes, created_by))
+            INSERT INTO purchase_orders
+                (po_number, supplier_id, delivery_date, notes, created_by, po_type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (po_number, supplier_id, delivery_date, notes, created_by, po_type))
         conn.commit()
         return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     finally:

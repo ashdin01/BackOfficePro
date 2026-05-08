@@ -87,6 +87,9 @@ def apply_migrations():
         if current < 21:
             migrate_v21(conn)
             logging.info("Migration v21 applied: pack_qty column on po_lines")
+        if current < 22:
+            migrate_v22(conn)
+            logging.info("Migration v22 applied: po_type column on purchase_orders")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -363,4 +366,11 @@ def migrate_v21(conn):
     """Add pack_qty to po_lines so reversals use the value recorded at order time."""
     conn.execute("ALTER TABLE po_lines ADD COLUMN pack_qty INTEGER NOT NULL DEFAULT 1")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '21')")
+    conn.commit()
+
+
+def migrate_v22(conn):
+    """Add po_type to purchase_orders to support Credit/Return and Invoice Only orders."""
+    conn.execute("ALTER TABLE purchase_orders ADD COLUMN po_type TEXT NOT NULL DEFAULT 'PO'")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '22')")
     conn.commit()

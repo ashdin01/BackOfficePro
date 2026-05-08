@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     po_number       TEXT    NOT NULL UNIQUE,
     supplier_id     INTEGER NOT NULL,
     status          TEXT    NOT NULL DEFAULT 'DRAFT',
+    po_type         TEXT    NOT NULL DEFAULT 'PO',
     delivery_date   DATE,
     notes           TEXT,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -290,5 +291,5 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('po_prefix',      'PO',             'Purchase order number prefix'),
     ('po_next_number', '1',              'Next PO sequence number'),
     ('po_pdf_path',    '',               'Folder path for exported PO PDFs'),
-    ('schema_version', '21',             'Database schema version');
+    ('schema_version', '22',             'Database schema version');
 """

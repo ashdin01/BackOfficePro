@@ -5,6 +5,7 @@ PO_STATUS_PARTIAL   = 'PARTIAL'
 PO_STATUS_RECEIVED  = 'RECEIVED'
 PO_STATUS_CANCELLED = 'CANCELLED'
 PO_STATUS_REVERSED  = 'REVERSED'
+PO_STATUS_CLOSED    = 'CLOSED'   # Final status for Credit/Return orders
 
 PO_STATUSES = [
     PO_STATUS_DRAFT,
@@ -13,7 +14,25 @@ PO_STATUSES = [
     PO_STATUS_RECEIVED,
     PO_STATUS_CANCELLED,
     PO_STATUS_REVERSED,
+    PO_STATUS_CLOSED,
 ]
+
+# Purchase order types
+PO_TYPE_PO = 'PO'   # Normal purchase order
+PO_TYPE_RO = 'RO'   # Credit / Return order
+PO_TYPE_IO = 'IO'   # Invoice Only
+
+PO_TYPES = {
+    PO_TYPE_PO: 'Purchase Order',
+    PO_TYPE_RO: 'Credit / Return',
+    PO_TYPE_IO: 'Invoice Only',
+}
+
+PO_DOC_TITLES = {
+    PO_TYPE_PO: 'PURCHASE ORDER',
+    PO_TYPE_RO: 'CREDIT REQUEST',
+    PO_TYPE_IO: 'INVOICE ONLY',
+}
 
 # Stocktake statuses
 STOCKTAKE_OPEN      = 'OPEN'

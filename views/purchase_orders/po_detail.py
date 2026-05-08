@@ -434,9 +434,11 @@ class PODetail(QWidget):
                 return
             supplier_email = email.strip()
 
+        from config.constants import PO_DOC_TITLES
+        _doc_title = PO_DOC_TITLES.get(po.get('po_type', 'PO') or 'PO', 'PURCHASE ORDER').title()
         reply = QMessageBox.question(
             self, "Confirm Email",
-            f"Email Purchase Order {po['po_number']} to:\n\n{po['supplier_name']}\n{supplier_email}"
+            f"Email {_doc_title} {po['po_number']} to:\n\n{po['supplier_name']}\n{supplier_email}"
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -461,7 +463,7 @@ class PODetail(QWidget):
             if self.on_save:
                 self.on_save()
 
-            QMessageBox.information(self, "Email Sent", f"✓ Purchase Order {po['po_number']} sent to:\n{supplier_email}")
+            QMessageBox.information(self, "Email Sent", f"✓ {_doc_title} {po['po_number']} sent to:\n{supplier_email}")
         except Exception as e:
             logging.error(f"Email send failed: {e}", exc_info=True)
             QMessageBox.critical(self, "Email Failed", f"Could not send the email.\n\nDetail: {e}")
@@ -515,7 +517,10 @@ class PODetail(QWidget):
     def _load(self):
         po = po_model.get_by_id(self.po_id)
         self._po = po
-        self.setWindowTitle(f"PO: {po['po_number']}")
+        from config.constants import PO_DOC_TITLES, PO_TYPES
+        _po_type   = po.get('po_type', 'PO') or 'PO'
+        _doc_title = PO_DOC_TITLES.get(_po_type, 'PURCHASE ORDER')
+        self.setWindowTitle(f"{_doc_title}: {po['po_number']}")
         from models.supplier import get_by_id as get_supplier
         supplier = get_supplier(po['supplier_id'])
         self._supplier = supplier
@@ -536,11 +541,16 @@ class PODetail(QWidget):
         )
         lines = lines_model.get_by_po(self.po_id)
 
-        if len(lines) == 0 and not self._blank:
+        _po_type = po.get('po_type', 'PO') or 'PO'
+        if len(lines) == 0 and not self._blank and _po_type == 'PO':
             self._auto_load_recommendations()
             lines = lines_model.get_by_po(self.po_id)
-        elif len(lines) == 0 and self._blank:
-            self.rec_banner.setText("Blank PO — use Add Line [A] or F2 lookup to add products.")
+        elif len(lines) == 0:
+            from config.constants import PO_TYPES
+            type_label = PO_TYPES.get(_po_type, 'Order')
+            self.rec_banner.setText(
+                f"{type_label} — use Add Line [A] or F2 lookup to add products."
+            )
 
         self._populate_table(lines)
 

@@ -87,8 +87,9 @@ class POList(QWidget):
         arch_filter_row.addWidget(QLabel("Filter:"))
         self.archive_filter = QComboBox()
         self.archive_filter.addItem("All Archived", None)
-        self.archive_filter.addItem("Received",    "RECEIVED")
-        self.archive_filter.addItem("Cancelled",   "CANCELLED")
+        self.archive_filter.addItem("Received",     "RECEIVED")
+        self.archive_filter.addItem("Closed (RO)",  "CLOSED")
+        self.archive_filter.addItem("Cancelled",    "CANCELLED")
         self.archive_filter.currentIndexChanged.connect(self._load_archive)
         arch_filter_row.addWidget(self.archive_filter)
         arch_filter_row.addStretch()
@@ -124,19 +125,20 @@ class POList(QWidget):
 
     def _make_table(self):
         t = QTableWidget()
-        t.setColumnCount(6)
+        t.setColumnCount(7)
         t.setHorizontalHeaderLabels([
-            "PO Number", "Supplier", "Status", "Delivery Date", "Created", "Notes"
+            "PO Number", "Type", "Supplier", "Status", "Delivery Date", "Created", "Notes"
         ])
-        t.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        t.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         t.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         t.setAlternatingRowColors(True)
         t.verticalHeader().setVisible(False)
         t.setColumnWidth(0, 110)
-        t.setColumnWidth(2, 90)
-        t.setColumnWidth(3, 110)
-        t.setColumnWidth(4, 100)
+        t.setColumnWidth(1, 55)
+        t.setColumnWidth(3, 90)
+        t.setColumnWidth(4, 110)
+        t.setColumnWidth(5, 100)
         return t
 
     def _btn(self, label, color, slot):
@@ -172,16 +174,22 @@ class POList(QWidget):
         rows = po_model.get_all(archived=False)
         self._populate_table(self.active_table, rows)
 
-        # Colour-code status column
+        # Colour-code status and type columns
         status_colours = {
             'DRAFT':   '#888888',
             'SENT':    '#2196F3',
             'PARTIAL': '#FF9800',
         }
+        type_colours = {
+            'PO': '#4CAF50',
+            'RO': '#f85149',
+            'IO': '#FF9800',
+        }
         for r in range(self.active_table.rowCount()):
-            status = self.active_table.item(r, 2).text()
-            colour = status_colours.get(status, '#888888')
-            self.active_table.item(r, 2).setForeground(QColor(colour))
+            status  = self.active_table.item(r, 3).text()
+            po_type = self.active_table.item(r, 1).text()
+            self.active_table.item(r, 3).setForeground(QColor(status_colours.get(status, '#888888')))
+            self.active_table.item(r, 1).setForeground(QColor(type_colours.get(po_type, '#8b949e')))
 
         self.active_status.setText(
             f"{self.active_table.rowCount()} active purchase orders  "
@@ -204,27 +212,40 @@ class POList(QWidget):
             'RECEIVED':  '#4CAF50',
             'CANCELLED': '#f44336',
             'REVERSED':  '#9C27B0',
+            'CLOSED':    '#26A69A',
         }
+        type_colours = {'PO': '#4CAF50', 'RO': '#f85149', 'IO': '#FF9800'}
         for r in range(self.archive_table.rowCount()):
-            status = self.archive_table.item(r, 2).text()
-            colour = status_colours.get(status, '#888888')
-            self.archive_table.item(r, 2).setForeground(QColor(colour))
+            status  = self.archive_table.item(r, 3).text()
+            po_type = self.archive_table.item(r, 1).text()
+            self.archive_table.item(r, 3).setForeground(QColor(status_colours.get(status, '#888888')))
+            self.archive_table.item(r, 1).setForeground(QColor(type_colours.get(po_type, '#8b949e')))
 
         self.archive_status.setText(
             f"{self.archive_table.rowCount()} archived purchase orders"
         )
 
     def _populate_table(self, table, rows):
+        from config.constants import PO_TYPES
         table.setRowCount(0)
         for row in rows:
             r = table.rowCount()
             table.insertRow(r)
+            po_type = row['po_type'] if 'po_type' in row.keys() else 'PO'
+
             table.setItem(r, 0, QTableWidgetItem(row['po_number']))
-            table.setItem(r, 1, QTableWidgetItem(row['supplier_name']))
-            table.setItem(r, 2, QTableWidgetItem(row['status']))
-            table.setItem(r, 3, QTableWidgetItem(row['delivery_date'] or ''))
-            table.setItem(r, 4, QTableWidgetItem(row['created_at'][:10]))
-            table.setItem(r, 5, QTableWidgetItem(row['notes'] or ''))
+
+            type_item = QTableWidgetItem(po_type or 'PO')
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            type_item.setData(Qt.ItemDataRole.UserRole, po_type or 'PO')
+            type_item.setToolTip(PO_TYPES.get(po_type or 'PO', ''))
+            table.setItem(r, 1, type_item)
+
+            table.setItem(r, 2, QTableWidgetItem(row['supplier_name']))
+            table.setItem(r, 3, QTableWidgetItem(row['status']))
+            table.setItem(r, 4, QTableWidgetItem(row['delivery_date'] or ''))
+            table.setItem(r, 5, QTableWidgetItem(row['created_at'][:10]))
+            table.setItem(r, 6, QTableWidgetItem(row['notes'] or ''))
             table.item(r, 0).setData(Qt.ItemDataRole.UserRole, row['id'])
 
     # ── Selection helpers ─────────────────────────────────────────────
@@ -236,8 +257,17 @@ class POList(QWidget):
         if row < 0:
             return None, None
         po_id  = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        status = table.item(row, 2).text()
+        status = table.item(row, 3).text()
         return po_id, status
+
+    def _get_selected_type(self, table=None):
+        if table is None:
+            table = self.active_table
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, 1)
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     # ── Actions ───────────────────────────────────────────────────────
 
@@ -264,18 +294,32 @@ class POList(QWidget):
 
     def _open_receive(self):
         po_id, status = self._get_selected()
+        po_type = self._get_selected_type()
         if po_id is None:
-            QMessageBox.information(self, "No Selection", "Select a PO first.")
+            QMessageBox.information(self, "No Selection", "Select an order first.")
             return
-        if status not in ('SENT', 'PARTIAL'):
-            QMessageBox.information(
-                self, "Cannot Receive",
-                "Only SENT or PARTIAL orders can be received."
-            )
-            return
-        from views.purchase_orders.po_receive import POReceive
-        self.receive_win = POReceive(po_id=po_id, on_save=self._load)
-        self.receive_win.show()
+
+        if po_type == 'RO':
+            # Credit/Return orders are closed, not received
+            if status != 'SENT':
+                QMessageBox.information(
+                    self, "Cannot Close",
+                    "Only SENT credit returns can be closed."
+                )
+                return
+            from views.purchase_orders.credit_close import CreditClose
+            self.receive_win = CreditClose(po_id=po_id, on_save=self._load)
+            self.receive_win.show()
+        else:
+            if status not in ('SENT', 'PARTIAL'):
+                QMessageBox.information(
+                    self, "Cannot Receive",
+                    "Only SENT or PARTIAL orders can be received."
+                )
+                return
+            from views.purchase_orders.po_receive import POReceive
+            self.receive_win = POReceive(po_id=po_id, on_save=self._load)
+            self.receive_win.show()
 
     def _update_po(self):
         """Force a PARTIAL PO to RECEIVED status after confirming with user."""
@@ -452,7 +496,12 @@ class POList(QWidget):
         act_open.triggered.connect(self._open)
         menu.addAction(act_open)
 
-        if status in ('SENT', 'PARTIAL'):
+        po_type = self._get_selected_type()
+        if po_type == 'RO' and status == 'SENT':
+            act_recv = QAction("✓  Close Credit Return", self)
+            act_recv.triggered.connect(self._open_receive)
+            menu.addAction(act_recv)
+        elif status in ('SENT', 'PARTIAL'):
             act_recv = QAction("📦  Receive Stock", self)
             act_recv.triggered.connect(self._open_receive)
             menu.addAction(act_recv)

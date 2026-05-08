@@ -107,9 +107,12 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     store_addr = settings.get("store_address", "")
     store_ph   = settings.get("store_phone", "")
 
+    from config.constants import PO_DOC_TITLES
+    doc_title = PO_DOC_TITLES.get(po.get("po_type", "PO"), "PURCHASE ORDER")
+
     header_data = [[
         Paragraph(store_name, st["title"]),
-        [Paragraph("PURCHASE ORDER", st["po_label"]),
+        [Paragraph(doc_title,        st["po_label"]),
          Paragraph(po["po_number"],  st["po_number"])],
     ]]
     header_tbl = Table(header_data, colWidths=[W * 0.6, W * 0.4])

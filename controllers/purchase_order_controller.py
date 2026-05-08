@@ -257,6 +257,43 @@ def close_po_force(po_id, unreceived_line_ids, reason):
         conn.close()
 
 
+def close_credit_atomic(po_id, po_number, line_receipts):
+    """
+    Close a Credit/Return PO atomically.
+    line_receipts: list of dicts with line_id, barcode, return_cartons, qty_units.
+    SOH is reduced by qty_units for each line; movements are RETURN type.
+    """
+    conn = get_connection()
+    try:
+        for r in line_receipts:
+            conn.execute(
+                "UPDATE po_lines SET received_qty=? WHERE id=?",
+                (r['return_cartons'], r['line_id'])
+            )
+            conn.execute("""
+                INSERT INTO stock_on_hand (barcode, quantity)
+                VALUES (?, ?)
+                ON CONFLICT(barcode) DO UPDATE SET
+                    quantity = quantity + excluded.quantity,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (r['barcode'], -r['qty_units']))
+            conn.execute("""
+                INSERT INTO stock_movements
+                    (barcode, movement_type, quantity, reference, notes, created_by)
+                VALUES (?, 'RETURN', ?, ?, '', '')
+            """, (r['barcode'], -r['qty_units'], po_number))
+        conn.execute(
+            "UPDATE purchase_orders SET status='CLOSED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (po_id,)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def receive_po_atomic(po_id, po_number, line_receipts, final_status):
     """
     Apply a full PO receipt in one atomic transaction.

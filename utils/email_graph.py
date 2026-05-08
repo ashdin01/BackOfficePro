@@ -163,7 +163,7 @@ def send_purchase_order(po_id: int, to_address: str, pdf_path: str) -> bool:
     from database.connection import get_connection
     conn = get_connection()
     po = conn.execute(
-        """SELECT po.po_number, s.name as supplier_name 
+        """SELECT po.po_number, po.po_type, s.name as supplier_name
    FROM purchase_orders po
    JOIN suppliers s ON po.supplier_id = s.id
    WHERE po.id=?""", (po_id,)
@@ -176,13 +176,17 @@ def send_purchase_order(po_id: int, to_address: str, pdf_path: str) -> bool:
 
     po_number     = po["po_number"] if po else f"PO-{po_id}"
     supplier      = po["supplier_name"] if po else "Supplier"
+    po_type       = (po["po_type"] if po else "PO") or "PO"
     store_name    = settings.get("store_name", "Our Store")
     store_manager = settings.get("store_manager", store_name)
 
-    subject = f"Purchase Order {po_number} — {store_name}"
+    from config.constants import PO_DOC_TITLES
+    doc_title = PO_DOC_TITLES.get(po_type, "PURCHASE ORDER").title()
+
+    subject = f"{doc_title} {po_number} — {store_name}"
     body = (
         f"Dear {supplier},\n\n"
-        f"Please find attached Purchase Order {po_number} from {store_name}.\n\n"
+        f"Please find attached {doc_title} {po_number} from {store_name}.\n\n"
         f"Kind regards,\n{store_manager}\n{store_name}"
     )
 
