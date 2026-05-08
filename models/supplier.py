@@ -25,7 +25,8 @@ def get_by_id(supplier_id):
 def add(code, name, contact_name='', phone='', account_number='',
         payment_terms='', address='', notes='', abn='', rep_name='', rep_phone='',
         order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
-        online_order=0, online_order_note='', order_days=''):
+        online_order=0, online_order_note='', order_days='',
+        order_first_monday=0, order_fortnightly_start=''):
     conn = get_connection()
     try:
         conn.execute("""
@@ -33,13 +34,15 @@ def add(code, name, contact_name='', phone='', account_number='',
                 code, name, contact_name, phone, account_number,
                 payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
                 email_orders, email_admin, email_accounts, email_rep,
-                online_order, online_order_note, order_days
+                online_order, online_order_note, order_days,
+                order_first_monday, order_fortnightly_start
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
               email_orders, email_admin, email_accounts, email_rep,
-              online_order, online_order_note, order_days))
+              online_order, online_order_note, order_days,
+              order_first_monday, order_fortnightly_start))
         conn.commit()
     finally:
         conn.close()
@@ -48,7 +51,8 @@ def add(code, name, contact_name='', phone='', account_number='',
 def update(supplier_id, code, name, contact_name, phone, account_number,
            payment_terms, address, notes, active, abn='', rep_name='', rep_phone='',
            order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
-           online_order=0, online_order_note='', order_days=''):
+           online_order=0, online_order_note='', order_days='',
+           order_first_monday=0, order_fortnightly_start=''):
     conn = get_connection()
     try:
         conn.execute("""
@@ -57,12 +61,14 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
                 account_number=?, payment_terms=?, address=?, notes=?, active=?,
                 abn=?, rep_name=?, rep_phone=?, order_minimum=?,
                 email_orders=?, email_admin=?, email_accounts=?, email_rep=?,
-                online_order=?, online_order_note=?, order_days=?
+                online_order=?, online_order_note=?, order_days=?,
+                order_first_monday=?, order_fortnightly_start=?
             WHERE id=?
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, active, abn, rep_name, rep_phone,
               order_minimum, email_orders, email_admin, email_accounts, email_rep,
               online_order, online_order_note, order_days,
+              order_first_monday, order_fortnightly_start,
               supplier_id))
         conn.commit()
     finally:
@@ -70,16 +76,48 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
 
 
 def get_order_due_today():
-    """Return active suppliers whose order_days includes today's weekday,
-    excluding any supplier that already has a SENT or CANCELLED PO updated today."""
+    """Return active suppliers with an order due today.
+
+    Checks three schedule types:
+    - Weekly: order_days contains today's weekday code ('MON', 'TUE', …)
+    - First Monday: order_first_monday=1 and today is the first Monday of the month
+    - Fortnightly: order_fortnightly_start is set and (today - start).days % 14 == 0
+    Excludes any supplier with a SENT or CANCELLED PO updated today.
+    """
     from datetime import date
-    today = date.today().strftime('%a').upper()  # 'MON','TUE','WED','THU','FRI','SAT','SUN'
+    today = date.today()
+    today_code = today.strftime('%a').upper()
+    is_first_monday = (today.weekday() == 0 and today.day <= 7)
+
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT * FROM suppliers WHERE active=1 AND order_days != '' ORDER BY name"
+            "SELECT * FROM suppliers WHERE active=1 ORDER BY name"
         ).fetchall()
-        due = [r for r in rows if today in (r['order_days'] or '').upper().split(',')]
+
+        due = []
+        for r in rows:
+            keys = r.keys()
+            # Weekly days
+            order_days = (r['order_days'] or '').upper()
+            if order_days and today_code in order_days.split(','):
+                due.append(r)
+                continue
+            # First Monday of the month
+            if is_first_monday and 'order_first_monday' in keys and r['order_first_monday']:
+                due.append(r)
+                continue
+            # Fortnightly from a fixed start date
+            fn_start = r['order_fortnightly_start'] if 'order_fortnightly_start' in keys else ''
+            if fn_start:
+                try:
+                    start = date.fromisoformat(fn_start)
+                    delta = (today - start).days
+                    if delta >= 0 and delta % 14 == 0:
+                        due.append(r)
+                        continue
+                except ValueError:
+                    pass
 
         # Exclude suppliers with a SENT or CANCELLED PO updated today
         done_ids = {

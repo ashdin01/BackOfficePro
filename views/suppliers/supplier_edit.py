@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QPushButton,
     QHBoxLayout, QVBoxLayout, QMessageBox, QCheckBox,
-    QTextEdit, QDoubleSpinBox, QGroupBox, QLabel
+    QTextEdit, QDoubleSpinBox, QGroupBox, QLabel, QDateEdit
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QDate
 from utils.keyboard_mixin import KeyboardMixin
 from utils.validators import validate_abn, validate_email, validate_phone
 from utils.error_dialog import show_error
@@ -126,6 +126,26 @@ class SupplierEdit(KeyboardMixin, QWidget):
         order_hint.setStyleSheet("color:#8b949e; font-size:11px;")
         order_form.addRow("", order_hint)
         order_form.addRow("Days", days_row)
+
+        # First Monday of the month
+        self.order_first_monday = QCheckBox("First Monday of the month")
+        order_form.addRow("", self.order_first_monday)
+
+        # Fortnightly from a fixed start date
+        fortnightly_row = QHBoxLayout()
+        fortnightly_row.setSpacing(8)
+        self.order_fortnightly = QCheckBox("Fortnightly from:")
+        self.order_fortnightly_start = QDateEdit()
+        self.order_fortnightly_start.setCalendarPopup(True)
+        self.order_fortnightly_start.setDisplayFormat("dd/MM/yyyy")
+        self.order_fortnightly_start.setDate(QDate.currentDate())
+        self.order_fortnightly_start.setEnabled(False)
+        self.order_fortnightly.toggled.connect(self.order_fortnightly_start.setEnabled)
+        fortnightly_row.addWidget(self.order_fortnightly)
+        fortnightly_row.addWidget(self.order_fortnightly_start)
+        fortnightly_row.addStretch()
+        order_form.addRow("", fortnightly_row)
+
         right.addWidget(order_group)
 
         # ── RIGHT: Online Ordering ────────────────────────────────────
@@ -208,6 +228,19 @@ class SupplierEdit(KeyboardMixin, QWidget):
         for code, cb in self._day_checks.items():
             cb.setChecked(code in saved_days.split(','))
 
+        self.order_first_monday.setChecked(
+            bool(s['order_first_monday']) if 'order_first_monday' in keys else False
+        )
+
+        fn_start = s['order_fortnightly_start'] if 'order_fortnightly_start' in keys else ''
+        if fn_start:
+            d = QDate.fromString(fn_start, "yyyy-MM-dd")
+            if d.isValid():
+                self.order_fortnightly_start.setDate(d)
+            self.order_fortnightly.setChecked(True)
+        else:
+            self.order_fortnightly.setChecked(False)
+
     def _save(self):
         code = self.code.text().strip()
         name = self.name.text().strip()
@@ -259,6 +292,11 @@ class SupplierEdit(KeyboardMixin, QWidget):
             self.abn.setText(abn)
 
         order_days = ','.join(c for c, cb in self._day_checks.items() if cb.isChecked())
+        order_first_monday = int(self.order_first_monday.isChecked())
+        order_fortnightly_start = (
+            self.order_fortnightly_start.date().toString("yyyy-MM-dd")
+            if self.order_fortnightly.isChecked() else ''
+        )
 
         try:
             if self.supplier_id:
@@ -282,6 +320,8 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     online_order=int(self.online_order.isChecked()),
                     online_order_note=self.online_order_note.toPlainText().strip(),
                     order_days=order_days,
+                    order_first_monday=order_first_monday,
+                    order_fortnightly_start=order_fortnightly_start,
                 )
             else:
                 supplier_model.add(
@@ -303,6 +343,8 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     online_order=int(self.online_order.isChecked()),
                     online_order_note=self.online_order_note.toPlainText().strip(),
                     order_days=order_days,
+                    order_first_monday=order_first_monday,
+                    order_fortnightly_start=order_fortnightly_start,
                 )
             if self.on_save:
                 self.on_save()
