@@ -144,6 +144,7 @@ class PODetail(QWidget):
         self.po_id = po_id
         self.on_save = on_save
         self._blank = blank
+        self._unit_mode = False   # True for IO/RO — qty means individual units, not cartons
         self._line_ids = []
         self._line_pack_info = []
         self._line_tax_rates = []
@@ -520,6 +521,11 @@ class PODetail(QWidget):
         from config.constants import PO_DOC_TITLES, PO_TYPES
         _po_type   = po['po_type'] or 'PO'
         _doc_title = PO_DOC_TITLES.get(_po_type, 'PURCHASE ORDER')
+        self._unit_mode = _po_type in ('IO', 'RO')
+        # Column 6 label reflects whether we're ordering in cartons or individual units
+        self.table.setHorizontalHeaderItem(6, QTableWidgetItem(
+            "Qty (Units)" if self._unit_mode else "Order Qty"
+        ))
         self.setWindowTitle(f"{_doc_title}: {po['po_number']}")
         from models.supplier import get_by_id as get_supplier
         supplier = get_supplier(po['supplier_id'])
@@ -687,11 +693,16 @@ class PODetail(QWidget):
                 rp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r, 5, rp_item)
 
-                cartons     = int(line['ordered_qty'])
-                total_units = cartons * pack_qty
-                qty_item = QTableWidgetItem(str(total_units))
+                if self._unit_mode:
+                    total_units = int(line['ordered_qty'])
+                    qty_item = QTableWidgetItem(str(total_units))
+                    qty_item.setToolTip(f"{total_units} unit(s)")
+                else:
+                    cartons     = int(line['ordered_qty'])
+                    total_units = cartons * pack_qty
+                    qty_item = QTableWidgetItem(str(total_units))
+                    qty_item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {total_units} units total")
                 qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                qty_item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {total_units} units total")
                 self.table.setItem(r, 6, qty_item)
 
                 cost_item = QTableWidgetItem(f"{line['unit_cost']:.2f}")
@@ -825,31 +836,50 @@ class PODetail(QWidget):
 
         try:
             if col == 6:
-                total_units = max(1, int(float(item.text())))
-                cartons = max(1, math.ceil(total_units / pack_qty))
-                snapped_units = cartons * pack_qty
-                self.table.blockSignals(True)
-                item.setText(str(snapped_units))
-                self.table.blockSignals(False)
-                lines_model.update(
-                    line_id,
-                    ordered_qty=cartons,
-                    unit_cost=float(self.table.item(row, 7).text().replace("$", "").strip()),
-                    notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text()),
-                )
-                item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {snapped_units} units total")
+                if self._unit_mode:
+                    # IO/RO: store exact unit quantity — no carton snapping
+                    total_units = max(1, int(float(item.text())))
+                    lines_model.update(
+                        line_id,
+                        ordered_qty=total_units,
+                        unit_cost=float(self.table.item(row, 7).text().replace("$", "").strip()),
+                        notes='',
+                    )
+                    item.setToolTip(f"{total_units} unit(s)")
+                else:
+                    total_units = max(1, int(float(item.text())))
+                    cartons = max(1, math.ceil(total_units / pack_qty))
+                    snapped_units = cartons * pack_qty
+                    self.table.blockSignals(True)
+                    item.setText(str(snapped_units))
+                    self.table.blockSignals(False)
+                    lines_model.update(
+                        line_id,
+                        ordered_qty=cartons,
+                        unit_cost=float(self.table.item(row, 7).text().replace("$", "").strip()),
+                        notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text()),
+                    )
+                    item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {snapped_units} units total")
                 self.rec_banner.setText("")
 
             elif col == 7:
                 cost = max(0.0, float(item.text().replace("$", "").strip()))
                 total_units_col = int(float(self.table.item(row, 6).text()))
-                cartons = max(1, math.ceil(total_units_col / pack_qty))
-                lines_model.update(
-                    line_id,
-                    ordered_qty=cartons,
-                    unit_cost=cost,
-                    notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text())
-                )
+                if self._unit_mode:
+                    lines_model.update(
+                        line_id,
+                        ordered_qty=total_units_col,
+                        unit_cost=cost,
+                        notes=''
+                    )
+                else:
+                    cartons = max(1, math.ceil(total_units_col / pack_qty))
+                    lines_model.update(
+                        line_id,
+                        ordered_qty=cartons,
+                        unit_cost=cost,
+                        notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text())
+                    )
 
             try:
                 total_units_now = int(float(self.table.item(row, 6).text()))
@@ -911,7 +941,8 @@ class PODetail(QWidget):
 
     def _add_line(self):
         po = po_model.get_by_id(self.po_id)
-        dlg = AddLineDialog(self.po_id, supplier_id=po["supplier_id"], parent=self)
+        dlg = AddLineDialog(self.po_id, supplier_id=po["supplier_id"],
+                            po_type=po["po_type"] or 'PO', parent=self)
         if dlg.exec():
             lines = lines_model.get_by_po(self.po_id)
             self._populate_table(lines)
@@ -986,10 +1017,11 @@ class PODetail(QWidget):
 
 
 class AddLineDialog(QDialog):
-    def __init__(self, po_id, supplier_id=None, parent=None):
+    def __init__(self, po_id, supplier_id=None, po_type='PO', parent=None):
         super().__init__(parent)
         self.po_id = po_id
         self.supplier_id = supplier_id
+        self._unit_mode = po_type in ('IO', 'RO')
         self.setWindowTitle("Add Line")
         self.setMinimumWidth(440)
         self._reorder_max = 0
@@ -1034,7 +1066,7 @@ class AddLineDialog(QDialog):
         self.qty.setMaximum(99999)
         self.qty.setDecimals(0)
         self.qty.setValue(1)
-        self.qty.setSuffix(" carton(s)")
+        self.qty.setSuffix(" unit(s)" if self._unit_mode else " carton(s)")
         self.qty.valueChanged.connect(self._update_unit_preview)
         self.qty.installEventFilter(self)
 
@@ -1054,7 +1086,7 @@ class AddLineDialog(QDialog):
         form.addRow("Description",     self.description)
         form.addRow("Stock on Hand",   self.on_hand_label)
         form.addRow("Pack Size",       self.pack_label)
-        form.addRow("Qty (Cartons) *", self.qty)
+        form.addRow("Qty (Units) *" if self._unit_mode else "Qty (Cartons) *", self.qty)
         form.addRow("",                self.unit_preview)
         form.addRow("Unit Cost",       self.unit_cost)
         form.addRow("Notes",           self.notes)
@@ -1152,10 +1184,13 @@ class AddLineDialog(QDialog):
                 f"(reorder at {reorder})"
             )
             self.pack_label.setText(f"{self._pack_qty} × {self._pack_unit} per carton")
-            soh_qty = int(soh['quantity']) if soh else 0
-            order_units = max(1, self._reorder_max - soh_qty) if self._reorder_max > 0 else self._pack_qty
-            suggested_cartons = max(1, math.ceil(order_units / self._pack_qty))
-            self.qty.setValue(suggested_cartons)
+            if self._unit_mode:
+                self.qty.setValue(1)
+            else:
+                soh_qty = int(soh['quantity']) if soh else 0
+                order_units = max(1, self._reorder_max - soh_qty) if self._reorder_max > 0 else self._pack_qty
+                suggested_cartons = max(1, math.ceil(order_units / self._pack_qty))
+                self.qty.setValue(suggested_cartons)
             self._update_unit_preview()
         else:
             self.description.clear()
@@ -1163,11 +1198,16 @@ class AddLineDialog(QDialog):
             self.on_hand_label.setText("<span style='color:red'>Product not found</span>")
 
     def _update_unit_preview(self):
-        cartons     = int(self.qty.value())
-        total_units = cartons * self._pack_qty
-        self.unit_preview.setText(
-            f"= {total_units} units  ({cartons} × {self._pack_qty} {self._pack_unit})"
-        )
+        qty = int(self.qty.value())
+        if self._unit_mode:
+            self.unit_preview.setText(
+                f"= {qty} individual unit(s)  (pack size: {self._pack_qty} {self._pack_unit})"
+            )
+        else:
+            total_units = qty * self._pack_qty
+            self.unit_preview.setText(
+                f"= {total_units} units  ({qty} × {self._pack_qty} {self._pack_unit})"
+            )
 
     def _add(self):
         barcode     = self.barcode.text().strip()
@@ -1175,15 +1215,27 @@ class AddLineDialog(QDialog):
         if not barcode or not description:
             QMessageBox.warning(self, "Validation", "Barcode and Description are required.")
             return
-        cartons = int(self.qty.value())
-        note    = _carton_note(self._pack_qty, self._pack_unit, barcode)
-        lines_model.add(
-            po_id=self.po_id,
-            barcode=barcode,
-            description=description,
-            ordered_qty=cartons,
-            unit_cost=self.unit_cost.value(),
-            notes=note,
-            pack_qty=self._pack_qty,
-        )
+        qty = int(self.qty.value())
+        if self._unit_mode:
+            # IO/RO: store exact unit count; pack_qty kept for reference only
+            lines_model.add(
+                po_id=self.po_id,
+                barcode=barcode,
+                description=description,
+                ordered_qty=qty,
+                unit_cost=self.unit_cost.value(),
+                notes='',
+                pack_qty=self._pack_qty,
+            )
+        else:
+            note = _carton_note(self._pack_qty, self._pack_unit, barcode)
+            lines_model.add(
+                po_id=self.po_id,
+                barcode=barcode,
+                description=description,
+                ordered_qty=qty,
+                unit_cost=self.unit_cost.value(),
+                notes=note,
+                pack_qty=self._pack_qty,
+            )
         self.accept()
