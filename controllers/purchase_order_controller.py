@@ -389,7 +389,7 @@ def get_milk_order_recommendations(supplier_id):
         cartons      = ceil(needed_units / pack_qty), minimum 1
     """
     from datetime import date, timedelta
-    SAFETY_DAYS  = 1
+    SAFETY_DAYS  = 2
     SALES_WINDOW = 14
 
     conn = get_connection()
