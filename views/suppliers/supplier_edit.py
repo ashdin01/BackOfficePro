@@ -127,21 +127,6 @@ class SupplierEdit(KeyboardMixin, QWidget):
         order_form.addRow("", order_hint)
         order_form.addRow("Order Days", days_row)
 
-        # Delivery days
-        delivery_days_row = QHBoxLayout()
-        delivery_days_row.setSpacing(12)
-        self._delivery_day_checks = {}
-        for code, label in [('MON','Mon'), ('TUE','Tue'), ('WED','Wed'),
-                             ('THU','Thu'), ('FRI','Fri'), ('SAT','Sat'), ('SUN','Sun')]:
-            cb = QCheckBox(label)
-            self._delivery_day_checks[code] = cb
-            delivery_days_row.addWidget(cb)
-        delivery_days_row.addStretch()
-        delivery_hint = QLabel("Days this supplier delivers (used for milk demand forecasting)")
-        delivery_hint.setStyleSheet("color:#8b949e; font-size:11px;")
-        order_form.addRow("", delivery_hint)
-        order_form.addRow("Delivery Days", delivery_days_row)
-
         # First Monday of the month
         self.order_first_monday = QCheckBox("First Monday of the month")
         order_form.addRow("", self.order_first_monday)
@@ -160,6 +145,21 @@ class SupplierEdit(KeyboardMixin, QWidget):
         fortnightly_row.addWidget(self.order_fortnightly_start)
         fortnightly_row.addStretch()
         order_form.addRow("", fortnightly_row)
+
+        # Delivery days
+        delivery_days_row = QHBoxLayout()
+        delivery_days_row.setSpacing(12)
+        self._delivery_day_checks = {}
+        for code, label in [('MON','Mon'), ('TUE','Tue'), ('WED','Wed'),
+                             ('THU','Thu'), ('FRI','Fri'), ('SAT','Sat'), ('SUN','Sun')]:
+            cb = QCheckBox(label)
+            self._delivery_day_checks[code] = cb
+            delivery_days_row.addWidget(cb)
+        delivery_days_row.addStretch()
+        delivery_hint = QLabel("Days this supplier delivers (used for milk demand forecasting)")
+        delivery_hint.setStyleSheet("color:#8b949e; font-size:11px;")
+        order_form.addRow("", delivery_hint)
+        order_form.addRow("Delivery Days", delivery_days_row)
 
         right.addWidget(order_group)
 
