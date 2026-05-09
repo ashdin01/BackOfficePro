@@ -357,6 +357,131 @@ def receive_po_atomic(po_id, po_number, line_receipts, final_status):
         conn.close()
 
 
+def _days_to_next_delivery(delivery_days_str, from_date=None):
+    """
+    Given a comma-separated delivery day string ('MON,THU'), return
+    (days_ahead, next_delivery_date) for the next upcoming delivery.
+    Never returns 0 — if delivery is today, returns 7 (next week).
+    """
+    from datetime import date, timedelta
+    if from_date is None:
+        from_date = date.today()
+    days_map = {'MON': 0, 'TUE': 1, 'WED': 2, 'THU': 3, 'FRI': 4, 'SAT': 5, 'SUN': 6}
+    codes    = [d.strip().upper() for d in delivery_days_str.split(',') if d.strip()]
+    weekdays = [days_map[d] for d in codes if d in days_map]
+    if not weekdays:
+        return 3, from_date + timedelta(days=3)
+    today_wd = from_date.weekday()
+    min_days = min(((dw - today_wd) % 7) or 7 for dw in weekdays)
+    return min_days, from_date + timedelta(days=min_days)
+
+
+def get_milk_order_recommendations(supplier_id):
+    """
+    Return demand-forecast order quantities for Dairy/Milk products linked to
+    supplier_id.  Requires delivery_days to be set on the supplier; returns []
+    if not configured (caller falls back to standard reorder logic).
+
+    Algorithm per product:
+        avg_daily    = total units sold (last 14 days) / 14
+        cover_days   = days_to_next_delivery + 1  (safety buffer)
+        needed_units = max(0, avg_daily * cover_days - current_soh)
+        cartons      = ceil(needed_units / pack_qty), minimum 1
+    """
+    from datetime import date, timedelta
+    SAFETY_DAYS  = 1
+    SALES_WINDOW = 14
+
+    conn = get_connection()
+    try:
+        sup = conn.execute(
+            "SELECT delivery_days FROM suppliers WHERE id=?", (supplier_id,)
+        ).fetchone()
+        if not sup or not (sup['delivery_days'] or '').strip():
+            return []
+
+        days_ahead, next_delivery = _days_to_next_delivery(sup['delivery_days'])
+        cover_days   = days_ahead + SAFETY_DAYS
+        today        = date.today()
+        window_start = today - timedelta(days=SALES_WINDOW)
+
+        products = conn.execute("""
+            SELECT p.barcode, p.description,
+                   COALESCE(p.cost_price, 0)   AS cost_price,
+                   COALESCE(p.pack_qty, 1)     AS pack_qty,
+                   COALESCE(p.pack_unit, 'EA') AS pack_unit,
+                   COALESCE(soh.quantity, 0)   AS on_hand,
+                   p.supplier_sku
+            FROM products p
+            JOIN product_groups  pg  ON p.group_id       = pg.id
+            JOIN departments     d   ON pg.department_id = d.id
+            LEFT JOIN stock_on_hand soh ON p.barcode     = soh.barcode
+            WHERE p.supplier_id = ?
+              AND p.active = 1
+              AND UPPER(d.name)  = 'DAIRY'
+              AND UPPER(pg.name) = 'MILK'
+            ORDER BY p.description
+        """, (supplier_id,)).fetchall()
+
+        if not products:
+            return []
+
+        barcodes = [p['barcode'] for p in products]
+        ph       = ','.join('?' * len(barcodes))
+        plu_rows = conn.execute(
+            f"SELECT barcode, plu FROM plu_barcode_map WHERE barcode IN ({ph})", barcodes
+        ).fetchall()
+        barcode_to_plu = {r['barcode']: str(r['plu']) for r in plu_rows}
+
+        # Fallback: use products.sku for any unmapped barcodes
+        for p in products:
+            if p['barcode'] not in barcode_to_plu:
+                row = conn.execute(
+                    "SELECT sku FROM products WHERE barcode=?", (p['barcode'],)
+                ).fetchone()
+                if row and row['sku']:
+                    barcode_to_plu[p['barcode']] = str(row['sku'])
+
+        plu_sales = {}
+        all_plus  = list(barcode_to_plu.values())
+        if all_plus:
+            ph2 = ','.join('?' * len(all_plus))
+            for row in conn.execute(f"""
+                SELECT plu, COALESCE(SUM(quantity), 0) AS total
+                FROM sales_daily
+                WHERE plu IN ({ph2}) AND sale_date BETWEEN ? AND ?
+                GROUP BY plu
+            """, all_plus + [str(window_start), str(today)]).fetchall():
+                plu_sales[row['plu']] = float(row['total'])
+
+        recs = []
+        for p in products:
+            plu          = barcode_to_plu.get(p['barcode'])
+            total_14day  = plu_sales.get(plu, 0.0) if plu else 0.0
+            avg_daily    = total_14day / SALES_WINDOW
+            needed_units = max(0.0, avg_daily * cover_days - float(p['on_hand']))
+            pack_qty     = max(1, int(p['pack_qty']))
+            cartons      = max(1, math.ceil(needed_units / pack_qty))
+            recs.append({
+                'barcode':          p['barcode'],
+                'description':      p['description'],
+                'cost_price':       p['cost_price'],
+                'pack_qty':         pack_qty,
+                'pack_unit':        p['pack_unit'],
+                'on_hand':          float(p['on_hand']),
+                'supplier_sku':     p['supplier_sku'],
+                'cartons':          cartons,
+                'avg_daily':        round(avg_daily, 1),
+                'cover_days':       cover_days,
+                'days_to_delivery': days_ahead,
+                'next_delivery':    next_delivery,
+                'has_sales_data':   plu is not None and total_14day > 0,
+            })
+        return recs
+    finally:
+        conn.close()
+
+
 def cartons_needed(reorder_qty, pack_qty):
     pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
     return max(1, math.ceil(reorder_qty / pack_qty))

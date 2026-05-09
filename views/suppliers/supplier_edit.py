@@ -125,7 +125,22 @@ class SupplierEdit(KeyboardMixin, QWidget):
         order_hint = QLabel("Days an order should be placed with this supplier")
         order_hint.setStyleSheet("color:#8b949e; font-size:11px;")
         order_form.addRow("", order_hint)
-        order_form.addRow("Days", days_row)
+        order_form.addRow("Order Days", days_row)
+
+        # Delivery days
+        delivery_days_row = QHBoxLayout()
+        delivery_days_row.setSpacing(12)
+        self._delivery_day_checks = {}
+        for code, label in [('MON','Mon'), ('TUE','Tue'), ('WED','Wed'),
+                             ('THU','Thu'), ('FRI','Fri'), ('SAT','Sat'), ('SUN','Sun')]:
+            cb = QCheckBox(label)
+            self._delivery_day_checks[code] = cb
+            delivery_days_row.addWidget(cb)
+        delivery_days_row.addStretch()
+        delivery_hint = QLabel("Days this supplier delivers (used for milk demand forecasting)")
+        delivery_hint.setStyleSheet("color:#8b949e; font-size:11px;")
+        order_form.addRow("", delivery_hint)
+        order_form.addRow("Delivery Days", delivery_days_row)
 
         # First Monday of the month
         self.order_first_monday = QCheckBox("First Monday of the month")
@@ -228,6 +243,10 @@ class SupplierEdit(KeyboardMixin, QWidget):
         for code, cb in self._day_checks.items():
             cb.setChecked(code in saved_days.split(','))
 
+        saved_delivery = (s['delivery_days'] if 'delivery_days' in keys and s['delivery_days'] else '').upper()
+        for code, cb in self._delivery_day_checks.items():
+            cb.setChecked(code in saved_delivery.split(','))
+
         self.order_first_monday.setChecked(
             bool(s['order_first_monday']) if 'order_first_monday' in keys else False
         )
@@ -292,6 +311,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
             self.abn.setText(abn)
 
         order_days = ','.join(c for c, cb in self._day_checks.items() if cb.isChecked())
+        delivery_days = ','.join(c for c, cb in self._delivery_day_checks.items() if cb.isChecked())
         order_first_monday = int(self.order_first_monday.isChecked())
         order_fortnightly_start = (
             self.order_fortnightly_start.date().toString("yyyy-MM-dd")
@@ -322,6 +342,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     order_days=order_days,
                     order_first_monday=order_first_monday,
                     order_fortnightly_start=order_fortnightly_start,
+                    delivery_days=delivery_days,
                 )
             else:
                 supplier_model.add(
@@ -345,6 +366,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     order_days=order_days,
                     order_first_monday=order_first_monday,
                     order_fortnightly_start=order_fortnightly_start,
+                    delivery_days=delivery_days,
                 )
             if self.on_save:
                 self.on_save()

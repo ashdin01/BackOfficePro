@@ -96,6 +96,9 @@ def apply_migrations():
         if current < 24:
             migrate_v24(conn)
             logging.info("Migration v24 applied: order_first_monday, order_fortnightly_start on suppliers")
+        if current < 25:
+            migrate_v25(conn)
+            logging.info("Migration v25 applied: delivery_days on suppliers")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -394,4 +397,11 @@ def migrate_v24(conn):
     _add_column(conn, "ALTER TABLE suppliers ADD COLUMN order_first_monday INTEGER NOT NULL DEFAULT 0")
     _add_column(conn, "ALTER TABLE suppliers ADD COLUMN order_fortnightly_start TEXT DEFAULT ''")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '24')")
+    conn.commit()
+
+
+def migrate_v25(conn):
+    """Add delivery_days to suppliers for milk demand forecasting."""
+    _add_column(conn, "ALTER TABLE suppliers ADD COLUMN delivery_days TEXT DEFAULT ''")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '25')")
     conn.commit()

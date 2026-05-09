@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
     online_order_note   TEXT    DEFAULT '',
     order_days              TEXT    DEFAULT '',
     order_first_monday      INTEGER NOT NULL DEFAULT 0,
-    order_fortnightly_start TEXT    DEFAULT ''
+    order_fortnightly_start TEXT    DEFAULT '',
+    delivery_days           TEXT    DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS product_suppliers (

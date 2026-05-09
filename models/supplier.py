@@ -26,7 +26,7 @@ def add(code, name, contact_name='', phone='', account_number='',
         payment_terms='', address='', notes='', abn='', rep_name='', rep_phone='',
         order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
         online_order=0, online_order_note='', order_days='',
-        order_first_monday=0, order_fortnightly_start=''):
+        order_first_monday=0, order_fortnightly_start='', delivery_days=''):
     conn = get_connection()
     try:
         conn.execute("""
@@ -35,14 +35,14 @@ def add(code, name, contact_name='', phone='', account_number='',
                 payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
                 email_orders, email_admin, email_accounts, email_rep,
                 online_order, online_order_note, order_days,
-                order_first_monday, order_fortnightly_start
+                order_first_monday, order_fortnightly_start, delivery_days
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, abn, rep_name, rep_phone, order_minimum,
               email_orders, email_admin, email_accounts, email_rep,
               online_order, online_order_note, order_days,
-              order_first_monday, order_fortnightly_start))
+              order_first_monday, order_fortnightly_start, delivery_days))
         conn.commit()
     finally:
         conn.close()
@@ -52,7 +52,7 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
            payment_terms, address, notes, active, abn='', rep_name='', rep_phone='',
            order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
            online_order=0, online_order_note='', order_days='',
-           order_first_monday=0, order_fortnightly_start=''):
+           order_first_monday=0, order_fortnightly_start='', delivery_days=''):
     conn = get_connection()
     try:
         conn.execute("""
@@ -62,13 +62,13 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
                 abn=?, rep_name=?, rep_phone=?, order_minimum=?,
                 email_orders=?, email_admin=?, email_accounts=?, email_rep=?,
                 online_order=?, online_order_note=?, order_days=?,
-                order_first_monday=?, order_fortnightly_start=?
+                order_first_monday=?, order_fortnightly_start=?, delivery_days=?
             WHERE id=?
         """, (code.upper(), name, contact_name, phone, account_number,
               payment_terms, address, notes, active, abn, rep_name, rep_phone,
               order_minimum, email_orders, email_admin, email_accounts, email_rep,
               online_order, online_order_note, order_days,
-              order_first_monday, order_fortnightly_start,
+              order_first_monday, order_fortnightly_start, delivery_days,
               supplier_id))
         conn.commit()
     finally:

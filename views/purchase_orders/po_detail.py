@@ -561,16 +561,47 @@ class PODetail(QWidget):
         self._populate_table(lines)
 
     def _auto_load_recommendations(self):
-        recs = po_controller.get_reorder_recommendations(self._po['supplier_id'])
-        if not recs:
-            self.rec_banner.setText("✓ All stock levels are above reorder points for this supplier.")
-            return
+        supplier_id = self._po['supplier_id']
+        banner_parts = []
+
+        # ── Milk demand forecast (Dairy/Milk products with delivery days set) ──
+        milk_recs = po_controller.get_milk_order_recommendations(supplier_id)
+        milk_barcodes = set()
+        if milk_recs:
+            first = milk_recs[0]
+            delivery_str = first['next_delivery'].strftime('%a %-d %b')
+            for r in milk_recs:
+                note = (
+                    f"🥛 Milk forecast: avg {r['avg_daily']}/day × {r['cover_days']} days "
+                    f"(delivery {delivery_str} + {1} day buffer)  |  SOH: {int(r['on_hand'])}  |  "
+                    f"{r['pack_qty']} × {r['pack_unit']}"
+                )
+                if not r['has_sales_data']:
+                    note += "  ⚠ no sales history — defaulting to 1 carton"
+                lines_model.add(
+                    po_id=self.po_id,
+                    barcode=r['barcode'],
+                    description=r['description'],
+                    ordered_qty=r['cartons'],
+                    unit_cost=r['cost_price'],
+                    notes=note,
+                    pack_qty=r['pack_qty'],
+                )
+                milk_barcodes.add(r['barcode'])
+            banner_parts.append(
+                f"🥛 {len(milk_recs)} milk line(s) — covering {first['days_to_delivery']} days "
+                f"to delivery ({delivery_str}) + 1 day buffer"
+            )
+
+        # ── Standard reorder point recommendations (skip milk products) ──────
+        recs = po_controller.get_reorder_recommendations(supplier_id)
+        recs = [r for r in recs if r['barcode'] not in milk_barcodes]
         for r in recs:
-            pack_qty = int(r['pack_qty']) if r['pack_qty'] else 1
+            pack_qty  = int(r['pack_qty']) if r['pack_qty'] else 1
             pack_unit = r['pack_unit'] or 'EA'
             order_units = _calc_order_units(r['reorder_max'], 0, r['on_hand'])
-            cartons = _cartons_needed(order_units, pack_qty)
-            note = _carton_note(pack_qty, pack_unit, r['barcode'])
+            cartons     = _cartons_needed(order_units, pack_qty)
+            note        = _carton_note(pack_qty, pack_unit, r['barcode'])
             lines_model.add(
                 po_id=self.po_id,
                 barcode=r['barcode'],
@@ -580,8 +611,11 @@ class PODetail(QWidget):
                 notes=note,
                 pack_qty=pack_qty,
             )
-        # ── Also add any auto_reorder products not already on PO ─────
-        auto_rows = po_controller.get_auto_reorder_items(self._po['supplier_id'])
+        if recs:
+            banner_parts.append(f"💡 {len(recs)} reorder line(s) from reorder points")
+
+        # ── Auto-reorder items not yet on PO ────────────────────────────────
+        auto_rows = po_controller.get_auto_reorder_items(supplier_id)
         existing_barcodes = {l['barcode'] for l in lines_model.get_by_po(self.po_id)}
         auto_added = 0
         for ar in auto_rows:
@@ -599,10 +633,13 @@ class PODetail(QWidget):
                 pack_qty=auto_pack_qty,
             )
             auto_added += 1
-        _banner = f"💡 {len(recs)} line(s) auto-loaded from reorder points."
         if auto_added:
-            _banner += f"  |  {auto_added} on-reorder item(s) added at 1 carton."
-        self.rec_banner.setText(_banner)
+            banner_parts.append(f"{auto_added} on-reorder item(s) at 1 carton")
+
+        if not banner_parts:
+            self.rec_banner.setText("✓ All stock levels are above reorder points for this supplier.")
+        else:
+            self.rec_banner.setText("  |  ".join(banner_parts))
 
     def _reload_recommendations(self):
         recs = po_controller.get_reorder_recommendations(self._po['supplier_id'])
