@@ -119,12 +119,15 @@ def get_order_due_today():
                 except ValueError:
                     pass
 
-        # Exclude suppliers with a SENT or CANCELLED PO updated today
+        # Suppress prompt if a DRAFT or SENT PO exists created/updated within the last 2 days
         done_ids = {
             r[0] for r in conn.execute("""
                 SELECT DISTINCT supplier_id FROM purchase_orders
-                WHERE status IN ('SENT', 'CANCELLED')
-                AND DATE(updated_at) = DATE('now')
+                WHERE status IN ('DRAFT', 'SENT')
+                AND (
+                    DATE(COALESCE(updated_at, created_at)) >= DATE('now', '-1 day')
+                    OR DATE(created_at) >= DATE('now', '-1 day')
+                )
             """).fetchall()
         }
         return [r for r in due if r['id'] not in done_ids]
