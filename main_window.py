@@ -47,12 +47,12 @@ class MainWindow(QMainWindow):
             ("&Suppliers",         2),
             ("&Departments",       3),
             ("Purchase &Orders",   4),
+            ("A/Recei&vable",     10),
             ("&Reports",           5),
             ("Stockta&ke",         6),
             ("Stock &Adjust",      7),
             ("&Sales",             8),
             ("Bun&dles",           9),
-            ("A/&Receivable",     10),
         ]
         is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
         # STAFF can only see: Home, Products, Reports, Sales
