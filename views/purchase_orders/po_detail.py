@@ -570,11 +570,14 @@ class PODetail(QWidget):
         if milk_recs:
             first = milk_recs[0]
             delivery_str = first['next_delivery'].strftime('%a %-d %b')
+            safety = first['cover_days'] - first['days_to_delivery']
             for r in milk_recs:
+                on_order_str = f"  |  On order: {int(r['on_order'])}" if r['on_order'] > 0 else ""
                 note = (
                     f"🥛 Milk forecast: avg {r['avg_daily']}/day × {r['cover_days']} days "
-                    f"(delivery {delivery_str} + {1} day buffer)  |  SOH: {int(r['on_hand'])}  |  "
-                    f"{r['pack_qty']} × {r['pack_unit']}"
+                    f"(delivery {delivery_str} + {safety} day buffer)"
+                    f"  |  SOH: {int(r['on_hand'])}{on_order_str}"
+                    f"  |  {r['pack_qty']} × {r['pack_unit']}"
                 )
                 if not r['has_sales_data']:
                     note += "  ⚠ no sales history — defaulting to 1 carton"
@@ -590,7 +593,7 @@ class PODetail(QWidget):
                 milk_barcodes.add(r['barcode'])
             banner_parts.append(
                 f"🥛 {len(milk_recs)} milk line(s) — covering {first['days_to_delivery']} days "
-                f"to delivery ({delivery_str}) + 1 day buffer"
+                f"to delivery ({delivery_str}) + {first['cover_days'] - first['days_to_delivery']} day buffer"
             )
 
         # ── Standard reorder point recommendations (skip milk products) ──────
@@ -599,7 +602,7 @@ class PODetail(QWidget):
         for r in recs:
             pack_qty  = int(r['pack_qty']) if r['pack_qty'] else 1
             pack_unit = r['pack_unit'] or 'EA'
-            order_units = _calc_order_units(r['reorder_max'], 0, r['on_hand'])
+            order_units = _calc_order_units(r['reorder_max'], 0, r['effective_stock'])
             cartons     = _cartons_needed(order_units, pack_qty)
             note        = _carton_note(pack_qty, pack_unit, r['barcode'])
             lines_model.add(
@@ -654,7 +657,7 @@ class PODetail(QWidget):
         for r in new_recs:
             pack_qty = int(r['pack_qty']) if r['pack_qty'] else 1
             pack_unit = r['pack_unit'] or 'EA'
-            order_units = _calc_order_units(r['reorder_max'], 0, r['on_hand'])
+            order_units = _calc_order_units(r['reorder_max'], 0, r['effective_stock'])
             cartons = _cartons_needed(order_units, pack_qty)
             note = _carton_note(pack_qty, pack_unit, r['barcode'])
             lines_model.add(

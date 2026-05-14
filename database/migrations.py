@@ -99,6 +99,12 @@ def apply_migrations():
         if current < 25:
             migrate_v25(conn)
             logging.info("Migration v25 applied: delivery_days on suppliers")
+        if current < 26:
+            migrate_v26(conn)
+            logging.info("Migration v26 applied: customers table")
+        if current < 27:
+            migrate_v27(conn)
+            logging.info("Migration v27 applied: ar_invoices, ar_invoice_lines, ar_payments, ar_credit_notes")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -404,4 +410,112 @@ def migrate_v25(conn):
     """Add delivery_days to suppliers for milk demand forecasting."""
     _add_column(conn, "ALTER TABLE suppliers ADD COLUMN delivery_days TEXT DEFAULT ''")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '25')")
+    conn.commit()
+
+
+def migrate_v26(conn):
+    """Add customers table for accounts receivable."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS customers (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            code                TEXT NOT NULL UNIQUE,
+            name                TEXT NOT NULL,
+            abn                 TEXT DEFAULT '',
+            address_line1       TEXT DEFAULT '',
+            address_line2       TEXT DEFAULT '',
+            suburb              TEXT DEFAULT '',
+            state               TEXT DEFAULT '',
+            postcode            TEXT DEFAULT '',
+            email               TEXT DEFAULT '',
+            phone               TEXT DEFAULT '',
+            contact_name        TEXT DEFAULT '',
+            payment_terms_days  INTEGER NOT NULL DEFAULT 37,
+            credit_limit        REAL DEFAULT 0,
+            active              INTEGER NOT NULL DEFAULT 1,
+            notes               TEXT DEFAULT '',
+            created_at          TEXT DEFAULT (datetime('now','localtime')),
+            updated_at          TEXT DEFAULT (datetime('now','localtime'))
+        )
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '26')")
+    conn.commit()
+
+
+def migrate_v27(conn):
+    """Add AR invoices, lines, payments, credit notes tables."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS ar_invoices (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_number  TEXT NOT NULL UNIQUE,
+            customer_id     INTEGER NOT NULL,
+            invoice_date    TEXT NOT NULL,
+            due_date        TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'DRAFT',
+            subtotal        REAL NOT NULL DEFAULT 0,
+            gst_amount      REAL NOT NULL DEFAULT 0,
+            total           REAL NOT NULL DEFAULT 0,
+            amount_paid     REAL NOT NULL DEFAULT 0,
+            notes           TEXT DEFAULT '',
+            created_by      TEXT DEFAULT '',
+            exported_to_myob INTEGER NOT NULL DEFAULT 0,
+            created_at      TEXT DEFAULT (datetime('now','localtime')),
+            updated_at      TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (customer_id) REFERENCES customers(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS ar_invoice_lines (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id      INTEGER NOT NULL,
+            barcode         TEXT DEFAULT '',
+            description     TEXT NOT NULL,
+            quantity        REAL NOT NULL DEFAULT 1,
+            unit_price      REAL NOT NULL DEFAULT 0,
+            discount_pct    REAL NOT NULL DEFAULT 0,
+            gst_rate        REAL NOT NULL DEFAULT 10,
+            line_subtotal   REAL NOT NULL DEFAULT 0,
+            line_gst        REAL NOT NULL DEFAULT 0,
+            line_total      REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY (invoice_id) REFERENCES ar_invoices(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS ar_payments (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id      INTEGER NOT NULL,
+            customer_id     INTEGER NOT NULL,
+            payment_date    TEXT NOT NULL,
+            amount          REAL NOT NULL,
+            method          TEXT NOT NULL DEFAULT 'EFT',
+            reference       TEXT DEFAULT '',
+            notes           TEXT DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (invoice_id)  REFERENCES ar_invoices(id),
+            FOREIGN KEY (customer_id) REFERENCES customers(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS ar_credit_notes (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            credit_note_number  TEXT NOT NULL UNIQUE,
+            customer_id         INTEGER NOT NULL,
+            invoice_id          INTEGER DEFAULT NULL,
+            date                TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'DRAFT',
+            subtotal            REAL NOT NULL DEFAULT 0,
+            gst_amount          REAL NOT NULL DEFAULT 0,
+            total               REAL NOT NULL DEFAULT 0,
+            reason              TEXT DEFAULT '',
+            created_at          TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (invoice_id)  REFERENCES ar_invoices(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ar_invoices_customer ON ar_invoices(customer_id);
+        CREATE INDEX IF NOT EXISTS idx_ar_invoices_status   ON ar_invoices(status);
+        CREATE INDEX IF NOT EXISTS idx_ar_invoice_lines_inv ON ar_invoice_lines(invoice_id);
+        CREATE INDEX IF NOT EXISTS idx_ar_payments_invoice  ON ar_payments(invoice_id);
+        CREATE INDEX IF NOT EXISTS idx_ar_credit_notes_cust ON ar_credit_notes(customer_id);
+    """)
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ar_next_invoice_number', '1')")
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ar_next_credit_number', '1')")
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ar_invoice_pdf_path', '')")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '27')")
     conn.commit()

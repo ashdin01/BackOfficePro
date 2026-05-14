@@ -42,16 +42,17 @@ class MainWindow(QMainWindow):
 
         self.nav_buttons = []
         nav_items = [
-            ("&Home",            0),
-            ("&Products",        1),
-            ("&Suppliers",       2),
-            ("&Departments",     3),
-            ("Purchase &Orders", 4),
-            ("&Reports",         5),
-            ("Stockta&ke",       6),
-            ("Stock &Adjust",    7),
-            ("&Sales",           8),
-            ("Bun&dles",         9),
+            ("&Home",              0),
+            ("&Products",          1),
+            ("&Suppliers",         2),
+            ("&Departments",       3),
+            ("Purchase &Orders",   4),
+            ("&Reports",           5),
+            ("Stockta&ke",         6),
+            ("Stock &Adjust",      7),
+            ("&Sales",             8),
+            ("Bun&dles",           9),
+            ("A/&Receivable",     10),
         ]
         is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
         # STAFF can only see: Home, Products, Reports, Sales
@@ -186,6 +187,7 @@ class MainWindow(QMainWindow):
         from views.stock_adjust.stock_adjust_view import StockAdjustView
         from views.reports.sales_report_view import SalesReportView
         from views.bundles.bundle_list import BundleList
+        from views.ar.invoice_list import InvoiceList
 
         self.screens = [
             HomeScreen(on_navigate=self._switch),   # index 0
@@ -198,6 +200,7 @@ class MainWindow(QMainWindow):
             StockAdjustView(current_user=self.current_user),  # index 7
             SalesReportView(),                       # index 8
             BundleList(),                            # index 9
+            InvoiceList(),                           # index 10
         ]
         for screen in self.screens:
             self.stack.addWidget(screen)
@@ -212,6 +215,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("K"),      self, lambda: self._switch(6))
         QShortcut(QKeySequence("A"),      self, lambda: self._switch(7))
         QShortcut(QKeySequence("L"),      self, lambda: self._switch(8))
+        QShortcut(QKeySequence("V"),      self, lambda: self._switch(10))
 
         self._switch(0)
 

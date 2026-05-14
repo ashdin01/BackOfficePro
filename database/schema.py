@@ -285,15 +285,109 @@ CREATE TABLE IF NOT EXISTS settings (
     description     TEXT
 );
 
+CREATE TABLE IF NOT EXISTS customers (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    code                TEXT NOT NULL UNIQUE,
+    name                TEXT NOT NULL,
+    abn                 TEXT DEFAULT '',
+    address_line1       TEXT DEFAULT '',
+    address_line2       TEXT DEFAULT '',
+    suburb              TEXT DEFAULT '',
+    state               TEXT DEFAULT '',
+    postcode            TEXT DEFAULT '',
+    email               TEXT DEFAULT '',
+    phone               TEXT DEFAULT '',
+    contact_name        TEXT DEFAULT '',
+    payment_terms_days  INTEGER NOT NULL DEFAULT 37,
+    credit_limit        REAL DEFAULT 0,
+    active              INTEGER NOT NULL DEFAULT 1,
+    notes               TEXT DEFAULT '',
+    created_at          TEXT DEFAULT (datetime('now','localtime')),
+    updated_at          TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS ar_invoices (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_number  TEXT NOT NULL UNIQUE,
+    customer_id     INTEGER NOT NULL,
+    invoice_date    TEXT NOT NULL,
+    due_date        TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'DRAFT',
+    subtotal        REAL NOT NULL DEFAULT 0,
+    gst_amount      REAL NOT NULL DEFAULT 0,
+    total           REAL NOT NULL DEFAULT 0,
+    amount_paid     REAL NOT NULL DEFAULT 0,
+    notes           TEXT DEFAULT '',
+    created_by      TEXT DEFAULT '',
+    exported_to_myob INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT DEFAULT (datetime('now','localtime')),
+    updated_at      TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+CREATE TABLE IF NOT EXISTS ar_invoice_lines (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id      INTEGER NOT NULL,
+    barcode         TEXT DEFAULT '',
+    description     TEXT NOT NULL,
+    quantity        REAL NOT NULL DEFAULT 1,
+    unit_price      REAL NOT NULL DEFAULT 0,
+    discount_pct    REAL NOT NULL DEFAULT 0,
+    gst_rate        REAL NOT NULL DEFAULT 10,
+    line_subtotal   REAL NOT NULL DEFAULT 0,
+    line_gst        REAL NOT NULL DEFAULT 0,
+    line_total      REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (invoice_id) REFERENCES ar_invoices(id)
+);
+
+CREATE TABLE IF NOT EXISTS ar_payments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id      INTEGER NOT NULL,
+    customer_id     INTEGER NOT NULL,
+    payment_date    TEXT NOT NULL,
+    amount          REAL NOT NULL,
+    method          TEXT NOT NULL DEFAULT 'EFT',
+    reference       TEXT DEFAULT '',
+    notes           TEXT DEFAULT '',
+    created_at      TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (invoice_id) REFERENCES ar_invoices(id),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+CREATE TABLE IF NOT EXISTS ar_credit_notes (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    credit_note_number  TEXT NOT NULL UNIQUE,
+    customer_id         INTEGER NOT NULL,
+    invoice_id          INTEGER DEFAULT NULL,
+    date                TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'DRAFT',
+    subtotal            REAL NOT NULL DEFAULT 0,
+    gst_amount          REAL NOT NULL DEFAULT 0,
+    total               REAL NOT NULL DEFAULT 0,
+    reason              TEXT DEFAULT '',
+    created_at          TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (customer_id) REFERENCES customers(id),
+    FOREIGN KEY (invoice_id)  REFERENCES ar_invoices(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ar_invoices_customer   ON ar_invoices(customer_id);
+CREATE INDEX IF NOT EXISTS idx_ar_invoices_status     ON ar_invoices(status);
+CREATE INDEX IF NOT EXISTS idx_ar_invoice_lines_inv   ON ar_invoice_lines(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_ar_payments_invoice    ON ar_payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_ar_credit_notes_cust   ON ar_credit_notes(customer_id);
+
 INSERT OR IGNORE INTO settings (key, value, description) VALUES
-    ('store_name',     'My Supermarket', 'Store trading name'),
-    ('store_address',  '',               'Store address'),
-    ('store_phone',    '',               'Store phone number'),
-    ('store_abn',      '',               'Australian Business Number'),
-    ('gst_rate',       '10.0',           'Default GST rate percentage'),
-    ('currency',       'AUD',            'Currency code'),
-    ('po_prefix',      'PO',             'Purchase order number prefix'),
-    ('po_next_number', '1',              'Next PO sequence number'),
-    ('po_pdf_path',    '',               'Folder path for exported PO PDFs'),
-    ('schema_version', '22',             'Database schema version');
+    ('store_name',          'My Supermarket', 'Store trading name'),
+    ('store_address',       '',               'Store address'),
+    ('store_phone',         '',               'Store phone number'),
+    ('store_abn',           '',               'Australian Business Number'),
+    ('gst_rate',            '10.0',           'Default GST rate percentage'),
+    ('currency',            'AUD',            'Currency code'),
+    ('po_prefix',           'PO',             'Purchase order number prefix'),
+    ('po_next_number',      '1',              'Next PO sequence number'),
+    ('po_pdf_path',         '',               'Folder path for exported PO PDFs'),
+    ('ar_next_invoice_number', '1',           'Next AR invoice sequence number'),
+    ('ar_next_credit_number',  '1',           'Next AR credit note sequence number'),
+    ('ar_invoice_pdf_path', '',               'Folder path for exported invoice PDFs'),
+    ('schema_version',      '27',             'Database schema version');
 """

@@ -5,15 +5,47 @@ import models.purchase_order as po_model
 import models.po_lines as lines_model
 
 
+def _on_order_units(conn, barcodes):
+    """
+    Units already committed on open (DRAFT/SENT) POs, keyed by barcode.
+    For standard POs ordered_qty is cartons → multiply by pack_qty.
+    For IO/RO POs ordered_qty is already units.
+    """
+    if not barcodes:
+        return {}
+    ph = ','.join('?' * len(barcodes))
+    rows = conn.execute(f"""
+        SELECT pl.barcode,
+               COALESCE(SUM(
+                   CASE WHEN po.po_type IN ('IO', 'RO')
+                        THEN MAX(0.0, pl.ordered_qty - pl.received_qty)
+                        ELSE MAX(0.0, pl.ordered_qty - pl.received_qty)
+                             * COALESCE(p.pack_qty, 1)
+                   END
+               ), 0.0) AS on_order_units
+        FROM po_lines pl
+        JOIN purchase_orders po ON pl.po_id = po.id
+        JOIN products p ON pl.barcode = p.barcode
+        WHERE po.status IN ('DRAFT', 'SENT')
+          AND pl.barcode IN ({ph})
+        GROUP BY pl.barcode
+    """, barcodes).fetchall()
+    result = {b: 0.0 for b in barcodes}
+    for r in rows:
+        result[r['barcode']] = float(r['on_order_units'])
+    return result
+
+
 def get_reorder_recommendations(supplier_id):
     """
-    Products linked to supplier_id whose stock is at or below their reorder point.
-    Returns rows with barcode, description, reorder_point, reorder_max, cost_price,
-    on_hand, pack_qty, pack_unit, supplier_sku.
+    Products linked to supplier_id whose effective stock (SOH + on open POs)
+    is at or below their reorder point.
+    Returns dicts with barcode, description, reorder_point, reorder_max,
+    cost_price, on_hand, on_order, effective_stock, pack_qty, pack_unit, supplier_sku.
     """
     conn = get_connection()
     try:
-        return conn.execute("""
+        rows = conn.execute("""
             SELECT p.barcode, p.description, p.reorder_point,
                    COALESCE(p.reorder_max, 0) AS reorder_max,
                    p.cost_price, COALESCE(s.quantity, 0) AS on_hand,
@@ -28,6 +60,22 @@ def get_reorder_recommendations(supplier_id):
               AND p.reorder_point > 0
             ORDER BY p.description
         """, (supplier_id,)).fetchall()
+
+        if not rows:
+            return []
+
+        barcodes   = [r['barcode'] for r in rows]
+        on_order   = _on_order_units(conn, barcodes)
+        result     = []
+        for r in rows:
+            on_order_qty    = on_order.get(r['barcode'], 0.0)
+            effective_stock = float(r['on_hand']) + on_order_qty
+            if effective_stock <= float(r['reorder_point']):
+                d = dict(r)
+                d['on_order']       = on_order_qty
+                d['effective_stock'] = effective_stock
+                result.append(d)
+        return result
     finally:
         conn.close()
 
@@ -426,6 +474,8 @@ def get_milk_order_recommendations(supplier_id):
         if not products:
             return []
 
+        milk_on_order = _on_order_units(conn, [p['barcode'] for p in products])
+
         barcodes = [p['barcode'] for p in products]
         ph       = ','.join('?' * len(barcodes))
         plu_rows = conn.execute(
@@ -456,19 +506,24 @@ def get_milk_order_recommendations(supplier_id):
 
         recs = []
         for p in products:
-            plu          = barcode_to_plu.get(p['barcode'])
-            total_14day  = plu_sales.get(plu, 0.0) if plu else 0.0
-            avg_daily    = total_14day / SALES_WINDOW
-            needed_units = max(0.0, avg_daily * cover_days - float(p['on_hand']))
-            pack_qty     = max(1, int(p['pack_qty']))
-            cartons      = max(1, math.ceil(needed_units / pack_qty))
+            plu              = barcode_to_plu.get(p['barcode'])
+            total_14day      = plu_sales.get(plu, 0.0) if plu else 0.0
+            avg_daily        = total_14day / SALES_WINDOW
+            on_hand          = float(p['on_hand'])
+            on_order         = milk_on_order.get(p['barcode'], 0.0)
+            effective_stock  = on_hand + on_order
+            needed_units     = max(0.0, avg_daily * cover_days - effective_stock)
+            pack_qty         = max(1, int(p['pack_qty']))
+            cartons          = max(1, math.ceil(needed_units / pack_qty))
             recs.append({
                 'barcode':          p['barcode'],
                 'description':      p['description'],
                 'cost_price':       p['cost_price'],
                 'pack_qty':         pack_qty,
                 'pack_unit':        p['pack_unit'],
-                'on_hand':          float(p['on_hand']),
+                'on_hand':          on_hand,
+                'on_order':         on_order,
+                'effective_stock':  effective_stock,
                 'supplier_sku':     p['supplier_sku'],
                 'cartons':          cartons,
                 'avg_daily':        round(avg_daily, 1),

@@ -193,10 +193,18 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
 
         cartons     = int(line["ordered_qty"])
         total_units = cartons * pack_qty
-        unit_cost   = float(line["unit_cost"])
-        line_total  = total_units * unit_cost
-        fixed_total += line_total
-        gst_total   += gst_on_ex(line_total, tax_rate)
+
+        raw_cost = line["unit_cost"]
+        try:
+            unit_cost      = float(raw_cost)
+            line_total     = total_units * unit_cost
+            fixed_total   += line_total
+            gst_total     += gst_on_ex(line_total, tax_rate)
+            cost_str       = f"${unit_cost:.2f}"
+            total_str      = f"${line_total:.2f}"
+        except (TypeError, ValueError):
+            cost_str  = str(raw_cost) if raw_cost else "—"
+            total_str = "—"
 
         desc_para = Paragraph(
             f'{line["description"]}<br/>'
@@ -211,11 +219,11 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
 
         tbl_data.append([
             desc_para,
-            Paragraph(sup_sku or "—",       st["small"]),
-            Paragraph(pack_str,             st["small"]),
-            Paragraph(qty_str,              st["ctr"]),
-            Paragraph(f"${unit_cost:.2f}",  st["right"]),
-            Paragraph(f"${line_total:.2f}", st["right"]),
+            Paragraph(sup_sku or "—", st["small"]),
+            Paragraph(pack_str,       st["small"]),
+            Paragraph(qty_str,        st["ctr"]),
+            Paragraph(cost_str,       st["right"]),
+            Paragraph(total_str,      st["right"]),
         ])
 
     lines_tbl = Table(tbl_data, colWidths=col_widths, repeatRows=1)
