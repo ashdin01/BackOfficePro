@@ -128,5 +128,5 @@ class TestPoHistoryCSVBankDetails:
         out = str(tmp_path / 'out.csv')
         _export_csv(widget, _mod, out)
         labels = _all_labels(_read_csv(out))
-        for expected in ('PO Number', 'Supplier', 'Status', 'Delivery Date'):
+        for expected in ('PO Number', 'Supplier', 'Status', 'Received Date'):
             assert expected in labels

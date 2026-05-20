@@ -7,3 +7,4 @@ requests
 keyring
 pytest>=7.4.0
 pytest-cov>=4.1.0
+pytest-qt>=4.2.0
