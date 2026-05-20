@@ -185,6 +185,15 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     gst_total   = 0.0
 
     for line in lines:
+        # ── Note line — span description column, skip numeric columns ────
+        if line["is_note"]:
+            note_para = Paragraph(
+                f'<i><font color="#888888">📝  {line["description"]}</font></i>',
+                st["body"]
+            )
+            tbl_data.append([note_para, "", "", "", "", "", ""])
+            continue
+
         product   = product_model.get_by_barcode(line["barcode"])
         pack_qty  = int(product["pack_qty"])        if product and product["pack_qty"]  else 1
         pack_unit = (product["pack_unit"] or "EA")  if product else "EA"

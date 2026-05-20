@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS suppliers (
     order_days              TEXT    DEFAULT '',
     order_first_monday      INTEGER NOT NULL DEFAULT 0,
     order_fortnightly_start TEXT    DEFAULT '',
-    delivery_days           TEXT    DEFAULT ''
+    delivery_days           TEXT    DEFAULT '',
+    bank_account_name       TEXT    DEFAULT '',
+    bank_bsb                TEXT    DEFAULT '',
+    bank_account_number     TEXT    DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS product_suppliers (
@@ -144,6 +147,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     received_at     DATETIME,
     created_by      TEXT,
     updated_at      DATETIME,
+    supplier_invoice_number TEXT DEFAULT '',
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
 );
 
@@ -162,6 +166,8 @@ CREATE TABLE IF NOT EXISTS po_lines (
     notes           TEXT,
     actual_cost     REAL    DEFAULT 0,
     is_promo        INTEGER NOT NULL DEFAULT 0,
+    is_note         INTEGER NOT NULL DEFAULT 0,
+    sort_order      INTEGER,
     FOREIGN KEY (po_id)   REFERENCES purchase_orders(id),
     FOREIGN KEY (barcode) REFERENCES products(barcode)
 );
@@ -389,5 +395,51 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('ar_next_invoice_number', '1',           'Next AR invoice sequence number'),
     ('ar_next_credit_number',  '1',           'Next AR credit note sequence number'),
     ('ar_invoice_pdf_path', '',               'Folder path for exported invoice PDFs'),
-    ('schema_version',      '27',             'Database schema version');
+    ('schema_version',      '32',             'Database schema version');
+
+CREATE TABLE IF NOT EXISTS bank_csv_profiles (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    delimiter       TEXT NOT NULL DEFAULT ',',
+    has_header      INTEGER NOT NULL DEFAULT 1,
+    skip_rows       INTEGER NOT NULL DEFAULT 0,
+    amount_type     TEXT NOT NULL DEFAULT 'signed',
+    col_date        INTEGER,
+    col_amount      INTEGER,
+    col_debit       INTEGER,
+    col_credit      INTEGER,
+    col_description INTEGER,
+    col_reference   INTEGER,
+    col_balance     INTEGER,
+    date_format     TEXT NOT NULL DEFAULT '%d/%m/%Y',
+    created_at      TEXT DEFAULT (datetime('now','localtime')),
+    updated_at      TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS bank_transactions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id      INTEGER NOT NULL REFERENCES bank_csv_profiles(id),
+    import_batch    TEXT NOT NULL,
+    txn_date        TEXT NOT NULL,
+    amount          REAL NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    reference       TEXT DEFAULT '',
+    balance         REAL,
+    status          TEXT NOT NULL DEFAULT 'UNMATCHED',
+    invoice_id      INTEGER REFERENCES ar_invoices(id),
+    payment_id      INTEGER REFERENCES ar_payments(id),
+    created_at      TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_bank_txn_batch  ON bank_transactions(import_batch);
+CREATE INDEX IF NOT EXISTS idx_bank_txn_status ON bank_transactions(status);
+
+CREATE TABLE IF NOT EXISTS po_charges (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    po_id           INTEGER NOT NULL REFERENCES purchase_orders(id),
+    description     TEXT NOT NULL DEFAULT '',
+    tax_rate        REAL NOT NULL DEFAULT 0,
+    amount_inc_tax  REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_po_charges_po ON po_charges(po_id);
 """

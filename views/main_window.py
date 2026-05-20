@@ -58,21 +58,31 @@ class MainWindow(QMainWindow):
         sidebar_layout.addSpacing(20)
 
         self.nav_buttons = []
+        self._nav_indices = []
         nav_items = [
-            ("&Home",            0),
-            ("&Products",        1),
-            ("&Suppliers",       2),
-            ("&Departments",     3),
-            ("Purchase &Orders", 4),
-            ("&Reports",         5),
-            ("Stockta&ke",       6),
-            ("Stock &Adjust",    7),
-            ("&Sales",           8),
-            ("Bun&dles",         9),
+            ("&Home",              0),
+            ("&Products",          1),
+            ("&Suppliers",         2),
+            ("&Departments",       3),
+            ("Purchase &Orders",   4),
+            ("A/Recei&vable",     10),
+            ("&Total Sales",      11),
+            ("&Reports",           5),
+            ("Stockta&ke",         6),
+            ("Stock &Adjust",      7),
+            ("&Sales",             8),
+            ("Bun&dles",           9),
         ]
         is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
         # STAFF can only see: Home, Products, Reports, Sales
         staff_allowed = {0, 1, 5, 8}
+
+        from PyQt6.QtWidgets import QScrollArea
+        nav_widget = QWidget()
+        nav_widget.setStyleSheet("background: transparent;")
+        nav_inner = QVBoxLayout(nav_widget)
+        nav_inner.setContentsMargins(0, 0, 0, 0)
+        nav_inner.setSpacing(8)
 
         for label, index in nav_items:
             btn = QPushButton(label)
@@ -83,10 +93,20 @@ class MainWindow(QMainWindow):
                 btn.setStyleSheet("color: #444; border-color: #2a3a4a;")
             else:
                 btn.clicked.connect(lambda _, i=index: self._switch(i))
-            sidebar_layout.addWidget(btn)
+            nav_inner.addWidget(btn)
             self.nav_buttons.append(btn)
+            self._nav_indices.append(index)
 
-        sidebar_layout.addStretch()
+        nav_inner.addStretch()
+
+        nav_scroll = QScrollArea()
+        nav_scroll.setWidget(nav_widget)
+        nav_scroll.setWidgetResizable(True)
+        nav_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        nav_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        nav_scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollBar:vertical { width: 4px; }")
+        sidebar_layout.addWidget(nav_scroll, 1)
 
         # ── Settings button (admin only) ──────────────────────────────
         if is_admin:
@@ -147,7 +167,7 @@ class MainWindow(QMainWindow):
         self._refresh_last_backup_label()
 
         sidebar_layout.addSpacing(8)
-        hint = QLabel("Hotkeys (outside text fields):\nH·P·S·D·O·R·K·A·L·B")
+        hint = QLabel("Hotkeys (outside text fields):\nH·P·S·D·O·V·R·K·A·L·B")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: grey; font-size: 10px;")
         sidebar_layout.addWidget(hint)
@@ -182,23 +202,27 @@ class MainWindow(QMainWindow):
         from views.suppliers.supplier_list import SupplierList
         from views.departments.department_list import DepartmentList
         from views.purchase_orders.po_list import POList
-        from views.reports.stock_on_hand import StockOnHandReport
+        from views.reports.reports_hub import ReportsHub
         from views.stocktake.stocktake_list import StocktakeList
         from views.stock_adjust.stock_adjust_view import StockAdjustView
         from views.reports.sales_report_view import SalesReportView
         from views.bundles.bundle_list import BundleList
+        from views.ar.invoice_list import InvoiceList
+        from views.reports.total_sales_report import TotalSalesReport
 
         screen_classes = [
             ("HomeScreen",        lambda: HomeScreen(on_navigate=self._switch)),
             ("ProductList",       lambda: ProductList(on_escape=lambda: self._switch(0))),
-            ("SupplierList",      lambda: SupplierList()),
+            ("SupplierList",      lambda: SupplierList(current_user=self.current_user)),
             ("DepartmentList",    lambda: DepartmentList()),
             ("POList",            lambda: POList()),
-            ("StockOnHandReport", lambda: StockOnHandReport()),
+            ("ReportsHub",        lambda: ReportsHub()),
             ("StocktakeList",     lambda: StocktakeList()),
             ("StockAdjustView",   lambda: StockAdjustView(current_user=self.current_user)),
             ("SalesReportView",   lambda: SalesReportView()),
             ("BundleList",        lambda: BundleList()),
+            ("InvoiceList",       lambda: InvoiceList()),
+            ("TotalSalesReport",  lambda: TotalSalesReport()),
         ]
 
         self.screens = []
@@ -265,27 +289,12 @@ class MainWindow(QMainWindow):
             self.screens[1]._load()
         except Exception as e:
             logging.warning(f"ProductList refresh failed: {e}")
-        # StockOnHandReport (index 5) — has showEvent, trigger via _load if exists
-        try:
-            s = self.screens[5]
-            if hasattr(s, '_load'):
-                s._load()
-            elif hasattr(s, 'refresh'):
-                s.refresh()
-        except Exception as e:
-            logging.warning(f"StockOnHandReport refresh failed: {e}")
-        # ReorderReport — inside Reports, refresh if visible
-        try:
-            s = self.screens[5]
-            if hasattr(s, 'reorder_report') and hasattr(s.reorder_report, '_load'):
-                s.reorder_report._load()
-        except Exception as e:
-            logging.warning(f"ReorderReport refresh failed: {e}")
+        # ReportsHub (index 5) — reports open as separate windows, nothing to refresh here
 
     def _switch(self, index):
         self.stack.setCurrentIndex(index)
-        for i, btn in enumerate(self.nav_buttons):
-            btn.setChecked(i == index)
+        for btn, screen_idx in zip(self.nav_buttons, self._nav_indices):
+            btn.setChecked(screen_idx == index)
 
     def keyPressEvent(self, event):
         from PyQt6.QtWidgets import QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox
@@ -304,6 +313,8 @@ class MainWindow(QMainWindow):
             Qt.Key.Key_A:      7,
             Qt.Key.Key_L:      8,
             Qt.Key.Key_B:      9,
+            Qt.Key.Key_V:     10,
+            Qt.Key.Key_T:     11,
             Qt.Key.Key_Escape: 0,
         }
         if event.key() in nav:

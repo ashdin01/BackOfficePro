@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QSpinBox, QDoubleSpinBox, QCheckBox,
+    QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit,
     QDialog, QFrame
 )
 from PyQt6.QtCore import Qt, QObject, QEvent
@@ -219,7 +219,8 @@ class POReceive(QWidget):
         self.po_id = po_id
         self.on_save = on_save
         self.setWindowTitle("Receive Stock")
-        self.setMinimumSize(1340, 560)
+        self.setMinimumSize(1600, 620)
+        self.resize(1750, 750)
         self.charges_table = None
         self._build_ui()
         self._load()
@@ -270,6 +271,24 @@ class POReceive(QWidget):
 
         self.header = QLabel()
         layout.addWidget(self.header)
+
+        # ── Supplier Invoice Number (required) ────────────────────────
+        inv_row = QHBoxLayout()
+        inv_lbl = QLabel("Supplier Invoice #:")
+        inv_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        inv_row.addWidget(inv_lbl)
+        self.supplier_invoice_input = QLineEdit()
+        self.supplier_invoice_input.setPlaceholderText("Enter supplier invoice number  (required)")
+        self.supplier_invoice_input.setFixedWidth(300)
+        self.supplier_invoice_input.setStyleSheet(
+            f"QLineEdit {{ background: {self.BG_ALT}; color: {self.FG};"
+            f" border: 1px solid {self.BORDER}; border-radius: 4px; padding: 4px 8px;"
+            f" font-size: 13px; }}"
+            f"QLineEdit:focus {{ border-color: #1976d2; }}"
+        )
+        inv_row.addWidget(self.supplier_invoice_input)
+        inv_row.addStretch()
+        layout.addLayout(inv_row)
 
         note = QLabel(
             "💡  Enter units received and cost per unit.  "
@@ -421,6 +440,9 @@ class POReceive(QWidget):
             f"<b>{po['po_number']}</b> — {po['supplier_name']} "
             f"— Status: <b>{po['status']}</b>"
         )
+        existing_inv = po['supplier_invoice_number'] or ''
+        if existing_inv:
+            self.supplier_invoice_input.setText(existing_inv)
         self.lines = lines_model.get_by_po(self.po_id)
         self.table.setRowCount(0)
 
@@ -670,6 +692,28 @@ class POReceive(QWidget):
             qty_input.setValue(remaining_units)
 
     def _confirm(self):
+        supplier_inv = self.supplier_invoice_input.text().strip()
+        if not supplier_inv:
+            self.supplier_invoice_input.setStyleSheet(
+                f"QLineEdit {{ background: {self.BG_ALT}; color: {self.FG};"
+                f" border: 2px solid #f85149; border-radius: 4px; padding: 4px 8px;"
+                f" font-size: 13px; }}"
+            )
+            self.supplier_invoice_input.setFocus()
+            QMessageBox.warning(
+                self, "Invoice Number Required",
+                "Please enter the supplier invoice number before confirming receipt."
+            )
+            return
+
+        # Reset border if previously highlighted
+        self.supplier_invoice_input.setStyleSheet(
+            f"QLineEdit {{ background: {self.BG_ALT}; color: {self.FG};"
+            f" border: 1px solid {self.BORDER}; border-radius: 4px; padding: 4px 8px;"
+            f" font-size: 13px; }}"
+            f"QLineEdit:focus {{ border-color: #1976d2; }}"
+        )
+
         po = po_model.get_by_id(self.po_id)
         po_number = po['po_number']
 
@@ -722,8 +766,30 @@ class POReceive(QWidget):
 
         status = PO_STATUS_RECEIVED if all_received else PO_STATUS_PARTIAL
 
+        # Collect additional charges
+        charges = []
+        if self.charges_table is not None:
+            for cr in range(self.charges_table.rowCount()):
+                try:
+                    desc_item = self.charges_table.item(cr, 0)
+                    amt_item  = self.charges_table.item(cr, 2)
+                    tax_combo = self.charges_table.cellWidget(cr, 1)
+                    if not amt_item:
+                        continue
+                    amt      = float(amt_item.text().replace("$", "").replace(",", "") or 0)
+                    tax_rate = tax_combo.currentData() if tax_combo else 0.0
+                    charges.append({
+                        'description':   (desc_item.text() if desc_item else '') or 'Charge',
+                        'tax_rate':      tax_rate,
+                        'amount_inc_tax': amt,
+                    })
+                except (ValueError, AttributeError):
+                    pass
+
         try:
-            po_ctrl.receive_po_atomic(self.po_id, po_number, line_receipts, status)
+            po_ctrl.receive_po_atomic(self.po_id, po_number, line_receipts, status,
+                                      supplier_invoice_number=supplier_inv,
+                                      charges=charges)
         except Exception as exc:
             QMessageBox.critical(
                 self, "Receipt Failed",

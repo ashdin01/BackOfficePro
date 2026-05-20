@@ -1,6 +1,6 @@
 """Tests for utils/validators.py."""
 import pytest
-from utils.validators import required, positive_number, validate_abn, validate_email, validate_phone
+from utils.validators import required, positive_number, validate_abn, validate_email, validate_phone, validate_bsb
 
 
 class TestRequired:
@@ -172,3 +172,46 @@ class TestValidatePhone:
     def test_raises_for_letters(self):
         with pytest.raises(ValueError):
             validate_phone("CALL-ME")
+
+
+class TestValidateBsb:
+    def test_blank_returns_empty_tuple(self):
+        assert validate_bsb("") == ("", "")
+
+    def test_none_returns_empty_tuple(self):
+        assert validate_bsb(None) == ("", "")
+
+    def test_whitespace_returns_empty_tuple(self):
+        assert validate_bsb("   ") == ("", "")
+
+    def test_six_digits_formatted_correctly(self):
+        formatted, _ = validate_bsb("063000")
+        assert formatted == "063-000"
+
+    def test_hyphenated_input_accepted(self):
+        formatted, _ = validate_bsb("063-000")
+        assert formatted == "063-000"
+
+    def test_known_prefix_returns_bank_name(self):
+        _, bank = validate_bsb("063-000")
+        assert bank == "Commonwealth Bank"
+
+    def test_anz_prefix_recognised(self):
+        _, bank = validate_bsb("014-000")
+        assert bank == "ANZ"
+
+    def test_unknown_prefix_returns_empty_bank_name(self):
+        _, bank = validate_bsb("999-000")
+        assert bank == ""
+
+    def test_five_digits_raises(self):
+        with pytest.raises(ValueError, match="6 digits"):
+            validate_bsb("06300")
+
+    def test_seven_digits_raises(self):
+        with pytest.raises(ValueError, match="6 digits"):
+            validate_bsb("0630001")
+
+    def test_letters_only_raises(self):
+        with pytest.raises(ValueError):
+            validate_bsb("ABC-DEF")

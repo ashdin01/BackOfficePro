@@ -47,6 +47,57 @@ def validate_email(email: str) -> str:
     return email
 
 
+_BSB_BANKS = {
+    "01": "ANZ",
+    "03": "Westpac",
+    "06": "Commonwealth Bank",
+    "08": "NAB",
+    "09": "Reserve Bank of Australia",
+    "10": "BankWest",
+    "11": "St.George Bank",
+    "12": "Bank of Queensland",
+    "14": "Citibank",
+    "15": "HSBC",
+    "18": "Macquarie Bank",
+    "19": "Suncorp Bank",
+    "22": "Bank of Melbourne",
+    "23": "Bendigo Bank",
+    "24": "ING",
+    "25": "Rabobank",
+    "28": "Greater Bank",
+    "29": "Newcastle Permanent",
+    "34": "Heritage Bank",
+    "36": "BCU Bank",
+    "40": "Adelaide Bank",
+    "45": "ME Bank",
+    "48": "Teachers Mutual Bank",
+    "55": "Defence Bank",
+    "57": "P&N Bank",
+    "61": "Bendigo and Adelaide Bank",
+    "66": "BankVic",
+    "76": "Bank Australia",
+    "80": "Westpac (Treasury)",
+}
+
+
+def validate_bsb(bsb: str) -> tuple[str, str]:
+    """Validate and format an Australian BSB number.
+
+    Returns ("", "") if blank.
+    Returns (formatted, bank_name) where formatted is "NNN-NNN" if valid.
+    Raises ValueError if non-blank and not exactly 6 digits.
+    bank_name is "" if the prefix is not in the known list.
+    """
+    if not bsb or not bsb.strip():
+        return "", ""
+    digits = re.sub(r"\D", "", bsb.strip())
+    if len(digits) != 6:
+        raise ValueError("BSB must be exactly 6 digits (e.g. 063-000)")
+    formatted = f"{digits[:3]}-{digits[3:]}"
+    bank_name = _BSB_BANKS.get(digits[:2], "")
+    return formatted, bank_name
+
+
 def validate_phone(phone: str) -> str:
     """Validate a phone number by digit count (8–15 digits).
 

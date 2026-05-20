@@ -274,6 +274,10 @@ class PODetail(QWidget):
         btn_add.setFixedHeight(35)
         btn_add.clicked.connect(self._add_line)
 
+        btn_note = QPushButton("Add Note  [N]")
+        btn_note.setFixedHeight(35)
+        btn_note.clicked.connect(self._add_note)
+
         btn_del = QPushButton("Remove Line  [Del]")
         btn_del.setFixedHeight(35)
         btn_del.clicked.connect(self._remove_line)
@@ -322,6 +326,7 @@ class PODetail(QWidget):
         btn_close.clicked.connect(self.close)
 
         btns.addWidget(btn_add)
+        btns.addWidget(btn_note)
         btns.addWidget(btn_del)
         btns.addWidget(btn_reload)
         btns.addWidget(btn_cancel)
@@ -334,6 +339,7 @@ class PODetail(QWidget):
         layout.addLayout(btns)
 
         QShortcut(QKeySequence("A"), self, self._add_line)
+        QShortcut(QKeySequence("N"), self, self._add_note)
         QShortcut(QKeySequence("M"), self, self._mark_sent)
         QShortcut(QKeySequence("C"), self, self._cancel_po)
         QShortcut(QKeySequence("R"), self, self._reload_recommendations)
@@ -498,6 +504,9 @@ class PODetail(QWidget):
 
                 rows_written = 0
                 for line in lines:
+                    if line['is_note']:
+                        writer.writerow(['', f'NOTE: {line["description"]}', '', '', '', '', ''])
+                        continue
                     product = product_model.get_by_barcode(line['barcode'])
                     pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
                     pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
@@ -695,6 +704,25 @@ class PODetail(QWidget):
                 r = self.table.rowCount()
                 self.table.insertRow(r)
                 self._line_ids.append(line['id'])
+
+                # ── Note line ─────────────────────────────────────────────
+                if line['is_note']:
+                    note_colour = QColor('#8b949e')
+                    note_bg     = QColor('#1e2a38')
+                    note_item   = QTableWidgetItem(f"📝  {line['description']}")
+                    note_item.setForeground(note_colour)
+                    note_item.setBackground(note_bg)
+                    note_item.setFlags(note_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    font = note_item.font(); font.setItalic(True); note_item.setFont(font)
+                    self.table.setItem(r, 1, note_item)
+                    for col in [0, 2, 3, 4, 5, 6, 7, 8, 9]:
+                        blank = QTableWidgetItem('')
+                        blank.setBackground(note_bg)
+                        blank.setFlags(blank.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        self.table.setItem(r, col, blank)
+                    self._line_pack_info.append((1, 'EA'))
+                    self._line_tax_rates.append(0.0)
+                    continue
 
                 product  = product_map.get(line['barcode'])
                 pack_qty  = int(product['pack_qty']) if product and product['pack_qty'] else 1
@@ -986,8 +1014,37 @@ class PODetail(QWidget):
         if dlg.exec():
             lines = lines_model.get_by_po(self.po_id)
             self._populate_table(lines)
+            last = self.table.rowCount() - 1
+            if last >= 0:
+                self.table.selectRow(last)
             if self.on_save:
                 self.on_save()
+
+    def _add_note(self):
+        from PyQt6.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(self, "Add Note", "Note text:")
+        if not ok or not text.strip():
+            return
+
+        row = self.table.currentRow()
+        note_id = lines_model.add_note(self.po_id, text.strip())
+
+        # Build new order: insert note after selected row (or at end)
+        ids = list(self._line_ids)
+        if row >= 0 and row < len(ids):
+            ids.insert(row + 1, note_id)
+        else:
+            ids.append(note_id)
+
+        lines_model.renumber_sort_order(self.po_id, ids)
+        lines = lines_model.get_by_po(self.po_id)
+        self._populate_table(lines)
+        target = (row + 1) if row >= 0 else (self.table.rowCount() - 1)
+        target = min(target, self.table.rowCount() - 1)
+        if target >= 0:
+            self.table.selectRow(target)
+        if self.on_save:
+            self.on_save()
 
     def _remove_line(self):
         row = self.table.currentRow()
@@ -1009,6 +1066,9 @@ class PODetail(QWidget):
             lines_model.delete(line_id)
             lines = lines_model.get_by_po(self.po_id)
             self._populate_table(lines)
+            target = min(row, self.table.rowCount() - 1)
+            if target >= 0:
+                self.table.selectRow(target)
             if self.on_save:
                 self.on_save()
 

@@ -1,3 +1,5 @@
+import sqlite3
+from config.settings import DATABASE_PATH
 from database.connection import get_connection
 
 
@@ -5,8 +7,42 @@ def get_by_po(po_id):
     conn = get_connection()
     try:
         return conn.execute(
-            "SELECT * FROM po_lines WHERE po_id = ? ORDER BY id", (po_id,)
+            "SELECT * FROM po_lines WHERE po_id=?"
+            " ORDER BY COALESCE(sort_order, id), id",
+            (po_id,)
         ).fetchall()
+    finally:
+        conn.close()
+
+
+def add_note(po_id: int, text: str) -> int:
+    """Insert a note line (no barcode, no qty). FK constraints skipped intentionally."""
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    try:
+        conn.execute("""
+            INSERT INTO po_lines
+                (po_id, barcode, description, ordered_qty, unit_cost, pack_qty, is_note)
+            VALUES (?, '', ?, 0, 0, 1, 1)
+        """, (po_id, text))
+        note_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+        return note_id
+    finally:
+        conn.close()
+
+
+def renumber_sort_order(po_id: int, ordered_ids: list):
+    """Set sort_order = 10, 20, 30... for lines in the given id order."""
+    conn = get_connection()
+    try:
+        for i, line_id in enumerate(ordered_ids):
+            conn.execute(
+                "UPDATE po_lines SET sort_order=? WHERE id=? AND po_id=?",
+                ((i + 1) * 10, line_id, po_id)
+            )
+        conn.commit()
     finally:
         conn.close()
 

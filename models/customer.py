@@ -38,19 +38,21 @@ def get_by_code(code):
 
 def add(code, name, abn='', address_line1='', address_line2='',
         suburb='', state='', postcode='', email='', phone='',
-        contact_name='', payment_terms_days=37, credit_limit=0.0, notes=''):
+        contact_name='', payment_terms_days=37, credit_limit=0.0,
+        active=1, notes=''):
     conn = get_connection()
     try:
-        conn.execute("""
+        cur = conn.execute("""
             INSERT INTO customers
                 (code, name, abn, address_line1, address_line2,
                  suburb, state, postcode, email, phone,
-                 contact_name, payment_terms_days, credit_limit, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 contact_name, payment_terms_days, credit_limit, active, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (code.upper(), name, abn, address_line1, address_line2,
               suburb, state, postcode, email, phone,
-              contact_name, payment_terms_days, credit_limit, notes))
+              contact_name, payment_terms_days, credit_limit, active, notes))
         conn.commit()
+        return cur.lastrowid
     finally:
         conn.close()
 

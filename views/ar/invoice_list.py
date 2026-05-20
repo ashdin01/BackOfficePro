@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit,
     QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QColor
 import models.ar_invoice as invoice_model
 import controllers.ar_controller as ar_ctrl
@@ -42,6 +42,10 @@ class InvoiceList(QWidget):
         self.status_filter.currentTextChanged.connect(self._filter)
         top.addWidget(self.status_filter)
 
+        btn_customers = QPushButton("&Customers")
+        btn_customers.clicked.connect(self._open_customers)
+        top.addWidget(btn_customers)
+
         btn_new = QPushButton("&New Invoice")
         btn_new.clicked.connect(self._new_invoice)
         top.addWidget(btn_new)
@@ -49,6 +53,10 @@ class InvoiceList(QWidget):
         btn_aged = QPushButton("Aged Debtors")
         btn_aged.clicked.connect(self._aged_debtors)
         top.addWidget(btn_aged)
+
+        btn_recon = QPushButton("Reconcile…")
+        btn_recon.clicked.connect(self._reconcile)
+        top.addWidget(btn_recon)
 
         layout.addLayout(top)
 
@@ -62,6 +70,7 @@ class InvoiceList(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(self._open)
+        self.table.installEventFilter(self)
         layout.addWidget(self.table)
 
         self.status_lbl = QLabel("")
@@ -135,6 +144,43 @@ class InvoiceList(QWidget):
         self._open_wins.append(w)
         w.show()
 
+    def _reconcile(self):
+        from views.ar.recon_csv_mapper import ReconImportDialog
+        dlg = ReconImportDialog(self)
+        if dlg.exec():
+            result = dlg.import_result()
+            if result:
+                from views.ar.recon_session import ReconSession
+                w = ReconSession(batch=result['batch'], on_done=self._load)
+                self._open_wins.append(w)
+                w.show()
+
+    def _open_customers(self):
+        from views.ar.customer_list import CustomerList
+        w = CustomerList()
+        self._open_wins.append(w)
+        w.show()
+
+    def eventFilter(self, obj, event):
+        if obj is self.table and event.type() == QEvent.Type.KeyPress:
+            key  = event.key()
+            mods = event.modifiers()
+            if mods == Qt.KeyboardModifier.NoModifier:
+                if key == Qt.Key.Key_C:
+                    self._open_customers()
+                    return True
+                if key == Qt.Key.Key_N:
+                    self._new_invoice()
+                    return True
+                if key == Qt.Key.Key_R:
+                    self._reconcile()
+                    return True
+                if key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+                    self._open()
+                    return True
+        return super().eventFilter(obj, event)
+
     def showEvent(self, event):
         super().showEvent(event)
         self._load()
+        self.table.setFocus()

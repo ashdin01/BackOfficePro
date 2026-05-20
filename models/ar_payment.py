@@ -31,7 +31,7 @@ def add(invoice_id, customer_id, payment_date, amount,
         method='EFT', reference='', notes=''):
     conn = get_connection()
     try:
-        conn.execute("""
+        cur = conn.execute("""
             INSERT INTO ar_payments
                 (invoice_id, customer_id, payment_date, amount,
                  method, reference, notes)
@@ -39,6 +39,7 @@ def add(invoice_id, customer_id, payment_date, amount,
         """, (invoice_id, customer_id, payment_date, amount,
               method, reference, notes))
         conn.commit()
+        return cur.lastrowid
     finally:
         conn.close()
 

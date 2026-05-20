@@ -342,7 +342,8 @@ def close_credit_atomic(po_id, po_number, line_receipts):
         conn.close()
 
 
-def receive_po_atomic(po_id, po_number, line_receipts, final_status):
+def receive_po_atomic(po_id, po_number, line_receipts, final_status,
+                      supplier_invoice_number='', charges=None):
     """
     Apply a full PO receipt in one atomic transaction.
 
@@ -393,10 +394,18 @@ def receive_po_atomic(po_id, po_number, line_receipts, final_status):
                 )
 
         conn.execute(
-            "UPDATE purchase_orders SET status=?, updated_at=CURRENT_TIMESTAMP"
-            " WHERE id=?",
-            (final_status, po_id)
+            "UPDATE purchase_orders SET status=?, supplier_invoice_number=?,"
+            " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (final_status, supplier_invoice_number, po_id)
         )
+        if charges:
+            conn.execute("DELETE FROM po_charges WHERE po_id=?", (po_id,))
+            for c in charges:
+                conn.execute(
+                    "INSERT INTO po_charges (po_id, description, tax_rate, amount_inc_tax)"
+                    " VALUES (?,?,?,?)",
+                    (po_id, c['description'], c['tax_rate'], c['amount_inc_tax'])
+                )
         conn.commit()
     except Exception:
         conn.rollback()

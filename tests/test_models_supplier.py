@@ -194,3 +194,52 @@ def test_inactive_supplier_never_due(test_db, db_conn):
     db_conn.commit()
     due_ids = [r['id'] for r in supplier_model.get_order_due_today()]
     assert sid not in due_ids
+
+
+# ── Bank fields ───────────────────────────────────────────────────────────────
+
+class TestSupplierBankFields:
+    def test_add_stores_bank_fields(self, test_db):
+        supplier_model.add(
+            'BNK', 'Bank Supplier',
+            bank_account_name='Harcourt Apples Pty Ltd',
+            bank_bsb='063-000',
+            bank_account_number='12345678',
+        )
+        from database.connection import get_connection
+        conn = get_connection()
+        s = conn.execute("SELECT * FROM suppliers WHERE code='BNK'").fetchone()
+        conn.close()
+        assert s['bank_account_name'] == 'Harcourt Apples Pty Ltd'
+        assert s['bank_bsb'] == '063-000'
+        assert s['bank_account_number'] == '12345678'
+
+    def test_get_by_id_returns_bank_fields(self, test_db, db_conn):
+        sid = _add(db_conn, 'BN2', 'Bank 2',
+                   bank_account_name='Acme Co',
+                   bank_bsb='082-001',
+                   bank_account_number='99887766')
+        s = supplier_model.get_by_id(sid)
+        assert s['bank_account_name'] == 'Acme Co'
+        assert s['bank_bsb'] == '082-001'
+        assert s['bank_account_number'] == '99887766'
+
+    def test_update_persists_bank_fields(self, test_db, db_conn):
+        sid = _add(db_conn, 'BN3', 'Bank 3')
+        supplier_model.update(
+            sid, 'BN3', 'Bank 3', '', '', '', '', '', '', 1,
+            bank_account_name='New Name',
+            bank_bsb='036-000',
+            bank_account_number='11223344',
+        )
+        s = supplier_model.get_by_id(sid)
+        assert s['bank_account_name'] == 'New Name'
+        assert s['bank_bsb'] == '036-000'
+        assert s['bank_account_number'] == '11223344'
+
+    def test_bank_fields_default_to_empty_string(self, test_db, db_conn):
+        sid = _add(db_conn, 'BN4', 'No Bank')
+        s = supplier_model.get_by_id(sid)
+        assert (s['bank_account_name'] or '') == ''
+        assert (s['bank_bsb'] or '') == ''
+        assert (s['bank_account_number'] or '') == ''

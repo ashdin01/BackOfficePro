@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
     QLineEdit, QMessageBox, QDialog, QFormLayout, QDoubleSpinBox,
-    QSpinBox, QDialogButtonBox, QTextEdit, QFrame, QSplitter
+    QSpinBox, QDialogButtonBox, QTextEdit, QFrame, QSplitter,
+    QAbstractItemView
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
@@ -374,9 +375,23 @@ class _LineDialog(QDialog):
         form = QFormLayout(self)
 
         self.barcode = QLineEdit()
-        self.barcode.setPlaceholderText("Scan or type barcode (optional)")
+        self.barcode.setPlaceholderText("Scan or type barcode — Enter to lookup, F2 to browse")
         self.barcode.returnPressed.connect(self._lookup_barcode)
-        form.addRow("Barcode", self.barcode)
+
+        lookup_btn = QPushButton("🔍")
+        lookup_btn.setFixedWidth(32)
+        lookup_btn.setToolTip("Browse all products  [F2]")
+        lookup_btn.clicked.connect(self._open_picker)
+
+        bc_row = QWidget()
+        bc_layout = QHBoxLayout(bc_row)
+        bc_layout.setContentsMargins(0, 0, 0, 0)
+        bc_layout.setSpacing(4)
+        bc_layout.addWidget(self.barcode)
+        bc_layout.addWidget(lookup_btn)
+        form.addRow("Barcode", bc_row)
+
+        QShortcut(QKeySequence("F2"), self, self._open_picker)
 
         self.description = QLineEdit()
         form.addRow("Description *", self.description)
@@ -429,7 +444,17 @@ class _LineDialog(QDialog):
         if p:
             self.description.setText(p['description'])
             self.unit_price.setValue(float(p['sell_price'] or 0))
-            self.gst_rate.setValue(float(p['tax_rate'] or 10))
+            self.gst_rate.setValue(float(p['tax_rate']) if p['tax_rate'] is not None else 10.0)
+
+    def _open_picker(self):
+        dlg = _ProductPickerDialog(parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            p = dlg.selected_product()
+            if p:
+                self.barcode.setText(p['barcode'] or '')
+                self.description.setText(p['description'])
+                self.unit_price.setValue(float(p['sell_price'] or 0))
+                self.gst_rate.setValue(float(p['tax_rate']) if p['tax_rate'] is not None else 10.0)
 
     def _accept(self):
         if not self.description.text().strip():
@@ -446,3 +471,106 @@ class _LineDialog(QDialog):
             'discount_pct': self.discount.value(),
             'gst_rate':    self.gst_rate.value(),
         }
+
+
+class _ProductPickerDialog(QDialog):
+    """Searchable product browser — opened via 🔍 button or F2."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Product Lookup  [F2]")
+        self.setMinimumSize(740, 520)
+        self._selected  = None
+        self._all_rows  = []
+        self._build_ui()
+        self._load()
+
+    def _build_ui(self):
+        from PyQt6.QtCore import QTimer
+        layout = QVBoxLayout(self)
+
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search description or barcode…")
+        self.search.setClearButtonEnabled(True)
+        layout.addWidget(self.search)
+
+        self._timer = QTimer()
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(500)
+        self._timer.timeout.connect(self._filter)
+        self.search.textChanged.connect(lambda _: self._timer.start())
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Barcode", "Description", "Sell Price", "GST"])
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.doubleClicked.connect(self._pick)
+        layout.addWidget(self.table)
+
+        self.lbl_count = QLabel("")
+        self.lbl_count.setStyleSheet("color: grey; font-size: 10px;")
+        layout.addWidget(self.lbl_count)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self._pick)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+        QShortcut(QKeySequence("Return"), self, self._pick)
+
+    def _load(self):
+        from database.connection import get_connection
+        conn = get_connection()
+        try:
+            self._all_rows = [dict(r) for r in conn.execute("""
+                SELECT barcode, description, sell_price, tax_rate
+                FROM products
+                WHERE active = 1
+                ORDER BY description COLLATE NOCASE
+            """).fetchall()]
+        finally:
+            conn.close()
+        self._render(self._all_rows)
+        self.search.setFocus()
+
+    def _filter(self):
+        term = self.search.text().strip().lower()
+        if not term:
+            self._render(self._all_rows)
+            return
+        rows = [p for p in self._all_rows
+                if term in p['description'].lower()
+                or term in (p['barcode'] or '').lower()]
+        self._render(rows)
+
+    def _render(self, rows):
+        self.table.setRowCount(len(rows))
+        for i, p in enumerate(rows):
+            vals = [
+                p['barcode'] or '',
+                p['description'],
+                f"${float(p['sell_price'] or 0):.2f}",
+                f"{float(p['tax_rate'] or 0):g}%",
+            ]
+            for j, v in enumerate(vals):
+                item = QTableWidgetItem(v)
+                item.setData(Qt.ItemDataRole.UserRole, p)
+                self.table.setItem(i, j, item)
+        self.lbl_count.setText(f"{len(rows)} product(s)")
+        if rows:
+            self.table.selectRow(0)
+
+    def _pick(self):
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        self._selected = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        self.accept()
+
+    def selected_product(self):
+        return self._selected

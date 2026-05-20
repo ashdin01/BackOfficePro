@@ -5,19 +5,24 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 from utils.keyboard_mixin import KeyboardMixin
-from utils.validators import validate_abn, validate_email, validate_phone
+from utils.validators import validate_abn, validate_email, validate_phone, validate_bsb
 from utils.error_dialog import show_error
 import models.supplier as supplier_model
 
 
 class SupplierEdit(KeyboardMixin, QWidget):
-    def __init__(self, supplier_id=None, on_save=None):
+    def __init__(self, supplier_id=None, on_save=None, current_user=None):
         super().__init__()
         self.supplier_id = supplier_id
         self.on_save = on_save
+        self._role = (current_user or {}).get("role", "STAFF")
+        self._saved_bank_account_name   = ''
+        self._saved_bank_bsb            = ''
+        self._saved_bank_account_number = ''
         self.setWindowTitle("Edit Supplier" if supplier_id else "Add Supplier")
         self.setMinimumWidth(880)
         self._build_ui()
+        self._apply_role_permissions()
         self.setup_keyboard()
         if supplier_id:
             self._populate()
@@ -180,6 +185,33 @@ class SupplierEdit(KeyboardMixin, QWidget):
         online_form.addRow("", self.online_order)
         online_form.addRow("Instructions", self.online_order_note)
         right.addWidget(online_group)
+
+        # ── RIGHT: Bank Details ───────────────────────────────────────
+        self._bank_group = bank_group = QGroupBox("Bank Details")
+        bank_form = QFormLayout(bank_group)
+        bank_form.setSpacing(8)
+
+        self.bank_account_name   = QLineEdit()
+        self.bank_account_number = QLineEdit()
+
+        self.bank_bsb = QLineEdit()
+        self.bank_bsb.setPlaceholderText("e.g. 063-000")
+        self.bank_bsb.setMaxLength(7)
+
+        bsb_row = QHBoxLayout()
+        bsb_row.setSpacing(6)
+        bsb_row.addWidget(self.bank_bsb)
+        self._bsb_indicator = QLabel("")
+        self._bsb_indicator.setMinimumWidth(180)
+        bsb_row.addWidget(self._bsb_indicator)
+        bsb_row.addStretch()
+
+        self.bank_bsb.textChanged.connect(self._on_bsb_changed)
+
+        bank_form.addRow("Account Name",   self.bank_account_name)
+        bank_form.addRow("BSB",            bsb_row)
+        bank_form.addRow("Account Number", self.bank_account_number)
+        right.addWidget(bank_group)
         right.addStretch()
 
         columns.addLayout(left,  stretch=1)
@@ -188,7 +220,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
 
         # ── Buttons ───────────────────────────────────────────────────
         btns = QHBoxLayout()
-        save_btn = QPushButton("Save  [Ctrl+S]")
+        self._save_btn = save_btn = QPushButton("Save  [Ctrl+S]")
         save_btn.setFixedHeight(35)
         save_btn.setStyleSheet(
             "QPushButton{background:#1565c0;color:white;border:none;"
@@ -203,6 +235,86 @@ class SupplierEdit(KeyboardMixin, QWidget):
         btns.addWidget(cancel_btn)
         btns.addStretch()
         root.addLayout(btns)
+
+    def _apply_role_permissions(self):
+        """
+        ADMIN    — full access (all fields editable, bank details editable).
+        MANAGER  — can edit supplier details; bank details group is read-only.
+        STAFF    — entire form is read-only; Save button hidden.
+        """
+        all_editable = [
+            self.code, self.name, self.abn, self.contact, self.phone,
+            self.order_minimum, self.account, self.terms, self.address, self.notes,
+            self.active, self.rep_name, self.rep_phone,
+            self.email_orders, self.email_admin, self.email_accounts, self.email_rep,
+            self.online_order, self.online_order_note,
+            self.order_fortnightly, self.order_fortnightly_start,
+            self.order_first_monday,
+        ]
+        all_editable += list(self._day_checks.values())
+        all_editable += list(self._delivery_day_checks.values())
+
+        bank_fields = [self.bank_account_name, self.bank_bsb, self.bank_account_number]
+
+        if self._role == "ADMIN":
+            pass  # everything already enabled by default
+
+        elif self._role == "MANAGER":
+            for w in bank_fields:
+                w.setReadOnly(True)
+                w.setStyleSheet("background: #1a1a2e; color: #666;")
+            self._bsb_indicator.setVisible(False)
+            self._bank_group.setTitle("Bank Details  (Admin only)")
+
+        else:  # STAFF or unknown
+            for w in all_editable + bank_fields:
+                if hasattr(w, 'setReadOnly'):
+                    w.setReadOnly(True)
+                    w.setStyleSheet("background: #1a1a2e; color: #666;")
+                elif hasattr(w, 'setEnabled'):
+                    w.setEnabled(False)
+            self._save_btn.hide()
+            self.setWindowTitle(
+                ("View Supplier" if self.supplier_id else "Supplier") + "  [read-only]"
+            )
+
+    def _on_bsb_changed(self, text):
+        """Auto-format BSB and show live bank identification."""
+        from utils.validators import validate_bsb
+        digits = ''.join(c for c in text if c.isdigit())
+
+        # Auto-insert hyphen after 3 digits
+        if len(digits) > 3:
+            formatted = f"{digits[:3]}-{digits[3:6]}"
+        else:
+            formatted = digits
+
+        if formatted != text:
+            self.bank_bsb.blockSignals(True)
+            self.bank_bsb.setText(formatted)
+            self.bank_bsb.blockSignals(False)
+
+        # Live indicator
+        raw = self.bank_bsb.text().strip()
+        if not raw:
+            self._bsb_indicator.setText("")
+            self._bsb_indicator.setStyleSheet("")
+            return
+        try:
+            _, bank_name = validate_bsb(raw)
+            if bank_name:
+                self._bsb_indicator.setText(f"✓  {bank_name}")
+                self._bsb_indicator.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            else:
+                self._bsb_indicator.setText("✓  Valid format")
+                self._bsb_indicator.setStyleSheet("color: #4CAF50;")
+        except ValueError:
+            if len(digits) == 6:
+                self._bsb_indicator.setText("✗  Invalid BSB")
+                self._bsb_indicator.setStyleSheet("color: #ef5350;")
+            else:
+                self._bsb_indicator.setText("")
+                self._bsb_indicator.setStyleSheet("")
 
     def _populate(self):
         s = supplier_model.get_by_id(self.supplier_id)
@@ -260,6 +372,13 @@ class SupplierEdit(KeyboardMixin, QWidget):
         else:
             self.order_fortnightly.setChecked(False)
 
+        self._saved_bank_account_name   = s['bank_account_name']   if 'bank_account_name'   in keys else ''
+        self._saved_bank_bsb            = s['bank_bsb']            if 'bank_bsb'            in keys else ''
+        self._saved_bank_account_number = s['bank_account_number'] if 'bank_account_number' in keys else ''
+        self.bank_account_name.setText(self._saved_bank_account_name)
+        self.bank_bsb.setText(self._saved_bank_bsb)
+        self.bank_account_number.setText(self._saved_bank_account_number)
+
     def _save(self):
         code = self.code.text().strip()
         name = self.name.text().strip()
@@ -269,6 +388,13 @@ class SupplierEdit(KeyboardMixin, QWidget):
             errors.append("Code is required.")
         if not name:
             errors.append("Company Name is required.")
+
+        bsb = bsb_bank = ""
+        if self._role == "ADMIN":
+            try:
+                bsb, bsb_bank = validate_bsb(self.bank_bsb.text())
+            except ValueError as e:
+                errors.append(f"BSB: {e}")
 
         # Validate optional fields — collect all errors before blocking save
         abn = phone = rep_phone = ""
@@ -343,6 +469,9 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     order_first_monday=order_first_monday,
                     order_fortnightly_start=order_fortnightly_start,
                     delivery_days=delivery_days,
+                    bank_account_name=self.bank_account_name.text().strip() if self._role == "ADMIN" else self._saved_bank_account_name,
+                    bank_bsb=bsb if self._role == "ADMIN" else self._saved_bank_bsb,
+                    bank_account_number=self.bank_account_number.text().strip() if self._role == "ADMIN" else self._saved_bank_account_number,
                 )
             else:
                 supplier_model.add(
@@ -367,6 +496,9 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     order_first_monday=order_first_monday,
                     order_fortnightly_start=order_fortnightly_start,
                     delivery_days=delivery_days,
+                    bank_account_name=self.bank_account_name.text().strip(),
+                    bank_bsb=bsb,
+                    bank_account_number=self.bank_account_number.text().strip(),
                 )
             if self.on_save:
                 self.on_save()

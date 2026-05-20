@@ -8,8 +8,9 @@ import models.supplier as supplier_model
 
 
 class SupplierList(KeyboardMixin, QWidget):
-    def __init__(self):
+    def __init__(self, current_user=None):
         super().__init__()
+        self._current_user = current_user or {}
         self._open_wins = []
         self._build_ui()
         self._load()
@@ -90,7 +91,7 @@ class SupplierList(KeyboardMixin, QWidget):
 
     def _add(self):
         from views.suppliers.supplier_edit import SupplierEdit
-        self._open_win(SupplierEdit(on_save=self._load))
+        self._open_win(SupplierEdit(on_save=self._load, current_user=self._current_user))
 
     def _edit(self, index=None):
         row = self.table.currentRow()
@@ -98,4 +99,5 @@ class SupplierList(KeyboardMixin, QWidget):
             return
         supplier_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
         from views.suppliers.supplier_edit import SupplierEdit
-        self._open_win(SupplierEdit(supplier_id=supplier_id, on_save=self._load))
+        self._open_win(SupplierEdit(supplier_id=supplier_id, on_save=self._load,
+                                    current_user=self._current_user))

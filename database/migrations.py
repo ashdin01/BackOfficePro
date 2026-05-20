@@ -105,6 +105,21 @@ def apply_migrations():
         if current < 27:
             migrate_v27(conn)
             logging.info("Migration v27 applied: ar_invoices, ar_invoice_lines, ar_payments, ar_credit_notes")
+        if current < 28:
+            migrate_v28(conn)
+            logging.info("Migration v28 applied: bank_csv_profiles, bank_transactions")
+        if current < 29:
+            migrate_v29(conn)
+            logging.info("Migration v29 applied: purchase_orders.supplier_invoice_number")
+        if current < 30:
+            migrate_v30(conn)
+            logging.info("Migration v30 applied: po_charges table")
+        if current < 31:
+            migrate_v31(conn)
+            logging.info("Migration v31 applied: po_lines sort_order + is_note")
+        if current < 32:
+            migrate_v32(conn)
+            logging.info("Migration v32 applied: suppliers bank details columns")
         logging.info("apply_migrations() complete")
     except Exception as e:
         logging.critical(f"Migration failed: {e}", exc_info=True)
@@ -518,4 +533,91 @@ def migrate_v27(conn):
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ar_next_credit_number', '1')")
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ar_invoice_pdf_path', '')")
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '27')")
+    conn.commit()
+
+
+def migrate_v31(conn):
+    """Add sort_order and is_note to po_lines."""
+    conn.execute("ALTER TABLE po_lines ADD COLUMN is_note INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE po_lines ADD COLUMN sort_order INTEGER")
+    conn.execute("UPDATE po_lines SET sort_order = id WHERE sort_order IS NULL")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '31')")
+    conn.commit()
+
+
+def migrate_v32(conn):
+    """Add bank details columns to suppliers."""
+    conn.execute("ALTER TABLE suppliers ADD COLUMN bank_account_name TEXT DEFAULT ''")
+    conn.execute("ALTER TABLE suppliers ADD COLUMN bank_bsb TEXT DEFAULT ''")
+    conn.execute("ALTER TABLE suppliers ADD COLUMN bank_account_number TEXT DEFAULT ''")
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '32')")
+    conn.commit()
+
+
+def migrate_v30(conn):
+    """Add po_charges table for freight/surcharges saved at receipt."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS po_charges (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id           INTEGER NOT NULL REFERENCES purchase_orders(id),
+            description     TEXT NOT NULL DEFAULT '',
+            tax_rate        REAL NOT NULL DEFAULT 0,
+            amount_inc_tax  REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_po_charges_po ON po_charges(po_id);
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '30')")
+    conn.commit()
+
+
+def migrate_v29(conn):
+    """Add supplier_invoice_number to purchase_orders."""
+    conn.execute(
+        "ALTER TABLE purchase_orders ADD COLUMN supplier_invoice_number TEXT DEFAULT ''"
+    )
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '29')")
+    conn.commit()
+
+
+def migrate_v28(conn):
+    """Add bank reconciliation tables."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS bank_csv_profiles (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL UNIQUE,
+            delimiter       TEXT NOT NULL DEFAULT ',',
+            has_header      INTEGER NOT NULL DEFAULT 1,
+            skip_rows       INTEGER NOT NULL DEFAULT 0,
+            amount_type     TEXT NOT NULL DEFAULT 'signed',
+            col_date        INTEGER,
+            col_amount      INTEGER,
+            col_debit       INTEGER,
+            col_credit      INTEGER,
+            col_description INTEGER,
+            col_reference   INTEGER,
+            col_balance     INTEGER,
+            date_format     TEXT NOT NULL DEFAULT '%d/%m/%Y',
+            created_at      TEXT DEFAULT (datetime('now','localtime')),
+            updated_at      TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS bank_transactions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id      INTEGER NOT NULL REFERENCES bank_csv_profiles(id),
+            import_batch    TEXT NOT NULL,
+            txn_date        TEXT NOT NULL,
+            amount          REAL NOT NULL,
+            description     TEXT NOT NULL DEFAULT '',
+            reference       TEXT DEFAULT '',
+            balance         REAL,
+            status          TEXT NOT NULL DEFAULT 'UNMATCHED',
+            invoice_id      INTEGER REFERENCES ar_invoices(id),
+            payment_id      INTEGER REFERENCES ar_payments(id),
+            created_at      TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bank_txn_batch  ON bank_transactions(import_batch);
+        CREATE INDEX IF NOT EXISTS idx_bank_txn_status ON bank_transactions(status);
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '28')")
     conn.commit()

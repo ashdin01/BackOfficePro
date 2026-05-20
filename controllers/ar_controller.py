@@ -103,7 +103,7 @@ def record_payment(invoice_id, amount, payment_date=None,
     if not inv:
         raise ValueError(f"Invoice {invoice_id} not found")
 
-    payment_model.add(
+    payment_id = payment_model.add(
         invoice_id=invoice_id,
         customer_id=inv['customer_id'],
         payment_date=payment_date,
@@ -121,6 +121,8 @@ def record_payment(invoice_id, amount, payment_date=None,
         invoice_model.update_status(invoice_id, 'PAID')
     elif total_paid > 0:
         invoice_model.update_status(invoice_id, 'PARTIAL')
+
+    return payment_id
 
 
 # ── Create credit note ────────────────────────────────────────────────────────
