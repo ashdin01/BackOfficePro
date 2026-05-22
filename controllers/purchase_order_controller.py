@@ -103,7 +103,8 @@ def get_auto_reorder_items(supplier_id):
 def get_items_for_supplier(supplier_id=None):
     """
     Return active products for the item lookup dialog.
-    If supplier_id is given, restrict to products whose default supplier matches.
+    If supplier_id is given, return all products linked to that supplier via
+    product_suppliers (not just those whose default supplier matches).
     Rows include: supplier_name, barcode, description, pack_qty, pack_unit, cost_price.
     """
     conn = get_connection()
@@ -112,14 +113,15 @@ def get_items_for_supplier(supplier_id=None):
             return conn.execute("""
                 SELECT COALESCE(s.name, '') AS supplier_name,
                        p.barcode, p.description,
-                       COALESCE(p.pack_qty, 1) AS pack_qty,
-                       COALESCE(p.pack_unit, 'EA') AS pack_unit,
+                       COALESCE(ps.pack_qty, p.pack_qty, 1) AS pack_qty,
+                       COALESCE(ps.pack_unit, p.pack_unit, 'EA') AS pack_unit,
                        COALESCE(p.cost_price, 0.0) AS cost_price
                 FROM products p
-                LEFT JOIN suppliers s ON p.supplier_id = s.id
-                WHERE p.active = 1 AND p.supplier_id = ?
+                JOIN product_suppliers ps ON p.barcode = ps.barcode AND ps.supplier_id = ?
+                JOIN suppliers s ON s.id = ?
+                WHERE p.active = 1
                 ORDER BY p.description ASC
-            """, (supplier_id,)).fetchall()
+            """, (supplier_id, supplier_id)).fetchall()
         else:
             return conn.execute("""
                 SELECT COALESCE(s.name, '') AS supplier_name,

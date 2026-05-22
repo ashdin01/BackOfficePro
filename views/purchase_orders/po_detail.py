@@ -1255,21 +1255,21 @@ class AddLineDialog(QDialog):
                 return
         product = product_model.get_by_barcode(barcode)
         if product:
-            if self.supplier_id and product['supplier_id'] != self.supplier_id:
-                import models.supplier as _sup_model
-                po_sup   = _sup_model.get_by_id(self.supplier_id)
-                prod_sup = _sup_model.get_by_id(product['supplier_id']) if product['supplier_id'] else None
-                po_name   = po_sup['name'] if po_sup else "Unknown"
-                prod_name = prod_sup['name'] if prod_sup else "No supplier set"
-                QMessageBox.warning(
-                    self, "Wrong Supplier",
-                    f"This product belongs to: {prod_name}\n"
-                    f"This PO is for: {po_name}\n\n"
-                    f"Only {po_name} products can be added to this order."
-                )
-                self.barcode.clear()
-                self.barcode.setFocus()
-                return
+            if self.supplier_id:
+                import models.product_suppliers as _ps_model
+                linked = [r['supplier_id'] for r in _ps_model.get_by_barcode(barcode)]
+                if self.supplier_id not in linked:
+                    import models.supplier as _sup_model
+                    po_sup  = _sup_model.get_by_id(self.supplier_id)
+                    po_name = po_sup['name'] if po_sup else "Unknown"
+                    QMessageBox.warning(
+                        self, "Product Not Available",
+                        f"This product is not linked to {po_name}.\n\n"
+                        f"Add {po_name} as a supplier for this product first."
+                    )
+                    self.barcode.clear()
+                    self.barcode.setFocus()
+                    return
             self.description.setText(product['description'])
             self.unit_cost.setValue(product['cost_price'])
             self._reorder_max = int(product['reorder_max']) if product['reorder_max'] else 0
