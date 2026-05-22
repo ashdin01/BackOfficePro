@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
-import models.department as dept_model
+import controllers.department_controller as dept_ctrl
 
 
 class DepartmentEdit(KeyboardMixin, QWidget):
@@ -44,7 +44,7 @@ class DepartmentEdit(KeyboardMixin, QWidget):
         layout.addLayout(btns)
 
     def _populate(self):
-        dept = dept_model.get_by_id(self.dept_id)
+        dept = dept_ctrl.get_by_id(self.dept_id)
         if dept:
             self.code.setText(dept['code'])
             self.name.setText(dept['name'])
@@ -58,9 +58,9 @@ class DepartmentEdit(KeyboardMixin, QWidget):
             return
         try:
             if self.dept_id:
-                dept_model.update(self.dept_id, code, name, int(self.active.isChecked()))
+                dept_ctrl.update(self.dept_id, code, name, int(self.active.isChecked()))
             else:
-                dept_model.add(code, name)
+                dept_ctrl.add(code, name)
             if self.on_save:
                 self.on_save()
             self.close()

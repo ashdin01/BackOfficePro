@@ -6,9 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
-import models.stocktake as stocktake_model
-import models.product as product_model
-import models.stock_on_hand as soh_model
+import controllers.stocktake_controller as stocktake_ctrl
+import controllers.product_controller as product_ctrl
 
 
 class StocktakeSession(QWidget):
@@ -136,7 +135,7 @@ class StocktakeSession(QWidget):
         QShortcut(QKeySequence("Escape"), self, self.close)
 
     def _load(self):
-        session = stocktake_model.get_session(self.session_id)
+        session = stocktake_ctrl.get_session(self.session_id)
         self._session = session
         status = session['status']
         dept = session['dept_name'] or 'All Departments'
@@ -150,7 +149,7 @@ class StocktakeSession(QWidget):
         self.scan_input.setEnabled(is_open)
         self.qty_input.setEnabled(is_open)
 
-        counts = stocktake_model.get_counts(self.session_id)
+        counts = stocktake_ctrl.get_counts(self.session_id)
         self.table.setRowCount(0)
         total_lines = 0
         total_variance = 0
@@ -208,7 +207,7 @@ class StocktakeSession(QWidget):
         if not path:
             return
         try:
-            imported, skipped, errors = stocktake_model.import_from_csv(
+            imported, skipped, errors = stocktake_ctrl.import_from_csv(
                 self.session_id, path
             )
             self._show_import_result(imported, skipped, errors, path)
@@ -227,7 +226,7 @@ class StocktakeSession(QWidget):
         if not path:
             return
         try:
-            imported, skipped, errors = stocktake_model.import_from_sqlite(
+            imported, skipped, errors = stocktake_ctrl.import_from_sqlite(
                 self.session_id, path
             )
             self._show_import_result(imported, skipped, errors, path)
@@ -256,13 +255,13 @@ class StocktakeSession(QWidget):
         barcode = self.scan_input.text().strip()
         if not barcode:
             return
-        product = product_model.get_by_barcode(barcode)
+        product = product_ctrl.get_product_by_barcode(barcode)
         if not product:
             self.scan_status.setText(f"⚠  Barcode not found: {barcode}")
             self.scan_input.selectAll()
             return
         qty = int(self.qty_input.value())
-        stocktake_model.upsert_count(self.session_id, barcode, qty)
+        stocktake_ctrl.upsert_count(self.session_id, barcode, qty)
         self.scan_status.setText(
             f"✓  {product['description']}  —  counted: {qty}"
         )
@@ -329,7 +328,7 @@ class StocktakeSession(QWidget):
         QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
         inp.setFocus()
         if dlg.exec() and result[0]:
-            stocktake_model.upsert_count(self.session_id, barcode, int(inp.value()))
+            stocktake_ctrl.upsert_count(self.session_id, barcode, int(inp.value()))
             self._load()
 
     def _remove_line(self):
@@ -341,7 +340,7 @@ class StocktakeSession(QWidget):
         desc = self.table.item(row, 1).text()
         reply = QMessageBox.question(self, "Confirm", f"Remove count for:\n{desc}?")
         if reply == QMessageBox.StandardButton.Yes:
-            stocktake_model.delete_count(count_id)
+            stocktake_ctrl.delete_count(count_id)
             self._load()
 
     # ── Apply ─────────────────────────────────────────────────────────────────
@@ -376,7 +375,7 @@ class StocktakeSession(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                stocktake_model.apply_session(self.session_id)
+                stocktake_ctrl.apply_session(self.session_id)
                 QMessageBox.information(
                     self, "Complete",
                     f"Stocktake applied. {count} product(s) updated."

@@ -7,8 +7,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 
-import models.bank_recon as recon_model
-import models.ar_invoice as invoice_model
 import controllers.ar_controller as ar_ctrl
 
 _GREEN  = QColor('#c8e6c9')
@@ -106,10 +104,10 @@ class ReconSession(QWidget):
     # ── data loading ─────────────────────────────────────────────────────────
 
     def _load(self):
-        self._txns    = recon_model.get_transactions(self._batch)
+        self._txns    = ar_ctrl.get_recon_transactions(self._batch)
         ar_ctrl.refresh_overdue_statuses()
         self._invoices = [
-            r for r in invoice_model.get_all()
+            r for r in ar_ctrl.get_all_invoices()
             if r['status'] not in ('PAID', 'VOID', 'DRAFT')
         ]
         self._render_txns()
@@ -221,7 +219,7 @@ class ReconSession(QWidget):
             QMessageBox.information(self, "Match", "Select an invoice on the right first.")
             return
 
-        inv = invoice_model.get_by_id(inv_id)
+        inv = ar_ctrl.get_invoice_by_id(inv_id)
         if not inv:
             return
         owing  = round(float(inv['total']) - float(inv['amount_paid']), 2)
@@ -246,7 +244,7 @@ class ReconSession(QWidget):
                 reference    = t.get('reference') or '',
                 notes        = f"Bank recon {self._batch}",
             )
-            recon_model.set_matched(t['id'], inv_id, payment_id)
+            ar_ctrl.set_recon_matched(t['id'], inv_id, payment_id)
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
             return
@@ -257,14 +255,14 @@ class ReconSession(QWidget):
         t = self._selected_txn()
         if not t or t['status'] != 'UNMATCHED':
             return
-        recon_model.set_ignored(t['id'])
+        ar_ctrl.set_recon_ignored(t['id'])
         self._load()
 
     def _unmatch(self):
         t = self._selected_txn()
         if not t or t['status'] not in ('MATCHED', 'IGNORED'):
             return
-        recon_model.unmatch_transaction(t['id'])
+        ar_ctrl.unmatch_recon_transaction(t['id'])
         self._load()
 
     def _finish(self):

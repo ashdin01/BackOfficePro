@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QObject, QEvent, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
-import models.stock_on_hand as soh_model
 import controllers.product_controller as product_controller
 
 
@@ -40,9 +39,8 @@ CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
 
 
 def search_products(term):
-    """Delegate to product_model.search() for consistent multi-word PLU/barcode/description search."""
-    import models.product as product_model
-    return product_model.search(term, active_only=True)
+    """Delegate to product_controller.search_products() for consistent multi-word PLU/barcode/description search."""
+    return product_controller.search_products(term, active_only=True)
 
 
 # ── Adjustment reason codes ──────────────────────────────────────────────
@@ -276,11 +274,11 @@ class _AdjustWorker(QObject):
 
     def run(self):
         try:
-            soh_model.adjust(
+            product_controller.adjust_soh(
                 self._barcode, self._qty, self._adj_type,
                 reference=self._reference, notes=self._notes,
             )
-            soh     = soh_model.get_by_barcode(self._barcode)
+            soh     = product_controller.get_soh_by_barcode(self._barcode)
             new_qty = int(soh["quantity"]) if soh else 0
             rows    = product_controller.get_recent_adjustments(limit=100)
             self.finished.emit(new_qty, rows)
@@ -468,7 +466,7 @@ class StockAdjustView(QWidget):
             return
 
         barcodes = [p["barcode"] for p in products]
-        soh_map = soh_model.get_by_barcodes(barcodes)
+        soh_map = product_controller.get_soh_by_barcodes(barcodes)
 
         self.results_table.setUpdatesEnabled(False)
         self.results_table.setRowCount(len(products))
@@ -489,7 +487,7 @@ class StockAdjustView(QWidget):
 
     def _select(self, barcode, description):
         self._selected_barcode = barcode
-        soh = soh_model.get_by_barcode(barcode)
+        soh = product_controller.get_soh_by_barcode(barcode)
         on_hand = int(soh["quantity"]) if soh else 0
         self.selected_label.setText(
             f"Selected: {description}   |   Barcode: {barcode}   |   Current Stock: {on_hand}"

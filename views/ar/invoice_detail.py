@@ -8,12 +8,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-import models.ar_invoice as invoice_model
-import models.customer as customer_model
-import models.ar_payment as payment_model
 import controllers.ar_controller as ar_ctrl
-import models.product as product_model
-import models.stock_on_hand as soh_model
+import controllers.product_controller as product_ctrl
 
 
 class InvoiceDetail(QWidget):
@@ -134,7 +130,7 @@ class InvoiceDetail(QWidget):
         form = QFormLayout(dlg)
 
         cust_combo = QComboBox()
-        customers  = customer_model.get_all(active_only=True)
+        customers  = ar_ctrl.get_all_customers(active_only=True)
         for c in customers:
             cust_combo.addItem(f"{c['code']} — {c['name']}", c['id'])
         form.addRow("Customer *", cust_combo)
@@ -174,7 +170,7 @@ class InvoiceDetail(QWidget):
             self._on_saved()
 
     def _load(self):
-        self._inv = invoice_model.get_by_id(self._id)
+        self._inv = ar_ctrl.get_invoice_by_id(self._id)
         if not self._inv:
             return
         inv = self._inv
@@ -200,7 +196,7 @@ class InvoiceDetail(QWidget):
         self._refresh_totals()
 
     def _load_lines(self):
-        lines = invoice_model.get_lines(self._id)
+        lines = ar_ctrl.get_invoice_lines(self._id)
         self.table.setRowCount(len(lines))
         for i, ln in enumerate(lines):
             vals = [
@@ -219,7 +215,7 @@ class InvoiceDetail(QWidget):
                 self.table.setItem(i, j, item)
 
     def _load_payments(self):
-        payments = payment_model.get_by_invoice(self._id)
+        payments = ar_ctrl.get_payments_by_invoice(self._id)
         self.payments_tbl.setRowCount(len(payments))
         for i, p in enumerate(payments):
             for j, v in enumerate([
@@ -231,7 +227,7 @@ class InvoiceDetail(QWidget):
     def _refresh_totals(self):
         if not self._inv:
             return
-        inv     = invoice_model.get_by_id(self._id)
+        inv     = ar_ctrl.get_invoice_by_id(self._id)
         total   = float(inv['total'])
         paid    = float(inv['amount_paid'])
         balance = round(total - paid, 2)
@@ -250,7 +246,7 @@ class InvoiceDetail(QWidget):
         dlg = _LineDialog(parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             d = dlg.data()
-            invoice_model.add_line(
+            ar_ctrl.add_invoice_line(
                 invoice_id=self._id,
                 description=d['description'],
                 quantity=d['quantity'],
@@ -271,14 +267,14 @@ class InvoiceDetail(QWidget):
         if row < 0:
             return
         line_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        lines   = invoice_model.get_lines(self._id)
+        lines   = ar_ctrl.get_invoice_lines(self._id)
         ln      = next((l for l in lines if l['id'] == line_id), None)
         if not ln:
             return
         dlg = _LineDialog(parent=self, line=ln)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             d = dlg.data()
-            invoice_model.update_line(
+            ar_ctrl.update_invoice_line(
                 line_id=line_id,
                 description=d['description'],
                 quantity=d['quantity'],
@@ -303,7 +299,7 @@ class InvoiceDetail(QWidget):
             self, "Delete Line", "Remove this line?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         ) == QMessageBox.StandardButton.Yes:
-            invoice_model.delete_line(line_id)
+            ar_ctrl.delete_invoice_line(line_id)
             self._load_lines()
             self._refresh_totals()
             if self._on_saved:
@@ -312,14 +308,14 @@ class InvoiceDetail(QWidget):
     def _status_changed(self, status):
         if not self._id:
             return
-        invoice_model.update_status(self._id, status)
+        ar_ctrl.update_invoice_status(self._id, status)
         self._load()
         if self._on_saved:
             self._on_saved()
 
     def _save_notes(self):
         if self._id:
-            invoice_model.update_notes(self._id, self.notes_edit.text().strip())
+            ar_ctrl.update_invoice_notes(self._id, self.notes_edit.text().strip())
 
     def _record_payment(self):
         if not self._inv:
@@ -440,7 +436,7 @@ class _LineDialog(QDialog):
         bc = self.barcode.text().strip()
         if not bc:
             return
-        p = product_model.get_by_barcode(bc)
+        p = product_ctrl.get_product_by_barcode(bc)
         if p:
             self.description.setText(p['description'])
             self.unit_price.setValue(float(p['sell_price'] or 0))

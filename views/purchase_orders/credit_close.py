@@ -10,8 +10,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-import models.purchase_order as po_model
-import models.po_lines as lines_model
 import controllers.purchase_order_controller as po_ctrl
 
 
@@ -113,8 +111,8 @@ class CreditClose(QWidget):
         QShortcut(QKeySequence("Escape"), self, self.close)
 
     def _load(self):
-        po    = po_model.get_by_id(self.po_id)
-        lines = lines_model.get_by_po(self.po_id)
+        po    = po_ctrl.get_po_by_id(self.po_id)
+        lines = po_ctrl.get_po_lines(self.po_id)
 
         self.setWindowTitle(f"Close Credit Return: {po['po_number']}")
         self.header.setText(
@@ -188,7 +186,7 @@ class CreditClose(QWidget):
             entry['qty_spin'].setValue(entry['qty_spin'].maximum())
 
     def _confirm(self):
-        po = po_model.get_by_id(self.po_id)
+        po = po_ctrl.get_po_by_id(self.po_id)
         if po['status'] not in ('DRAFT', 'SENT'):
             QMessageBox.warning(
                 self, "Cannot Close",

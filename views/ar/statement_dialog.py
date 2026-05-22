@@ -4,7 +4,6 @@ from PyQt6.QtWidgets import (
     QDateEdit, QMessageBox, QLabel
 )
 from PyQt6.QtCore import QDate
-import models.customer as customer_model
 import controllers.ar_controller as ar_ctrl
 
 
@@ -19,7 +18,7 @@ class StatementDialog(QDialog):
         form = QFormLayout(self)
 
         self.cust_combo = QComboBox()
-        customers = customer_model.get_all(active_only=True)
+        customers = ar_ctrl.get_all_customers(active_only=True)
         for c in customers:
             self.cust_combo.addItem(f"{c['code']} — {c['name']}", c['id'])
         if preselect_id:

@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.error_dialog import show_error
-import models.stocktake as stocktake_model
+import controllers.stocktake_controller as stocktake_ctrl
 import csv
 import os
 
@@ -88,7 +88,7 @@ class VarianceReport(QWidget):
         QShortcut(QKeySequence("Escape"), self, self.close)
 
     def _load(self):
-        self._rows = stocktake_model.get_variance_report(self.session_id)
+        self._rows = stocktake_ctrl.get_variance_report(self.session_id)
         self._apply_filter()
 
     def _apply_filter(self):
@@ -257,7 +257,7 @@ class VarianceReport(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                stocktake_model.apply_session(self.session_id)
+                stocktake_ctrl.apply_session(self.session_id)
                 QMessageBox.information(
                     self, "Complete",
                     f"Stocktake applied. {counted} product(s) updated."

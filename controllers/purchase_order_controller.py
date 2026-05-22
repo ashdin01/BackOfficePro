@@ -3,6 +3,8 @@ from datetime import date, timedelta
 from database.connection import get_connection
 import models.purchase_order as po_model
 import models.po_lines as lines_model
+import models.po_charges as charges_model
+import models.settings as settings_model
 
 
 def _on_order_units(conn, barcodes):
@@ -797,3 +799,77 @@ def lookup_product_for_po(barcode, po_id, supplier_id, unit_mode):
         'pack_unit':      pack_unit,
         'suggested_qty':  suggested_qty,
     }
+
+
+# ── Purchase order model wrappers ─────────────────────────────────────────────
+
+def get_all_pos(status=None, archived=False):
+    return po_model.get_all(status=status, archived=archived)
+
+
+def get_po_by_id(po_id):
+    return po_model.get_by_id(po_id)
+
+
+def create_po(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO'):
+    return po_model.create(supplier_id, delivery_date=delivery_date,
+                           notes=notes, created_by=created_by, po_type=po_type)
+
+
+def update_po_status(po_id, status):
+    po_model.update_status(po_id, status)
+
+
+def delete_draft_po(po_id):
+    po_model.cancel(po_id)
+
+
+def cancel_po(po_id):
+    po_model.cancel(po_id)
+
+
+def cleanup_old_pos():
+    return po_model.cleanup_old_pos()
+
+
+def reverse_po(po_id, reversed_by=''):
+    po_model.reverse(po_id, reversed_by=reversed_by)
+
+
+# ── PO lines model wrappers ───────────────────────────────────────────────────
+
+def get_po_lines(po_id):
+    return lines_model.get_by_po(po_id)
+
+
+def add_po_line(po_id, barcode, description, ordered_qty, unit_cost=0, notes='', pack_qty=1):
+    lines_model.add(po_id, barcode, description, ordered_qty,
+                    unit_cost=unit_cost, notes=notes, pack_qty=pack_qty)
+
+
+def update_po_line(line_id, ordered_qty, unit_cost, notes):
+    lines_model.update(line_id, ordered_qty, unit_cost, notes)
+
+
+def delete_po_line(line_id):
+    lines_model.delete(line_id)
+
+
+def add_po_note_line(po_id, text):
+    return lines_model.add_note(po_id, text)
+
+
+def renumber_po_lines(po_id, ordered_ids):
+    lines_model.renumber_sort_order(po_id, ordered_ids)
+
+
+# ── PO charges model wrappers ─────────────────────────────────────────────────
+
+def get_po_charges(po_id):
+    return charges_model.get_by_po(po_id)
+
+
+# ── Settings model wrapper ────────────────────────────────────────────────────
+
+def get_setting(key, default=''):
+    return settings_model.get_setting(key, default=default)

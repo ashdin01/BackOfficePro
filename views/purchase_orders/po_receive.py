@@ -7,10 +7,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QObject, QEvent
 from PyQt6.QtGui import QColor
 import math
-import models.purchase_order as po_model
-import models.po_lines as lines_model
-import models.stock_on_hand as stock_model
-import models.product as product_model
 import controllers.product_controller as product_ctrl
 import controllers.purchase_order_controller as po_ctrl
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
@@ -434,7 +430,7 @@ class POReceive(QWidget):
         self._product_win.raise_()
 
     def _load(self):
-        po = po_model.get_by_id(self.po_id)
+        po = po_ctrl.get_po_by_id(self.po_id)
         self.setWindowTitle(f"Receive: {po['po_number']}")
         self.header.setText(
             f"<b>{po['po_number']}</b> — {po['supplier_name']} "
@@ -443,7 +439,7 @@ class POReceive(QWidget):
         existing_inv = po['supplier_invoice_number'] or ''
         if existing_inv:
             self.supplier_invoice_input.setText(existing_inv)
-        self.lines = lines_model.get_by_po(self.po_id)
+        self.lines = po_ctrl.get_po_lines(self.po_id)
         self.table.setRowCount(0)
 
         # Tuple stored per row:
@@ -455,7 +451,7 @@ class POReceive(QWidget):
             r = self.table.rowCount()
             self.table.insertRow(r)
 
-            product      = product_model.get_by_barcode(line['barcode'])
+            product      = product_ctrl.get_product_by_barcode(line['barcode'])
             pack_qty     = int(product['pack_qty']) if product and product['pack_qty'] else 1
             pack_unit    = (product['pack_unit'] or 'EA') if product else 'EA'
             current_cost = float(product['cost_price']) if product else 0.0
@@ -714,7 +710,7 @@ class POReceive(QWidget):
             f"QLineEdit:focus {{ border-color: #1976d2; }}"
         )
 
-        po = po_model.get_by_id(self.po_id)
+        po = po_ctrl.get_po_by_id(self.po_id)
         po_number = po['po_number']
 
         if po['status'] in ('RECEIVED', 'REVERSED', 'CANCELLED'):

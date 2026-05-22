@@ -25,3 +25,7 @@ def deactivate(supplier_id):
 def get_products(supplier_id, default_only=True):
     """Return active products linked to this supplier."""
     return ps_model.get_by_supplier(supplier_id, default_only=default_only)
+
+
+def get_order_due_today():
+    return supplier_model.get_order_due_today()

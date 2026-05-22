@@ -7,11 +7,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 import csv, os
 from utils.error_dialog import show_error
-import models.purchase_order as po_model
-import models.po_lines as lines_model
-import models.po_charges as charges_model
-import models.product as product_model
-import models.supplier as supplier_model
+import controllers.purchase_order_controller as po_ctrl
+import controllers.product_controller as product_ctrl
+import controllers.supplier_controller as supplier_ctrl
 
 
 _RIGHT  = Qt.AlignmentFlag.AlignRight  | Qt.AlignmentFlag.AlignVCenter
@@ -40,7 +38,7 @@ class POHistory(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        po = po_model.get_by_id(self.po_id)
+        po = po_ctrl.get_po_by_id(self.po_id)
         self.setWindowTitle(f"PO History: {po['po_number']}")
 
         status_colour = {
@@ -60,7 +58,7 @@ class POHistory(QWidget):
         layout.addWidget(self.header)
 
         # ── Bank details row ─────────────────────────────────────────────────
-        supplier = supplier_model.get_by_id(po['supplier_id'])
+        supplier = supplier_ctrl.get_by_id(po['supplier_id'])
         bank_name   = (supplier['bank_account_name']   or '') if supplier else ''
         bank_bsb    = (supplier['bank_bsb']            or '') if supplier else ''
         bank_acct   = (supplier['bank_account_number'] or '') if supplier else ''
@@ -112,7 +110,7 @@ class POHistory(QWidget):
         layout.addWidget(self.table)
 
         # ── Charges table ────────────────────────────────────────────────────
-        charges = charges_model.get_by_po(self.po_id)
+        charges = po_ctrl.get_po_charges(self.po_id)
         if charges:
             chg_lbl = QLabel("Additional Charges")
             chg_lbl.setStyleSheet("font-weight: bold; color: #8b949e; font-size: 11px;"
@@ -183,17 +181,17 @@ class POHistory(QWidget):
 
     def _load_lines(self, po=None):
         if po is None:
-            po = po_model.get_by_id(self.po_id)
+            po = po_ctrl.get_po_by_id(self.po_id)
 
-        lines   = lines_model.get_by_po(self.po_id)
-        charges = charges_model.get_by_po(self.po_id)
+        lines   = po_ctrl.get_po_lines(self.po_id)
+        charges = po_ctrl.get_po_charges(self.po_id)
 
         self.table.setRowCount(len(lines))
         total_ex  = 0.0
         total_gst = 0.0
 
         for r, line in enumerate(lines):
-            product   = product_model.get_by_barcode(line['barcode'])
+            product   = product_ctrl.get_product_by_barcode(line['barcode'])
             pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
             pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
             tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
@@ -261,7 +259,7 @@ class POHistory(QWidget):
         )
 
     def _export_csv(self):
-        po = po_model.get_by_id(self.po_id)
+        po = po_ctrl.get_po_by_id(self.po_id)
         default_name = f"{po['po_number'].replace('/', '-')}.csv"
         path, _ = QFileDialog.getSaveFileName(
             self, "Export PO History",
@@ -271,8 +269,8 @@ class POHistory(QWidget):
         if not path:
             return
 
-        lines   = lines_model.get_by_po(self.po_id)
-        charges = charges_model.get_by_po(self.po_id)
+        lines   = po_ctrl.get_po_lines(self.po_id)
+        charges = po_ctrl.get_po_charges(self.po_id)
 
         total_ex  = 0.0
         total_gst = 0.0
@@ -286,7 +284,7 @@ class POHistory(QWidget):
             w.writerow(["Status",           po['status']])
             w.writerow(["Supplier Invoice", po['supplier_invoice_number'] or ''])
             w.writerow(["Received Date",    po['delivery_date'] or ''])
-            sup = supplier_model.get_by_id(po['supplier_id'])
+            sup = supplier_ctrl.get_by_id(po['supplier_id'])
             if sup:
                 bk_name = sup['bank_account_name']   or ''
                 bk_bsb  = sup['bank_bsb']            or ''
@@ -306,7 +304,7 @@ class POHistory(QWidget):
             ])
 
             for line in lines:
-                product   = product_model.get_by_barcode(line['barcode'])
+                product   = product_ctrl.get_product_by_barcode(line['barcode'])
                 pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
                 pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
                 tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
@@ -384,9 +382,9 @@ class POHistory(QWidget):
             SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
         )
 
-        po      = po_model.get_by_id(self.po_id)
-        lines   = lines_model.get_by_po(self.po_id)
-        charges = charges_model.get_by_po(self.po_id)
+        po      = po_ctrl.get_po_by_id(self.po_id)
+        lines   = po_ctrl.get_po_lines(self.po_id)
+        charges = po_ctrl.get_po_charges(self.po_id)
 
         default_name = f"{po['po_number'].replace('/', '-')}_receipt.pdf"
         path, _ = QFileDialog.getSaveFileName(
@@ -420,7 +418,7 @@ class POHistory(QWidget):
         story.append(Paragraph(f"Purchase Order Receipt", _s(16, bold=True)))
         story.append(Spacer(1, 4*mm))
 
-        sup_pdf = supplier_model.get_by_id(po['supplier_id'])
+        sup_pdf = supplier_ctrl.get_by_id(po['supplier_id'])
         bk_name_pdf = (sup_pdf['bank_account_name']   or '') if sup_pdf else ''
         bk_bsb_pdf  = (sup_pdf['bank_bsb']            or '') if sup_pdf else ''
         bk_acct_pdf = (sup_pdf['bank_account_number'] or '') if sup_pdf else ''
@@ -430,7 +428,7 @@ class POHistory(QWidget):
         # Pre-calculate totals so they can appear in the header block
         _t_ex = _t_gst = 0.0
         for _ln in lines:
-            _prod  = product_model.get_by_barcode(_ln['barcode'])
+            _prod  = product_ctrl.get_product_by_barcode(_ln['barcode'])
             _pack  = int(_prod['pack_qty']) if _prod and _prod['pack_qty'] else 1
             _tax   = float(_prod['tax_rate']) if _prod and _prod['tax_rate'] else 0.0
             _cost  = float(_ln['actual_cost'] or _ln['unit_cost'] or 0)
@@ -503,7 +501,7 @@ class POHistory(QWidget):
         tbl_data = [[Paragraph(h, _s(8, bold=True, align=TA_CENTER)) for h in hdrs]]
 
         for i, line in enumerate(lines):
-            product   = product_model.get_by_barcode(line['barcode'])
+            product   = product_ctrl.get_product_by_barcode(line['barcode'])
             pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
             pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
             tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
@@ -586,14 +584,14 @@ class POHistory(QWidget):
             subprocess.Popen(['xdg-open', path])
 
     def _reverse(self):
-        po    = po_model.get_by_id(self.po_id)
-        lines = lines_model.get_by_po(self.po_id)
+        po    = po_ctrl.get_po_by_id(self.po_id)
+        lines = po_ctrl.get_po_lines(self.po_id)
 
         summary_lines = []
         for line in lines:
             received = int(line['received_qty'] or 0)
             if received > 0:
-                product  = product_model.get_by_barcode(line['barcode'])
+                product  = product_ctrl.get_product_by_barcode(line['barcode'])
                 pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
                 units    = received * pack_qty
                 summary_lines.append(f"  • {line['description']}: -{units} units")
@@ -621,7 +619,7 @@ class POHistory(QWidget):
             return
 
         try:
-            po_model.reverse(self.po_id)
+            po_ctrl.reverse_po(self.po_id)
             QMessageBox.information(
                 self, "PO Reversed",
                 f"{po['po_number']} has been reversed.\n"

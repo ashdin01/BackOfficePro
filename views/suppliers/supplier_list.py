@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 from utils.keyboard_mixin import KeyboardMixin
-import models.supplier as supplier_model
+import controllers.supplier_controller as supplier_ctrl
 
 
 class SupplierList(KeyboardMixin, QWidget):
@@ -49,7 +49,7 @@ class SupplierList(KeyboardMixin, QWidget):
 
     def _load(self, rows=None):
         if rows is None:
-            rows = supplier_model.get_all(active_only=False)
+            rows = supplier_ctrl.get_all(active_only=False)
         self.table.setRowCount(0)
         for row in rows:
             r = self.table.rowCount()
@@ -71,7 +71,7 @@ class SupplierList(KeyboardMixin, QWidget):
 
     def _search(self, term):
         term = term.lower()
-        all_rows = supplier_model.get_all(active_only=False)
+        all_rows = supplier_ctrl.get_all(active_only=False)
         filtered = [r for r in all_rows if term in r['name'].lower() or term in r['code'].lower()]
         self._load(filtered)
 

@@ -6,8 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.keyboard_mixin import KeyboardMixin
-import models.department as dept_model
-import models.group as group_model
+import controllers.department_controller as dept_ctrl
 
 
 class DepartmentList(KeyboardMixin, QWidget):
@@ -53,7 +52,7 @@ class DepartmentList(KeyboardMixin, QWidget):
         return w
 
     def _load_depts(self):
-        rows = dept_model.get_all(active_only=False)
+        rows = dept_ctrl.get_all(active_only=False)
         self.dept_table.setRowCount(0)
         for row in rows:
             r = self.dept_table.rowCount()
@@ -91,7 +90,7 @@ class DepartmentList(KeyboardMixin, QWidget):
 
         self.dept_filter = QComboBox()
         self.dept_filter.addItem("All Departments", None)
-        for d in dept_model.get_all(active_only=False):
+        for d in dept_ctrl.get_all(active_only=False):
             self.dept_filter.addItem(f"{d['code']} — {d['name']}", d['id'])
         self.dept_filter.currentIndexChanged.connect(self._load_groups)
         top.addWidget(self.dept_filter)
@@ -120,9 +119,9 @@ class DepartmentList(KeyboardMixin, QWidget):
     def _load_groups(self):
         dept_id = self.dept_filter.currentData()
         if dept_id:
-            rows = group_model.get_by_department(dept_id, active_only=False)
+            rows = dept_ctrl.get_groups_by_department(dept_id, active_only=False)
         else:
-            rows = group_model.get_all(active_only=False)
+            rows = dept_ctrl.get_all_groups(active_only=False)
 
         self.group_table.setRowCount(0)
         for row in rows:

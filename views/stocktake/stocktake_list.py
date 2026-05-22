@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
-import models.stocktake as stocktake_model
-import models.department as dept_model
+import controllers.stocktake_controller as stocktake_ctrl
+import controllers.department_controller as dept_ctrl
 
 
 class StocktakeList(QWidget):
@@ -48,7 +48,7 @@ class StocktakeList(QWidget):
         QShortcut(QKeySequence("Return"), self, self._open_session)
 
     def _load(self):
-        rows = stocktake_model.get_all_sessions()
+        rows = stocktake_ctrl.get_all_sessions()
         self.table.setRowCount(0)
         for row in rows:
             r = self.table.rowCount()
@@ -96,7 +96,7 @@ class NewSessionDialog(QDialog):
         self.setWindowTitle("New Stocktake Session")
         self.setMinimumWidth(380)
         self.created_id = None
-        self._depts = dept_model.get_all()
+        self._depts = dept_ctrl.get_all()
         self._build_ui()
 
     def _build_ui(self):
@@ -143,7 +143,7 @@ class NewSessionDialog(QDialog):
             QMessageBox.warning(self, "Validation", "Please enter a label for this session.")
             return
         try:
-            self.created_id = stocktake_model.create_session(
+            self.created_id = stocktake_ctrl.create_session(
                 label=label,
                 department_id=self.dept.currentData(),
                 notes=self.notes.toPlainText(),

@@ -8,12 +8,9 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, QDate
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.error_dialog import show_error
-import models.purchase_order as po_model
-import models.po_lines as lines_model
-import models.product as product_model
-import models.stock_on_hand as stock_model
-import models.settings as settings_model
 import controllers.purchase_order_controller as po_controller
+import controllers.product_controller as product_ctrl
+import controllers.supplier_controller as supplier_ctrl
 from config.constants import PO_STATUS_SENT
 from datetime import date, timedelta
 import csv
@@ -371,7 +368,7 @@ class PODetail(QWidget):
         import logging
         if self._po['status'] == 'DRAFT':
             try:
-                po_model.update_status(self.po_id, 'DRAFT')
+                po_controller.update_po_status(self.po_id, 'DRAFT')
             except Exception as e:
                 logging.warning(f"Auto-save before PDF export failed: {e}")
         try:
@@ -461,7 +458,7 @@ class PODetail(QWidget):
             show_error(self, "Could not export CSV.", e, title="Export Failed")
 
     def _load(self):
-        po = po_model.get_by_id(self.po_id)
+        po = po_controller.get_po_by_id(self.po_id)
         self._po = po
         from config.constants import PO_DOC_TITLES, PO_TYPES
         _po_type   = po['po_type'] or 'PO'
@@ -472,8 +469,7 @@ class PODetail(QWidget):
             "Qty (Units)" if self._unit_mode else "Order Qty"
         ))
         self.setWindowTitle(f"{_doc_title}: {po['po_number']}")
-        from models.supplier import get_by_id as get_supplier
-        supplier = get_supplier(po['supplier_id'])
+        supplier = supplier_ctrl.get_by_id(po['supplier_id'])
         self._supplier = supplier
         self._order_minimum = float(supplier['order_minimum']) if supplier and supplier['order_minimum'] else 0
         min_str = f"  |  Order Min: <b>${self._order_minimum:.2f}</b>" if self._order_minimum else ""
@@ -490,12 +486,12 @@ class PODetail(QWidget):
             f"Status: <b>{po['status']}</b> — "
             f"Delivery: {po['delivery_date'] or 'TBC'}{min_str}"
         )
-        lines = lines_model.get_by_po(self.po_id)
+        lines = po_controller.get_po_lines(self.po_id)
 
         _po_type = po['po_type'] or 'PO'
         if len(lines) == 0 and not self._blank and _po_type == 'PO':
             self._auto_load_recommendations()
-            lines = lines_model.get_by_po(self.po_id)
+            lines = po_controller.get_po_lines(self.po_id)
         elif len(lines) == 0:
             from config.constants import PO_TYPES
             type_label = PO_TYPES.get(_po_type, 'Order')
@@ -518,7 +514,7 @@ class PODetail(QWidget):
             QMessageBox.information(self, "Recommendations", "All recommended products are already on this PO.")
             return
         self.rec_banner.setText(f"✓ {count} additional line(s) added.")
-        self._populate_table(lines_model.get_by_po(self.po_id))
+        self._populate_table(po_controller.get_po_lines(self.po_id))
         if self.on_save:
             self.on_save()
 
@@ -534,8 +530,8 @@ class PODetail(QWidget):
             d_from = self._date_from.date().toPyDate()
             d_to   = self._date_to.date().toPyDate()
 
-            product_map = product_model.get_by_barcodes(barcodes)
-            soh_map     = stock_model.get_by_barcodes(barcodes)
+            product_map = product_ctrl.get_products_by_barcodes(barcodes)
+            soh_map     = product_ctrl.get_soh_by_barcodes(barcodes)
             sales_map   = po_controller.get_sales_for_barcodes_range(barcodes, d_from, d_to)
 
             for line in lines:
@@ -745,7 +741,7 @@ class PODetail(QWidget):
                 if self._unit_mode:
                     # IO/RO: store exact unit quantity — no carton snapping
                     total_units = max(1, int(float(item.text())))
-                    lines_model.update(
+                    po_controller.update_po_line(
                         line_id,
                         ordered_qty=total_units,
                         unit_cost=float(self.table.item(row, 7).text().replace("$", "").strip()),
@@ -759,7 +755,7 @@ class PODetail(QWidget):
                     self.table.blockSignals(True)
                     item.setText(str(snapped_units))
                     self.table.blockSignals(False)
-                    lines_model.update(
+                    po_controller.update_po_line(
                         line_id,
                         ordered_qty=cartons,
                         unit_cost=float(self.table.item(row, 7).text().replace("$", "").strip()),
@@ -772,7 +768,7 @@ class PODetail(QWidget):
                 cost = max(0.0, float(item.text().replace("$", "").strip()))
                 total_units_col = int(float(self.table.item(row, 6).text()))
                 if self._unit_mode:
-                    lines_model.update(
+                    po_controller.update_po_line(
                         line_id,
                         ordered_qty=total_units_col,
                         unit_cost=cost,
@@ -780,7 +776,7 @@ class PODetail(QWidget):
                     )
                 else:
                     cartons = max(1, math.ceil(total_units_col / pack_qty))
-                    lines_model.update(
+                    po_controller.update_po_line(
                         line_id,
                         ordered_qty=cartons,
                         unit_cost=cost,
@@ -846,11 +842,11 @@ class PODetail(QWidget):
             self.total_label.setText(f"Order Total (inc. GST): ${order_total:.2f}")
 
     def _add_line(self):
-        po = po_model.get_by_id(self.po_id)
+        po = po_controller.get_po_by_id(self.po_id)
         dlg = AddLineDialog(self.po_id, supplier_id=po["supplier_id"],
                             po_type=po["po_type"] or 'PO', parent=self)
         if dlg.exec():
-            lines = lines_model.get_by_po(self.po_id)
+            lines = po_controller.get_po_lines(self.po_id)
             self._populate_table(lines)
             last = self.table.rowCount() - 1
             if last >= 0:
@@ -865,7 +861,7 @@ class PODetail(QWidget):
             return
 
         row = self.table.currentRow()
-        note_id = lines_model.add_note(self.po_id, text.strip())
+        note_id = po_controller.add_po_note_line(self.po_id, text.strip())
 
         # Build new order: insert note after selected row (or at end)
         ids = list(self._line_ids)
@@ -874,8 +870,8 @@ class PODetail(QWidget):
         else:
             ids.append(note_id)
 
-        lines_model.renumber_sort_order(self.po_id, ids)
-        lines = lines_model.get_by_po(self.po_id)
+        po_controller.renumber_po_lines(self.po_id, ids)
+        lines = po_controller.get_po_lines(self.po_id)
         self._populate_table(lines)
         target = (row + 1) if row >= 0 else (self.table.rowCount() - 1)
         target = min(target, self.table.rowCount() - 1)
@@ -901,8 +897,8 @@ class PODetail(QWidget):
             f"Remove this line?\n\n{desc}"
         )
         if reply == QMessageBox.StandardButton.Yes:
-            lines_model.delete(line_id)
-            lines = lines_model.get_by_po(self.po_id)
+            po_controller.delete_po_line(line_id)
+            lines = po_controller.get_po_lines(self.po_id)
             self._populate_table(lines)
             target = min(row, self.table.rowCount() - 1)
             if target >= 0:
@@ -911,7 +907,7 @@ class PODetail(QWidget):
                 self.on_save()
 
     def _mark_sent(self):
-        lines = lines_model.get_by_po(self.po_id)
+        lines = po_controller.get_po_lines(self.po_id)
         if not lines:
             QMessageBox.warning(self, "Cannot Send", "Add at least one line before sending.")
             return
@@ -938,7 +934,7 @@ class PODetail(QWidget):
                 return
         reply = QMessageBox.question(self, "Confirm", "Mark this PO as Sent?")
         if reply == QMessageBox.StandardButton.Yes:
-            po_model.update_status(self.po_id, PO_STATUS_SENT)
+            po_controller.update_po_status(self.po_id, PO_STATUS_SENT)
             self._load()
             if self.on_save:
                 self.on_save()
@@ -947,7 +943,7 @@ class PODetail(QWidget):
         reply = QMessageBox.question(
             self, "Confirm", "Cancel this PO? This cannot be undone.")
         if reply == QMessageBox.StandardButton.Yes:
-            po_model.cancel(self.po_id)
+            po_controller.cancel_po(self.po_id)
             if self.on_save:
                 self.on_save()
             self.close()
@@ -1138,7 +1134,7 @@ class AddLineDialog(QDialog):
         qty = int(self.qty.value())
         if self._unit_mode:
             # IO/RO: store exact unit count; pack_qty kept for reference only
-            lines_model.add(
+            po_controller.add_po_line(
                 po_id=self.po_id,
                 barcode=barcode,
                 description=description,
@@ -1149,7 +1145,7 @@ class AddLineDialog(QDialog):
             )
         else:
             note = _carton_note(self._pack_qty, self._pack_unit, barcode)
-            lines_model.add(
+            po_controller.add_po_line(
                 po_id=self.po_id,
                 barcode=barcode,
                 description=description,

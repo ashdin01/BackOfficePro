@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 from utils.keyboard_mixin import KeyboardMixin
-import models.bundle as bundle_model
+import controllers.bundle_controller as bundle_ctrl
 
 
 class BundleList(KeyboardMixin, QWidget):
@@ -67,7 +67,7 @@ class BundleList(KeyboardMixin, QWidget):
         self.setup_keyboard(table=self.table)
 
     def _load(self, search=''):
-        rows = bundle_model.get_all(active_only=False)
+        rows = bundle_ctrl.get_all(active_only=False)
         if search:
             term = search.lower()
             rows = [r for r in rows if term in r['name'].lower()

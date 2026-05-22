@@ -6,10 +6,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
-import models.product as product_model
-import models.department as dept_model
-import models.supplier as supplier_model
-import models.group as group_model
+import controllers.product_controller as product_ctrl
+import controllers.department_controller as dept_ctrl
+import controllers.supplier_controller as supplier_ctrl
 
 
 class ProductAdd(KeyboardMixin, QWidget):
@@ -18,9 +17,9 @@ class ProductAdd(KeyboardMixin, QWidget):
         self.setWindowTitle("Add Product")
         self.setMinimumWidth(500)
         self.on_save = on_save
-        self._depts = dept_model.get_all()
-        self._suppliers = supplier_model.get_all()
-        self._groups = group_model.get_all(active_only=True)
+        self._depts = dept_ctrl.get_all()
+        self._suppliers = supplier_ctrl.get_all()
+        self._groups = dept_ctrl.get_all_groups(active_only=True)
         self._build_ui()
         self.setup_keyboard()
 
@@ -196,7 +195,7 @@ class ProductAdd(KeyboardMixin, QWidget):
             QMessageBox.warning(self, "Validation", "Barcode and Description are required.")
             return
         try:
-            product_model.add(
+            product_ctrl.add_product(
                 barcode=barcode,
                 description=description,
                 brand=self.brand.text().strip(),

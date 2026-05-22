@@ -4,8 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
-import models.group as group_model
-import models.department as dept_model
+import controllers.department_controller as dept_ctrl
 
 
 class GroupEdit(QWidget):
@@ -15,7 +14,7 @@ class GroupEdit(QWidget):
         self.on_save = on_save
         self.setWindowTitle("Edit Group" if group_id else "Add Group")
         self.setMinimumWidth(380)
-        self._depts = dept_model.get_all(active_only=False)
+        self._depts = dept_ctrl.get_all(active_only=False)
         self._build_ui()
         if preset_dept_id:
             # Pre-select department
@@ -67,7 +66,7 @@ class GroupEdit(QWidget):
         self.code.setFocus()
 
     def _populate(self):
-        g = group_model.get_by_id(self.group_id)
+        g = dept_ctrl.get_group_by_id(self.group_id)
         if g:
             for i, d in enumerate(self._depts):
                 if d['id'] == g['department_id']:
@@ -86,10 +85,10 @@ class GroupEdit(QWidget):
             return
         try:
             if self.group_id:
-                group_model.update(self.group_id, dept_id, code, name,
-                                   int(self.active.isChecked()))
+                dept_ctrl.update_group(self.group_id, dept_id, code, name,
+                                       int(self.active.isChecked()))
             else:
-                group_model.add(dept_id, code, name)
+                dept_ctrl.add_group(dept_id, code, name)
             if self.on_save:
                 self.on_save()
             self.close()

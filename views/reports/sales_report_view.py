@@ -252,7 +252,7 @@ class _AddProductDialog(QDialog):
             self.f_gp.setText("—")
 
     def _save(self):
-        import models.product as prod_model
+        import controllers.product_controller as product_ctrl
         barcode = self.f_barcode.text().strip()
         desc    = self.f_desc.text().strip()
         if not barcode:
@@ -274,7 +274,7 @@ class _AddProductDialog(QDialog):
 
         tax_map = {"GST (10%)":10.0,"GST Free (0%)":0.0,"Wine (29%)":29.0}
         try:
-            prod_model.add(
+            product_ctrl.add_product(
                 barcode=barcode,
                 description=desc,
                 department_id=self.f_dept.currentData(),
@@ -951,10 +951,10 @@ class SalesReportView(QWidget):
             self._load()
 
     def _view_product(self, row_data: dict):
-        import models.product as prod_model
+        import controllers.product_controller as product_ctrl
         bc = row_data.get("barcode","").strip()
         if not bc: return
-        prod = prod_model.get_by_barcode(bc)
+        prod = product_ctrl.get_product_by_barcode(bc)
         if prod:
             QMessageBox.information(self, "Product",
                 f"Barcode:     {prod['barcode']}\n"

@@ -323,7 +323,7 @@ class HomeScreen(QWidget):
             self._refresh()
 
     def _refresh_order_today(self):
-        import models.supplier as supplier_model
+        import controllers.supplier_controller as supplier_ctrl
         from datetime import date as _date
 
         # Clear previous widgets from the layout
@@ -333,7 +333,7 @@ class HomeScreen(QWidget):
                 item.widget().deleteLater()
 
         try:
-            due = supplier_model.get_order_due_today()
+            due = supplier_ctrl.get_order_due_today()
         except Exception:
             return
 

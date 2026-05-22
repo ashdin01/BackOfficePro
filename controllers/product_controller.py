@@ -4,6 +4,7 @@ from database.connection import get_connection
 import models.product as product_model
 import models.product_suppliers as ps_model
 import models.stock_on_hand as soh_model
+import models.barcode_alias as alias_model
 
 
 def update_cost_price(barcode, cost):
@@ -466,3 +467,65 @@ def delete_product_image(barcode):
     path = find_product_image(barcode)
     if path:
         os.remove(path)
+
+
+# ── Product model wrappers ────────────────────────────────────────────────────
+
+def get_all_products(active_only=True, include_nonzero_inactive=False):
+    return product_model.get_all(active_only=active_only,
+                                 include_nonzero_inactive=include_nonzero_inactive)
+
+
+def get_product_by_barcode(barcode):
+    return product_model.get_by_barcode(barcode)
+
+
+def get_products_by_barcodes(barcodes):
+    return product_model.get_by_barcodes(barcodes)
+
+
+def add_product(barcode, description, department_id, supplier_id=None, unit='EA',
+                sell_price=0, cost_price=0, tax_rate=0, reorder_point=0,
+                reorder_max=0, variable_weight=0, expected=1, brand='',
+                plu='', supplier_sku='', base_sku='', pack_qty=1, pack_unit='EA',
+                group_id=None):
+    product_model.add(barcode, description, department_id, supplier_id=supplier_id,
+                      unit=unit, sell_price=sell_price, cost_price=cost_price,
+                      tax_rate=tax_rate, reorder_point=reorder_point,
+                      reorder_max=reorder_max, variable_weight=variable_weight,
+                      expected=expected, brand=brand, plu=plu,
+                      supplier_sku=supplier_sku, base_sku=base_sku,
+                      pack_qty=pack_qty, pack_unit=pack_unit, group_id=group_id)
+
+
+def search_products(term, active_only=True):
+    return product_model.search(term, active_only=active_only)
+
+
+# ── Stock on hand wrappers ────────────────────────────────────────────────────
+
+def get_soh_by_barcode(barcode):
+    return soh_model.get_by_barcode(barcode)
+
+
+def get_soh_by_barcodes(barcodes):
+    return soh_model.get_by_barcodes(barcodes)
+
+
+def adjust_soh(barcode, quantity, movement_type, reference='', notes='', created_by=''):
+    soh_model.adjust(barcode, quantity, movement_type,
+                     reference=reference, notes=notes, created_by=created_by)
+
+
+# ── Barcode alias wrappers ────────────────────────────────────────────────────
+
+def get_aliases(master_barcode):
+    return alias_model.get_aliases(master_barcode)
+
+
+def add_alias(alias_barcode, master_barcode, description=''):
+    alias_model.add(alias_barcode, master_barcode, description)
+
+
+def delete_alias(alias_id):
+    alias_model.delete(alias_id)

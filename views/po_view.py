@@ -7,11 +7,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate, QTimer
 from PyQt6.QtGui import QColor
-import models.purchase_order as po_model
-import models.po_lines as line_model
-import models.product as prod_model
-import models.supplier as sup_model
-import models.stock_on_hand as soh_model
+import controllers.purchase_order_controller as po_model
+import controllers.purchase_order_controller as line_model
+import controllers.product_controller as prod_model
+import controllers.supplier_controller as sup_model
+import controllers.product_controller as soh_model
 from config.constants import PO_STATUS_COLOURS
 from views.widgets import (
     page_header, primary_btn, danger_btn, success_btn, warning_btn,
@@ -405,8 +405,7 @@ class PODetailDialog(QDialog):
         self._reload_lines()
 
     def _load_products(self):
-        import models.product_suppliers as ps_model
-        self._all_products = list(ps_model.get_by_supplier(self._supplier_id, default_only=True))
+        self._all_products = list(sup_model.get_products(self._supplier_id, default_only=True))
         self.prod_combo.clear()
         for p in self._all_products:
             self.prod_combo.addItem(f"{p['barcode']} — {p['description']}", p["barcode"])

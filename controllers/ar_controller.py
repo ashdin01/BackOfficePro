@@ -9,6 +9,7 @@ import models.customer as customer_model
 import models.ar_invoice as invoice_model
 import models.ar_payment as payment_model
 import models.settings as settings_model
+import models.bank_recon as recon_model
 
 
 # ── Invoice / credit note numbering ──────────────────────────────────────────
@@ -566,3 +567,128 @@ def generate_statement_pdf(customer_id, date_from, date_to, output_path=None):
     )
     doc.build(story)
     return output_path
+
+
+# ── Invoice model wrappers ────────────────────────────────────────────────────
+
+def get_invoice_by_id(invoice_id):
+    return invoice_model.get_by_id(invoice_id)
+
+
+def get_all_invoices(customer_id=None, status=None):
+    return invoice_model.get_all(customer_id=customer_id, status=status)
+
+
+def get_invoice_lines(invoice_id):
+    return invoice_model.get_lines(invoice_id)
+
+
+def add_invoice_line(invoice_id, description, quantity, unit_price,
+                     discount_pct=0.0, gst_rate=10.0, barcode=''):
+    invoice_model.add_line(invoice_id, description, quantity, unit_price,
+                           discount_pct=discount_pct, gst_rate=gst_rate, barcode=barcode)
+
+
+def update_invoice_line(line_id, description, quantity, unit_price,
+                        discount_pct=0.0, gst_rate=10.0, barcode=''):
+    invoice_model.update_line(line_id, description, quantity, unit_price,
+                              discount_pct=discount_pct, gst_rate=gst_rate, barcode=barcode)
+
+
+def delete_invoice_line(line_id):
+    invoice_model.delete_line(line_id)
+
+
+def update_invoice_status(invoice_id, status):
+    invoice_model.update_status(invoice_id, status)
+
+
+def update_invoice_notes(invoice_id, notes):
+    invoice_model.update_notes(invoice_id, notes)
+
+
+# ── Customer model wrappers ───────────────────────────────────────────────────
+
+def get_all_customers(active_only=True):
+    return customer_model.get_all(active_only=active_only)
+
+
+def get_customer_by_id(customer_id):
+    return customer_model.get_by_id(customer_id)
+
+
+def add_customer(code, name, abn='', address_line1='', address_line2='',
+                 suburb='', state='', postcode='', email='', phone='',
+                 contact_name='', payment_terms_days=37, credit_limit=0.0,
+                 active=1, notes=''):
+    return customer_model.add(code, name, abn=abn, address_line1=address_line1,
+                               address_line2=address_line2, suburb=suburb, state=state,
+                               postcode=postcode, email=email, phone=phone,
+                               contact_name=contact_name,
+                               payment_terms_days=payment_terms_days,
+                               credit_limit=credit_limit, active=active, notes=notes)
+
+
+def update_customer(customer_id, code, name, abn='', address_line1='',
+                    address_line2='', suburb='', state='', postcode='',
+                    email='', phone='', contact_name='',
+                    payment_terms_days=37, credit_limit=0.0, active=1, notes=''):
+    customer_model.update(customer_id, code, name, abn=abn,
+                          address_line1=address_line1, address_line2=address_line2,
+                          suburb=suburb, state=state, postcode=postcode,
+                          email=email, phone=phone, contact_name=contact_name,
+                          payment_terms_days=payment_terms_days,
+                          credit_limit=credit_limit, active=active, notes=notes)
+
+
+# ── Payment model wrappers ────────────────────────────────────────────────────
+
+def get_payments_by_invoice(invoice_id):
+    return payment_model.get_by_invoice(invoice_id)
+
+
+# ── Bank recon model wrappers ─────────────────────────────────────────────────
+
+def get_all_recon_profiles():
+    return recon_model.get_all_profiles()
+
+
+def get_recon_profile(profile_id):
+    return recon_model.get_profile(profile_id)
+
+
+def delete_recon_profile(profile_id):
+    recon_model.delete_profile(profile_id)
+
+
+def save_recon_profile(name, delimiter, has_header, skip_rows, date_format,
+                       amount_type, col_date=None, col_amount=None,
+                       col_debit=None, col_credit=None, col_description=None,
+                       col_reference=None, col_balance=None):
+    return recon_model.save_profile(name, delimiter, has_header, skip_rows,
+                                    date_format, amount_type,
+                                    col_date=col_date, col_amount=col_amount,
+                                    col_debit=col_debit, col_credit=col_credit,
+                                    col_description=col_description,
+                                    col_reference=col_reference,
+                                    col_balance=col_balance)
+
+
+def get_recon_transactions(batch):
+    return recon_model.get_transactions(batch)
+
+
+def insert_recon_transactions(profile_id, batch, rows):
+    recon_model.insert_transactions(profile_id, batch, rows)
+
+
+def set_recon_matched(txn_id, invoice_id, payment_id):
+    recon_model.set_matched(txn_id, invoice_id, payment_id)
+
+
+def set_recon_ignored(txn_id):
+    recon_model.set_ignored(txn_id)
+
+
+def unmatch_recon_transaction(txn_id):
+    recon_model.unmatch_transaction(txn_id)

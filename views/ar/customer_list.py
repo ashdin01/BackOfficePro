@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer
-import models.customer as customer_model
+import controllers.ar_controller as ar_ctrl
 from views.ar.customer_edit import CustomerEdit
 
 
@@ -53,7 +53,7 @@ class CustomerList(QWidget):
 
     def _load(self, *_):
         active_only = not self.chk_inactive.isChecked()
-        self._all_rows = customer_model.get_all(active_only=active_only)
+        self._all_rows = ar_ctrl.get_all_customers(active_only=active_only)
         self._render(self._all_rows)
 
     def _filter(self):

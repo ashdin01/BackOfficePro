@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QShortcut, QKeySequence
-import models.bundle as bundle_model
+import controllers.bundle_controller as bundle_ctrl
 
 
 class BundleEdit(QWidget):
@@ -14,7 +14,7 @@ class BundleEdit(QWidget):
         super().__init__()
         self.bundle_id = bundle_id
         self.on_save = on_save
-        self._bundle = bundle_model.get_by_id(bundle_id) if bundle_id else None
+        self._bundle = bundle_ctrl.get_by_id(bundle_id) if bundle_id else None
         self.setWindowTitle("Edit Bundle" if bundle_id else "Add Bundle")
         self.setMinimumWidth(620)
         self.setMinimumHeight(520)
@@ -129,7 +129,7 @@ class BundleEdit(QWidget):
 
     def _load_eligible(self):
         self._elig_table.setRowCount(0)
-        for item in bundle_model.get_eligible(self.bundle_id):
+        for item in bundle_ctrl.get_eligible(self.bundle_id):
             self._add_eligible_row(item['id'], item['barcode'], item['description'], dict(item).get('unit_qty', 1))
 
     def _add_eligible_row(self, item_id, barcode, description, unit_qty=1):
@@ -147,7 +147,7 @@ class BundleEdit(QWidget):
         sb.setFixedHeight(24)
         sb.setToolTip("How many base units this scan contributes (1 for single, 6 for 6-pack, etc.)")
         if item_id and item_id > 0:
-            sb.valueChanged.connect(lambda v, eid=item_id: bundle_model.update_eligible_unit_qty(eid, v))
+            sb.valueChanged.connect(lambda v, eid=item_id: bundle_ctrl.update_eligible_unit_qty(eid, v))
         self._elig_table.setCellWidget(r, 2, sb)
         btn_rem = QPushButton("✕")
         btn_rem.setFixedHeight(24)
@@ -167,12 +167,12 @@ class BundleEdit(QWidget):
                 self._bc_input.clear()
                 return
 
-        description = bundle_model.resolve_barcode_description(barcode)
-        unit_qty = bundle_model.resolve_barcode_unit_qty(barcode)
+        description = bundle_ctrl.resolve_barcode_description(barcode)
+        unit_qty = bundle_ctrl.resolve_barcode_unit_qty(barcode)
 
         if self.bundle_id:
             # Saved bundle — persist immediately
-            row_id = bundle_model.add_eligible(self.bundle_id, barcode, description, unit_qty)
+            row_id = bundle_ctrl.add_eligible(self.bundle_id, barcode, description, unit_qty)
             self._add_eligible_row(row_id, barcode, description, unit_qty)
         else:
             # New bundle — buffer in table with sentinel id=-1
@@ -182,7 +182,7 @@ class BundleEdit(QWidget):
 
     def _remove_eligible(self, item_id):
         if item_id and item_id > 0:
-            bundle_model.remove_eligible(item_id)
+            bundle_ctrl.remove_eligible(item_id)
         # Remove from table
         for row in range(self._elig_table.rowCount()):
             if self._elig_table.item(row, 0).data(Qt.ItemDataRole.UserRole) == item_id:
@@ -201,16 +201,16 @@ class BundleEdit(QWidget):
         active = self._active.isChecked()
 
         if self.bundle_id:
-            bundle_model.update(self.bundle_id, name, desc, req_qty, price, active)
+            bundle_ctrl.update(self.bundle_id, name, desc, req_qty, price, active)
         else:
-            self.bundle_id = bundle_model.add(name, desc, req_qty, price)
+            self.bundle_id = bundle_ctrl.add(name, desc, req_qty, price)
             # Persist any buffered eligible items
             for row in range(self._elig_table.rowCount()):
                 barcode = self._elig_table.item(row, 0).text()
                 description = self._elig_table.item(row, 1).text()
                 sb = self._elig_table.cellWidget(row, 2)
                 unit_qty = sb.value() if sb else 1
-                bundle_model.add_eligible(self.bundle_id, barcode, description, unit_qty)
+                bundle_ctrl.add_eligible(self.bundle_id, barcode, description, unit_qty)
 
         if self.on_save:
             self.on_save()

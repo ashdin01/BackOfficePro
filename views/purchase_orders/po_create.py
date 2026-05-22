@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
-import models.purchase_order as po_model
-import models.supplier as supplier_model
+import controllers.purchase_order_controller as po_ctrl
+import controllers.supplier_controller as supplier_ctrl
 from config.constants import PO_TYPES, PO_TYPE_PO
 
 
@@ -147,7 +147,7 @@ class POCreate(QWidget):
         sep.setStyleSheet("color:#2a3a4a;")
 
         self.supplier = QComboBox()
-        suppliers = supplier_model.get_all()
+        suppliers = supplier_ctrl.get_all()
         for s in suppliers:
             self.supplier.addItem(s['name'], s['id'])
         if self._preset_supplier_id:
@@ -261,7 +261,7 @@ class POCreate(QWidget):
             return
 
         try:
-            po_id = po_model.create(
+            po_id = po_ctrl.create_po(
                 supplier_id=supplier_id,
                 delivery_date=self.delivery_date.date().toString("yyyy-MM-dd"),
                 notes=self.notes.toPlainText(),

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt
-import models.bank_recon as recon_model
+import controllers.ar_controller as ar_ctrl
 
 FIELD_OPTIONS = ['— ignore —', 'Date', 'Amount', 'Debit', 'Credit',
                  'Description', 'Reference', 'Balance']
@@ -159,7 +159,7 @@ class ReconImportDialog(QDialog):
         self.profile_combo.blockSignals(True)
         self.profile_combo.clear()
         self.profile_combo.addItem("— new mapping —", None)
-        for p in recon_model.get_all_profiles():
+        for p in ar_ctrl.get_all_recon_profiles():
             self.profile_combo.addItem(p['name'], p['id'])
         self.profile_combo.blockSignals(False)
 
@@ -167,7 +167,7 @@ class ReconImportDialog(QDialog):
         pid = self.profile_combo.currentData()
         if not pid:
             return
-        p = recon_model.get_profile(pid)
+        p = ar_ctrl.get_recon_profile(pid)
         if not p:
             return
         self.chk_header.setChecked(bool(p['has_header']))
@@ -200,7 +200,7 @@ class ReconImportDialog(QDialog):
             self, "Delete Profile", f"Delete profile '{name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         ) == QMessageBox.StandardButton.Yes:
-            recon_model.delete_profile(pid)
+            ar_ctrl.delete_recon_profile(pid)
             self._refresh_profiles()
 
     def _save_profile(self):
@@ -208,7 +208,7 @@ class ReconImportDialog(QDialog):
         if not name:
             QMessageBox.warning(self, "Validation", "Enter a profile name first.")
             return
-        pid = recon_model.save_profile(**self._profile_kwargs(name))
+        pid = ar_ctrl.save_recon_profile(**self._profile_kwargs(name))
         self._refresh_profiles()
         for i in range(self.profile_combo.count()):
             if self.profile_combo.itemData(i) == pid:
@@ -412,9 +412,9 @@ class ReconImportDialog(QDialog):
             return
 
         name = self.profile_name.text().strip() or "Unnamed"
-        profile_id = recon_model.save_profile(**self._profile_kwargs(name))
+        profile_id = ar_ctrl.save_recon_profile(**self._profile_kwargs(name))
         batch = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-        recon_model.insert_transactions(profile_id, batch, parsed)
+        ar_ctrl.insert_recon_transactions(profile_id, batch, parsed)
 
         self._result = {'batch': batch, 'count': len(parsed), 'errors': len(errors)}
         self.accept()

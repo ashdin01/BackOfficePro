@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-import models.ar_invoice as invoice_model
 import controllers.ar_controller as ar_ctrl
 from database.connection import get_connection
 
@@ -64,11 +63,11 @@ class CreditNoteDetail(QWidget):
         root.addLayout(totals)
 
     def _prefill_from_invoice(self):
-        inv = invoice_model.get_by_id(self._linked_invoice_id)
+        inv = ar_ctrl.get_invoice_by_id(self._linked_invoice_id)
         if not inv:
             return
         self.lbl_inv.setText(f"{inv['invoice_number']} ({inv['invoice_date']})")
-        lines = invoice_model.get_lines(self._linked_invoice_id)
+        lines = ar_ctrl.get_invoice_lines(self._linked_invoice_id)
         self._render_lines(lines)
         total = sum(float(ln['line_total']) for ln in lines)
         self.lbl_total.setText(f"Total Credit: ${total:.2f}")

@@ -7,8 +7,7 @@ from PyQt6.QtCore import Qt, QObject, QEvent, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
-import models.stock_on_hand as soh_model
-import models.product as product_model
+import controllers.product_controller as product_ctrl
 import csv
 import os
 
@@ -157,9 +156,9 @@ class ProductList(KeyboardMixin, QWidget):
     def _load(self, rows=None):
         if rows is None:
             if self._show_inactive():
-                rows = product_model.get_all(active_only=False)
+                rows = product_ctrl.get_all_products(active_only=False)
             else:
-                rows = product_model.get_all(
+                rows = product_ctrl.get_all_products(
                     active_only=True,
                     include_nonzero_inactive=True
                 )
@@ -170,7 +169,7 @@ class ProductList(KeyboardMixin, QWidget):
             r = self.table.rowCount()
             self.table.insertRow(r)
             is_active   = bool(row['active'])
-            soh         = soh_model.get_by_barcode(row["barcode"])
+            soh         = product_ctrl.get_soh_by_barcode(row["barcode"])
             soh_qty     = int(soh["quantity"]) if soh else 0
             is_warning  = not is_active and soh_qty != 0
             is_temp     = str(row['barcode']).startswith('TEMP-')
@@ -236,7 +235,7 @@ class ProductList(KeyboardMixin, QWidget):
 
     def _search(self, term):
         if term.strip():
-            rows = product_model.search(term, active_only=not self._show_inactive())
+            rows = product_ctrl.search_products(term, active_only=not self._show_inactive())
             self._load(rows)
         else:
             self._load()
@@ -244,7 +243,7 @@ class ProductList(KeyboardMixin, QWidget):
     def _reload_with_search(self):
         term = self.search_input.text().strip()
         if term:
-            rows = product_model.search(term, active_only=not self._show_inactive())
+            rows = product_ctrl.search_products(term, active_only=not self._show_inactive())
             self._load(rows)
         else:
             self._load()

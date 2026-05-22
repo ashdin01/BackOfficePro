@@ -11,12 +11,9 @@ from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
 import os, shutil
 import controllers.product_controller as product_controller
-import models.product as product_model
 from PyQt6.QtGui import QColor
-import models.department as dept_model
-import models.supplier as supplier_model
-import models.barcode_alias as alias_model
-import models.group as group_model
+import controllers.department_controller as dept_ctrl
+import controllers.supplier_controller as supplier_ctrl
 
 
 class ProductEdit(KeyboardMixin, QWidget):
@@ -28,10 +25,10 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.resize(960, 860)
         self.barcode = barcode
         self.on_save = on_save
-        self._depts = dept_model.get_all()
-        self._suppliers = supplier_model.get_all()
-        self._groups = group_model.get_all(active_only=False)
-        self.product = product_model.get_by_barcode(barcode)
+        self._depts = dept_ctrl.get_all()
+        self._suppliers = supplier_ctrl.get_all()
+        self._groups = dept_ctrl.get_all_groups(active_only=False)
+        self.product = product_controller.get_product_by_barcode(barcode)
         self._init_values()
         self._build_ui()
         self.setup_keyboard()
@@ -208,8 +205,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_auto_reorder = ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
         right_col.addLayout(r)
 
-        from models.stock_on_hand import get_by_barcode as _get_soh
-        soh = _get_soh(self.barcode)
+        soh = product_controller.get_soh_by_barcode(self.barcode)
         soh_qty = int(soh["quantity"]) if soh else 0
         soh_color = "#4CAF50" if soh_qty > 0 else "#FF9800" if soh_qty == 0 else "#f44336"
         self.lbl_soh = QLabel(f'<span style="color:{soh_color};font-weight:bold;">{soh_qty}</span>')
@@ -768,7 +764,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._load_image_preview()
 
     def _load_aliases(self):
-        aliases = alias_model.get_aliases(self.barcode)
+        aliases = product_controller.get_aliases(self.barcode)
         self.alias_table.setRowCount(0)
         for a in aliases:
             r = self.alias_table.rowCount()
@@ -790,7 +786,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             return
         alias_id = self.alias_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
         if QMessageBox.question(self, "Confirm", "Remove this alternate barcode?") == QMessageBox.StandardButton.Yes:
-            alias_model.delete(alias_id)
+            product_controller.delete_alias(alias_id)
             self._load_aliases()
 
     # ── Selling Units ─────────────────────────────────────────────────
@@ -1407,7 +1403,7 @@ class AddAliasDialog(QDialog):
             QMessageBox.warning(self, "Validation", "Barcode is required.")
             return
         try:
-            alias_model.add(barcode, self.master_barcode, self.desc.text().strip())
+            product_controller.add_alias(barcode, self.master_barcode, self.desc.text().strip())
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not add barcode: {e}")

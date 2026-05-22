@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QTextEdit, QGroupBox, QMessageBox
 )
 from PyQt6.QtCore import Qt
-import models.customer as customer_model
+import controllers.ar_controller as ar_ctrl
 
 
 class CustomerEdit(QWidget):
@@ -97,7 +97,7 @@ class CustomerEdit(QWidget):
         root.addLayout(btns)
 
     def _populate(self):
-        c = customer_model.get_by_id(self._id)
+        c = ar_ctrl.get_customer_by_id(self._id)
         if not c:
             return
         self.code.setText(c.get('code', ''))
@@ -142,9 +142,9 @@ class CustomerEdit(QWidget):
         )
         try:
             if self._id is None:
-                customer_model.add(**kwargs)
+                ar_ctrl.add_customer(**kwargs)
             else:
-                customer_model.update(self._id, **kwargs)
+                ar_ctrl.update_customer(self._id, **kwargs)
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
             return

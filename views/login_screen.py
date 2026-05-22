@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from datetime import datetime, timedelta
-import models.user as user_model
+import controllers.user_controller as user_ctrl
 
 _MAX_ATTEMPTS = 5
 _LOCKOUT_SECONDS = 30
@@ -85,7 +85,7 @@ class _SetupPinDialog(QDialog):
             QMessageBox.warning(self, "Mismatch", "PINs do not match.")
             self.pin2.clear(); self.pin2.setFocus()
             return
-        user_model.set_pin('admin', p1)
+        user_ctrl.set_pin('admin', p1)
         self.accept()
 
 
@@ -200,7 +200,7 @@ class LoginScreen(QWidget):
             if w:
                 w.deleteLater()
 
-        self._users = user_model.get_all_active()
+        self._users = user_ctrl.get_all_active()
         self._selected_user = None
 
         for user in self._users:
@@ -267,7 +267,7 @@ class LoginScreen(QWidget):
             self.status_lbl.setText("Please enter your PIN.")
             return
 
-        if user_model.verify_pin(username, pin):
+        if user_ctrl.verify_pin(username, pin):
             _failed_attempts.pop(username, None)
             _lockout_until.pop(username, None)
             self._on_login(self._selected_user)

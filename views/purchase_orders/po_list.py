@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut, QColor
-import models.purchase_order as po_model
 from config.constants import PO_STATUSES
 import controllers.purchase_order_controller as po_ctrl
 
@@ -19,7 +18,7 @@ class POList(QWidget):
 
     def _startup_cleanup(self):
         """Delete old cancelled POs silently on startup."""
-        deleted = po_model.cleanup_old_pos()
+        deleted = po_ctrl.cleanup_old_pos()
         if deleted:
             print(f"[PO Cleanup] Removed {deleted} old cancelled PO(s)")
 
@@ -171,7 +170,7 @@ class POList(QWidget):
     # ── Data loading ──────────────────────────────────────────────────
 
     def _load(self):
-        rows = po_model.get_all(archived=False)
+        rows = po_ctrl.get_all_pos(archived=False)
         self._populate_table(self.active_table, rows)
 
         # Colour-code status and type columns
@@ -203,9 +202,9 @@ class POList(QWidget):
     def _load_archive(self):
         status = self.archive_filter.currentData()
         if status:
-            rows = po_model.get_all(status=status)
+            rows = po_ctrl.get_all_pos(status=status)
         else:
-            rows = po_model.get_all(archived=True)
+            rows = po_ctrl.get_all_pos(archived=True)
         self._populate_table(self.archive_table, rows)
 
         status_colours = {
@@ -352,8 +351,7 @@ class POList(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         from config.constants import PO_STATUS_RECEIVED
-        import models.purchase_order as po_model
-        po_model.update_status(po_id, PO_STATUS_RECEIVED)
+        po_ctrl.update_po_status(po_id, PO_STATUS_RECEIVED)
         self._load()
         QMessageBox.information(
             self, "Updated",
@@ -369,7 +367,7 @@ class POList(QWidget):
             QMessageBox.information(self, "Cannot Cancel",
                 f"A {status} order cannot be cancelled.")
             return
-        po = po_model.get_by_id(po_id)
+        po = po_ctrl.get_po_by_id(po_id)
         reply = QMessageBox.warning(
             self, "Cancel Purchase Order",
             f"Cancel {po['po_number']} — {po['supplier_name']}?\n\n"
@@ -378,7 +376,7 @@ class POList(QWidget):
             QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            po_model.cancel(po_id)
+            po_ctrl.cancel_po(po_id)
             self._load()
 
     def showEvent(self, event):
@@ -409,8 +407,7 @@ class POList(QWidget):
         unreceived = po_ctrl.get_unreceived_lines(po_id)
 
         if not unreceived:
-            import models.purchase_order as po_model
-            po_model.update_status(po_id, 'RECEIVED')
+            po_ctrl.update_po_status(po_id, 'RECEIVED')
             self._load()
             return
 

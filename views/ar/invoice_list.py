@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QColor
-import models.ar_invoice as invoice_model
 import controllers.ar_controller as ar_ctrl
 
 
@@ -78,7 +77,7 @@ class InvoiceList(QWidget):
 
     def _load(self):
         ar_ctrl.refresh_overdue_statuses()
-        self._all_rows = invoice_model.get_all()
+        self._all_rows = ar_ctrl.get_all_invoices()
         self._filter()
 
     def _filter(self):

@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QDate
 from utils.keyboard_mixin import KeyboardMixin
 from utils.validators import validate_abn, validate_email, validate_phone, validate_bsb
 from utils.error_dialog import show_error
-import models.supplier as supplier_model
+import controllers.supplier_controller as supplier_ctrl
 
 
 class SupplierEdit(KeyboardMixin, QWidget):
@@ -317,7 +317,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
                 self._bsb_indicator.setStyleSheet("")
 
     def _populate(self):
-        s = supplier_model.get_by_id(self.supplier_id)
+        s = supplier_ctrl.get_by_id(self.supplier_id)
         if not s:
             return
         keys = s.keys()
@@ -446,7 +446,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
 
         try:
             if self.supplier_id:
-                supplier_model.update(
+                supplier_ctrl.update(
                     self.supplier_id, code, name,
                     self.contact.text().strip(),
                     phone,
@@ -474,7 +474,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     bank_account_number=self.bank_account_number.text().strip() if self._role == "ADMIN" else self._saved_bank_account_number,
                 )
             else:
-                supplier_model.add(
+                supplier_ctrl.add(
                     code, name,
                     self.contact.text().strip(),
                     phone,
