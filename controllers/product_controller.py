@@ -1,4 +1,5 @@
 import logging
+import os
 from database.connection import get_connection
 import models.product as product_model
 import models.product_suppliers as ps_model
@@ -418,3 +419,50 @@ def get_recent_adjustments(limit=100):
         return [tuple(r) for r in rows]
     finally:
         conn.close()
+
+
+# ── GP calculation ────────────────────────────────────────────────────────────
+
+def calculate_gross_profit(sell_price, cost_price, tax_rate):
+    """Return an HTML string for the GP label (colour-coded percentage)."""
+    cost = cost_price * (1 + (tax_rate or 0.0) / 100)
+    if sell_price > 0:
+        gp = (1 - cost / sell_price) * 100
+        color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"
+        return f"<b style='color:{color}'>{gp:.1f}%</b>"
+    return "<b style='color:grey'>--</b>"
+
+
+# ── Product image helpers ─────────────────────────────────────────────────────
+
+def find_product_image(barcode):
+    """Return the path to an existing product image file, or None."""
+    from config.settings import DATA_DIR
+    img_dir = os.path.join(DATA_DIR, 'images')
+    for ext in ('jpg', 'jpeg', 'png', 'webp'):
+        p = os.path.join(img_dir, f"{barcode}.{ext}")
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def prepare_image_destination(barcode):
+    """
+    Create the images directory, remove any alternate-extension copies of the
+    product image, and return the canonical .jpg destination path.
+    """
+    from config.settings import DATA_DIR
+    img_dir = os.path.join(DATA_DIR, 'images')
+    os.makedirs(img_dir, exist_ok=True)
+    for ext in ('jpeg', 'png', 'webp', 'bmp'):
+        old = os.path.join(img_dir, f"{barcode}.{ext}")
+        if os.path.exists(old):
+            os.remove(old)
+    return os.path.join(img_dir, f"{barcode}.jpg")
+
+
+def delete_product_image(barcode):
+    """Delete the product image file if one exists."""
+    path = find_product_image(barcode)
+    if path:
+        os.remove(path)

@@ -16,7 +16,12 @@ def get_by_po(po_id):
 
 
 def add_note(po_id: int, text: str) -> int:
-    """Insert a note line (no barcode, no qty). FK constraints skipped intentionally."""
+    """Insert a note line (no barcode, no qty).
+
+    Uses a raw connection rather than get_connection() because note lines store
+    an empty string barcode, which violates the FK constraint on products(barcode)
+    that get_connection() enforces via PRAGMA foreign_keys = ON.
+    """
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")

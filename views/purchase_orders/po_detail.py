@@ -368,33 +368,16 @@ class PODetail(QWidget):
         self._product_edit_win.activateWindow()
 
     def _export_pdf(self):
-        import os
         import logging
-        po = self._po
-
-        if po['status'] == 'DRAFT':
+        if self._po['status'] == 'DRAFT':
             try:
                 po_model.update_status(self.po_id, 'DRAFT')
-                logging.info(f"Auto-saved {po['po_number']} as DRAFT before PDF export")
             except Exception as e:
                 logging.warning(f"Auto-save before PDF export failed: {e}")
-
-        pdf_folder = settings_model.get_setting('po_pdf_path').strip()
-        if not pdf_folder:
-            pdf_folder = os.path.join(
-                os.path.expanduser("~"), "Documents", "BackOfficePro", "PurchaseOrders"
-            )
-        os.makedirs(pdf_folder, exist_ok=True)
-
-        filename = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
-        path = os.path.join(pdf_folder, filename)
-
         try:
-            from utils.po_pdf import generate_po_pdf
-            generate_po_pdf(self.po_id, path)
+            path = po_controller.generate_po_pdf_to_disk(self.po_id)
             if self.on_save:
                 self.on_save()
-            logging.info(f"PDF exported: {path}")
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
             QMessageBox.information(self, "PDF Exported", f"✓ Saved to:\n{path}")
         except Exception as e:
@@ -451,27 +434,13 @@ class PODetail(QWidget):
             return
 
         try:
-            pdf_folder = settings_model.get_setting('po_pdf_path').strip()
-            if not pdf_folder:
-                pdf_folder = os.path.join(os.path.expanduser('~'), 'Documents', 'BackOfficePro', 'PurchaseOrders')
-            os.makedirs(pdf_folder, exist_ok=True)
-
-            filename = f"{po['po_number']}_{po['supplier_name'].replace(' ', '_')}.pdf"
-            pdf_path = os.path.join(pdf_folder, filename)
-
-            from utils.po_pdf import generate_po_pdf
-            generate_po_pdf(self.po_id, pdf_path)
-
-            from utils.email_graph import send_purchase_order
-            send_purchase_order(po_id=self.po_id, to_address=supplier_email, pdf_path=pdf_path)
-
-            po_model.update_status(self.po_id, PO_STATUS_SENT)
+            po_controller.send_po_email(self.po_id, supplier_email)
             self._load()
             if self.on_save:
                 self.on_save()
-
             QMessageBox.information(self, "Email Sent", f"✓ {_doc_title} {po['po_number']} sent to:\n{supplier_email}")
         except Exception as e:
+            import logging
             logging.error(f"Email send failed: {e}", exc_info=True)
             QMessageBox.critical(self, "Email Failed", f"Could not send the email.\n\nDetail: {e}")
 
@@ -480,46 +449,13 @@ class PODetail(QWidget):
             QMessageBox.information(self, 'Export', 'No lines to export.')
             return
         po = self._po
-        supplier = getattr(self, '_supplier', None)
-        sup_name = po['supplier_name'] or ''
-        sup_email = (supplier['email_orders'] or '') if supplier and supplier['email_orders'] else ''
-
-        default_name = f"{po['po_number']}_{sup_name.replace(' ', '_')}.csv"
+        default_name = f"{po['po_number']}_{(po['supplier_name'] or '').replace(' ', '_')}.csv"
         default_path = os.path.join(os.path.expanduser("~/Downloads"), default_name)
         path, _ = QFileDialog.getSaveFileName(self, 'Export PO to CSV', default_path, 'CSV Files (*.csv)')
         if not path:
             return
         try:
-            lines = lines_model.get_by_po(self.po_id)
-
-            with open(path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Supplier', sup_name])
-                writer.writerow(['Email', sup_email])
-                writer.writerow(['PO Number', po['po_number']])
-                writer.writerow(['Status', po['status']])
-                writer.writerow([])
-                writer.writerow(['Barcode', 'Description', 'Units per Carton', 'Total Units',
-                                'SOH (Actual)', 'SOH (System)', 'Variance (Actual less System)'])
-
-                rows_written = 0
-                for line in lines:
-                    if line['is_note']:
-                        writer.writerow(['', f'NOTE: {line["description"]}', '', '', '', '', ''])
-                        continue
-                    product = product_model.get_by_barcode(line['barcode'])
-                    pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
-                    pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-
-                    soh = stock_model.get_by_barcode(line['barcode'])
-                    on_hand = int(soh['quantity']) if soh else 0
-
-                    total_units = int(line['ordered_qty']) * pack_qty
-
-                    writer.writerow([f'="{line["barcode"]}"', line['description'],
-                                    f'{pack_qty} x {pack_unit}', total_units, '', on_hand, ''])
-                    rows_written += 1
-
+            po_controller.write_po_csv(self.po_id, path)
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
         except Exception as e:
             show_error(self, "Could not export CSV.", e, title="Export Failed")
@@ -570,117 +506,19 @@ class PODetail(QWidget):
         self._populate_table(lines)
 
     def _auto_load_recommendations(self):
-        supplier_id = self._po['supplier_id']
-        banner_parts = []
-
-        # ── Milk demand forecast (Dairy/Milk products with delivery days set) ──
-        milk_recs = po_controller.get_milk_order_recommendations(supplier_id)
-        milk_barcodes = set()
-        if milk_recs:
-            first = milk_recs[0]
-            delivery_str = first['next_delivery'].strftime('%a %-d %b')
-            safety = first['cover_days'] - first['days_to_delivery']
-            for r in milk_recs:
-                on_order_str = f"  |  On order: {int(r['on_order'])}" if r['on_order'] > 0 else ""
-                note = (
-                    f"🥛 Milk forecast: avg {r['avg_daily']}/day × {r['cover_days']} days "
-                    f"(delivery {delivery_str} + {safety} day buffer)"
-                    f"  |  SOH: {int(r['on_hand'])}{on_order_str}"
-                    f"  |  {r['pack_qty']} × {r['pack_unit']}"
-                )
-                if not r['has_sales_data']:
-                    note += "  ⚠ no sales history — defaulting to 1 carton"
-                lines_model.add(
-                    po_id=self.po_id,
-                    barcode=r['barcode'],
-                    description=r['description'],
-                    ordered_qty=r['cartons'],
-                    unit_cost=r['cost_price'],
-                    notes=note,
-                    pack_qty=r['pack_qty'],
-                )
-                milk_barcodes.add(r['barcode'])
-            banner_parts.append(
-                f"🥛 {len(milk_recs)} milk line(s) — covering {first['days_to_delivery']} days "
-                f"to delivery ({delivery_str}) + {first['cover_days'] - first['days_to_delivery']} day buffer"
-            )
-
-        # ── Standard reorder point recommendations (skip milk products) ──────
-        recs = po_controller.get_reorder_recommendations(supplier_id)
-        recs = [r for r in recs if r['barcode'] not in milk_barcodes]
-        for r in recs:
-            pack_qty  = int(r['pack_qty']) if r['pack_qty'] else 1
-            pack_unit = r['pack_unit'] or 'EA'
-            order_units = _calc_order_units(r['reorder_max'], 0, r['effective_stock'])
-            cartons     = _cartons_needed(order_units, pack_qty)
-            note        = _carton_note(pack_qty, pack_unit, r['barcode'])
-            lines_model.add(
-                po_id=self.po_id,
-                barcode=r['barcode'],
-                description=r['description'],
-                ordered_qty=cartons,
-                unit_cost=r['cost_price'],
-                notes=note,
-                pack_qty=pack_qty,
-            )
-        if recs:
-            banner_parts.append(f"💡 {len(recs)} reorder line(s) from reorder points")
-
-        # ── Auto-reorder items not yet on PO ────────────────────────────────
-        auto_rows = po_controller.get_auto_reorder_items(supplier_id)
-        existing_barcodes = {l['barcode'] for l in lines_model.get_by_po(self.po_id)}
-        auto_added = 0
-        for ar in auto_rows:
-            if ar['barcode'] in existing_barcodes:
-                continue
-            auto_pack_qty = int(ar['pack_qty']) if ar['pack_qty'] else 1
-            note = _carton_note(auto_pack_qty, ar['pack_unit'], ar['barcode'])
-            lines_model.add(
-                po_id=self.po_id,
-                barcode=ar['barcode'],
-                description=ar['description'],
-                ordered_qty=1,
-                unit_cost=ar['cost_price'],
-                notes=note,
-                pack_qty=auto_pack_qty,
-            )
-            auto_added += 1
-        if auto_added:
-            banner_parts.append(f"{auto_added} on-reorder item(s) at 1 carton")
-
-        if not banner_parts:
-            self.rec_banner.setText("✓ All stock levels are above reorder points for this supplier.")
-        else:
-            self.rec_banner.setText("  |  ".join(banner_parts))
+        banner = po_controller.auto_populate_po_lines(self.po_id, self._po['supplier_id'])
+        self.rec_banner.setText(banner)
 
     def _reload_recommendations(self):
-        recs = po_controller.get_reorder_recommendations(self._po['supplier_id'])
-        if not recs:
+        count = po_controller.reload_reorder_recommendations(self.po_id, self._po['supplier_id'])
+        if count is None:
             QMessageBox.information(self, "Recommendations", "All products are above reorder points.")
             return
-        existing = {l['barcode'] for l in lines_model.get_by_po(self.po_id)}
-        new_recs = [r for r in recs if r['barcode'] not in existing]
-        if not new_recs:
+        if count == 0:
             QMessageBox.information(self, "Recommendations", "All recommended products are already on this PO.")
             return
-        for r in new_recs:
-            pack_qty = int(r['pack_qty']) if r['pack_qty'] else 1
-            pack_unit = r['pack_unit'] or 'EA'
-            order_units = _calc_order_units(r['reorder_max'], 0, r['effective_stock'])
-            cartons = _cartons_needed(order_units, pack_qty)
-            note = _carton_note(pack_qty, pack_unit, r['barcode'])
-            lines_model.add(
-                po_id=self.po_id,
-                barcode=r['barcode'],
-                description=r['description'],
-                ordered_qty=cartons,
-                unit_cost=r['cost_price'],
-                notes=note,
-                pack_qty=pack_qty,
-            )
-        self.rec_banner.setText(f"✓ {len(new_recs)} additional line(s) added.")
-        lines = lines_model.get_by_po(self.po_id)
-        self._populate_table(lines)
+        self.rec_banner.setText(f"✓ {count} additional line(s) added.")
+        self._populate_table(lines_model.get_by_po(self.po_id))
         if self.on_save:
             self.on_save()
 
@@ -1241,56 +1079,38 @@ class AddLineDialog(QDialog):
         barcode = self.barcode.text().strip()
         if not barcode:
             return
-        existing_lines = lines_model.get_by_po(self.po_id)
-        for line_num, existing in enumerate(existing_lines, start=1):
-            if existing['barcode'] == barcode:
+        try:
+            product = po_controller.lookup_product_for_po(barcode, self.po_id, self.supplier_id, self._unit_mode)
+        except ValueError as e:
+            code = str(e)
+            if code.startswith("already_on_po:"):
+                _, line_num, desc = code.split(":", 2)
                 QMessageBox.warning(
                     self, "Item Already on PO",
-                    f"This item is already on this PO at line {line_num}:\n\n"
-                    f"{existing['description']}\n\n"
-                    f"Edit the existing line instead."
+                    f"This item is already on this PO at line {line_num}:\n\n{desc}\n\nEdit the existing line instead."
                 )
-                self.barcode.clear()
-                self.barcode.setFocus()
-                return
-        product = product_model.get_by_barcode(barcode)
+            elif code.startswith("not_linked:"):
+                po_name = code.split(":", 1)[1]
+                QMessageBox.warning(
+                    self, "Product Not Available",
+                    f"This product is not linked to {po_name}.\n\nAdd {po_name} as a supplier for this product first."
+                )
+            self.barcode.clear()
+            self.barcode.setFocus()
+            return
         if product:
-            if self.supplier_id:
-                import models.product_suppliers as _ps_model
-                linked = [r['supplier_id'] for r in _ps_model.get_by_barcode(barcode)]
-                if self.supplier_id not in linked:
-                    import models.supplier as _sup_model
-                    po_sup  = _sup_model.get_by_id(self.supplier_id)
-                    po_name = po_sup['name'] if po_sup else "Unknown"
-                    QMessageBox.warning(
-                        self, "Product Not Available",
-                        f"This product is not linked to {po_name}.\n\n"
-                        f"Add {po_name} as a supplier for this product first."
-                    )
-                    self.barcode.clear()
-                    self.barcode.setFocus()
-                    return
             self.description.setText(product['description'])
             self.unit_cost.setValue(product['cost_price'])
-            self._reorder_max = int(product['reorder_max']) if product['reorder_max'] else 0
-            self._pack_qty    = int(product['pack_qty']) if product['pack_qty'] else 1
-            self._pack_unit   = product['pack_unit'] or 'EA'
-            soh = stock_model.get_by_barcode(barcode)
-            on_hand = int(soh['quantity']) if soh else 0
-            reorder = int(product['reorder_point'])
+            self._pack_qty  = product['pack_qty']
+            self._pack_unit = product['pack_unit']
+            on_hand = product['on_hand']
+            reorder = product['reorder_point']
             color   = "red" if on_hand <= reorder else "green"
             self.on_hand_label.setText(
-                f"<span style='color:{color}'>{on_hand}</span> "
-                f"(reorder at {reorder})"
+                f"<span style='color:{color}'>{on_hand}</span> (reorder at {reorder})"
             )
             self.pack_label.setText(f"{self._pack_qty} × {self._pack_unit} per carton")
-            if self._unit_mode:
-                self.qty.setValue(1)
-            else:
-                soh_qty = int(soh['quantity']) if soh else 0
-                order_units = max(1, self._reorder_max - soh_qty) if self._reorder_max > 0 else self._pack_qty
-                suggested_cartons = max(1, math.ceil(order_units / self._pack_qty))
-                self.qty.setValue(suggested_cartons)
+            self.qty.setValue(product['suggested_qty'])
             self._update_unit_preview()
         else:
             self.description.clear()

@@ -706,26 +706,16 @@ class ProductEdit(KeyboardMixin, QWidget):
         return "GST (10%)" if self._tax_rate == 10.0 else "GST Free (0%)"
 
     def _refresh_gp(self):
-        sell = self._sell_price
-        tax = self._tax_rate or 0.0
-        cost = self._cost_price * (1 + tax / 100)
-        if sell > 0:
-            gp = (1 - cost / sell) * 100
-            color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"
-            self.lbl_gp.setText(f"<b style='color:{color}'>{gp:.1f}%</b>")
-        else:
-            self.lbl_gp.setText("<b style='color:grey'>--</b>")
+        import controllers.product_controller as product_ctrl
+        self.lbl_gp.setText(
+            product_ctrl.calculate_gross_profit(self._sell_price, self._cost_price, self._tax_rate)
+        )
 
     # ── Image helpers ─────────────────────────────────────────────────
 
     def _image_path(self):
-        from config.settings import DATA_DIR
-        img_dir = os.path.join(DATA_DIR, 'images')
-        for ext in ('jpg', 'jpeg', 'png', 'webp'):
-            p = os.path.join(img_dir, f"{self.barcode}.{ext}")
-            if os.path.exists(p):
-                return p
-        return None
+        import controllers.product_controller as product_ctrl
+        return product_ctrl.find_product_image(self.barcode)
 
     def _load_image_preview(self):
         path = self._image_path()
@@ -743,7 +733,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._img_path_lbl.setText("No image")
 
     def _upload_image(self):
-        from config.settings import DATA_DIR
+        import controllers.product_controller as product_ctrl
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Product Image",
             os.path.expanduser("~"),
@@ -751,9 +741,6 @@ class ProductEdit(KeyboardMixin, QWidget):
         )
         if not path:
             return
-        img_dir = os.path.join(DATA_DIR, 'images')
-        os.makedirs(img_dir, exist_ok=True)
-        # Save scaled copy as JPEG to keep file sizes manageable
         pix = QPixmap(path)
         if pix.isNull():
             QMessageBox.warning(self, "Invalid Image", "Could not load the selected file.")
@@ -763,18 +750,13 @@ class ProductEdit(KeyboardMixin, QWidget):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
-        dest = os.path.join(img_dir, f"{self.barcode}.jpg")
-        # Remove any existing alternate-extension copies first
-        for ext in ('jpeg', 'png', 'webp', 'bmp'):
-            old = os.path.join(img_dir, f"{self.barcode}.{ext}")
-            if os.path.exists(old):
-                os.remove(old)
+        dest = product_ctrl.prepare_image_destination(self.barcode)
         pix.save(dest, "JPEG", 88)
         self._load_image_preview()
 
     def _remove_image(self):
-        path = self._image_path()
-        if not path:
+        import controllers.product_controller as product_ctrl
+        if not product_ctrl.find_product_image(self.barcode):
             return
         if QMessageBox.question(
             self, "Remove Image",
@@ -782,7 +764,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         ) == QMessageBox.StandardButton.Yes:
-            os.remove(path)
+            product_ctrl.delete_product_image(self.barcode)
             self._load_image_preview()
 
     def _load_aliases(self):
