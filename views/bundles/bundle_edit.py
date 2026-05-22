@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QShortcut, QKeySequence
 import controllers.bundle_controller as bundle_ctrl
+import config.styles as styles
 
 
 class BundleEdit(QWidget):
@@ -30,7 +31,7 @@ class BundleEdit(QWidget):
 
         # ── Header ───────────────────────────────────────────────────────
         title = QLabel("Edit Bundle" if self.bundle_id else "New Bundle")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #e6edf3;")
+        title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {styles.CLR_TEXT};")
         layout.addWidget(title)
 
         # ── Fields ───────────────────────────────────────────────────────
@@ -67,14 +68,14 @@ class BundleEdit(QWidget):
 
         # ── Eligible items ────────────────────────────────────────────────
         elig_label = QLabel("Eligible Items")
-        elig_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #e6edf3; margin-top: 8px;")
+        elig_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {styles.CLR_TEXT}; margin-top: 8px;")
         layout.addWidget(elig_label)
 
         elig_note = QLabel(
             "Any of these barcodes can contribute towards the bundle. "
             "When the required quantity is reached the bundle price applies."
         )
-        elig_note.setStyleSheet("color: #8b949e; font-size: 11px;")
+        elig_note.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 11px;")
         elig_note.setWordWrap(True)
         layout.addWidget(elig_note)
 
@@ -112,9 +113,9 @@ class BundleEdit(QWidget):
         save_btn = QPushButton("Save  [Ctrl+S]")
         save_btn.setFixedHeight(34)
         save_btn.setStyleSheet(
-            "QPushButton { background: #1565c0; color: white; border: none; "
+            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
             "border-radius: 4px; padding: 0 20px; font-weight: bold; }"
-            "QPushButton:hover { background: #1976d2; }"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
         )
         save_btn.clicked.connect(self._save)
         cancel_btn = QPushButton("Cancel  [Esc]")
@@ -151,7 +152,7 @@ class BundleEdit(QWidget):
         self._elig_table.setCellWidget(r, 2, sb)
         btn_rem = QPushButton("✕")
         btn_rem.setFixedHeight(24)
-        btn_rem.setStyleSheet("color: #f44336; font-weight: bold; border: none; background: transparent;")
+        btn_rem.setStyleSheet(f"color: {styles.CLR_DANGER_ALT}; font-weight: bold; border: none; background: transparent;")
         btn_rem.clicked.connect(lambda _, eid=item_id: self._remove_eligible(eid))
         self._elig_table.setCellWidget(r, 3, btn_rem)
 

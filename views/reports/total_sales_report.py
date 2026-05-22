@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor, QFont
 
 from database.connection import get_connection
+import config.styles as styles
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -40,21 +41,19 @@ def _fetch(d_from: str, d_to: str) -> dict:
     return data
 
 
-def _stat_card(label: str, value: str, colour: str = '#1565c0') -> QFrame:
+def _stat_card(label: str, value: str, colour: str = None) -> QFrame:
+    if colour is None:
+        colour = styles.CLR_ACCENT
     f = QFrame()
     f.setFrameShape(QFrame.Shape.StyledPanel)
-    f.setStyleSheet(f"""
-        QFrame {{
-            background: #1e2a38;
-            border: 1px solid {colour};
-            border-radius: 6px;
-            padding: 8px;
-        }}
-    """)
+    f.setStyleSheet(
+        f"QFrame{{background:{styles.CLR_BG_PANEL};border:1px solid {colour};"
+        "border-radius:6px;padding:8px;}"
+    )
     v = QVBoxLayout(f)
     v.setSpacing(2)
     lbl = QLabel(label)
-    lbl.setStyleSheet("color: #8b949e; font-size: 11px; border: none;")
+    lbl.setStyleSheet(f"{styles.STYLE_LABEL_MUTED} border: none;")
     val = QLabel(value)
     bold = QFont(); bold.setBold(True); bold.setPointSize(16)
     val.setFont(bold)
@@ -101,9 +100,9 @@ class TotalSalesReport(QWidget):
 
         # ── stat cards ───────────────────────────────────────────────────────
         cards_row = QHBoxLayout()
-        self.card_pos      = _stat_card("POS Sales",    "$0.00", '#1565c0')
+        self.card_pos      = _stat_card("POS Sales",    "$0.00", styles.CLR_ACCENT)
         self.card_ar       = _stat_card("AR Invoiced",  "$0.00", '#e65100')
-        self.card_combined = _stat_card("Combined",     "$0.00", '#2e7d32')
+        self.card_combined = _stat_card("Combined",     "$0.00", styles.CLR_SUCCESS_DARK)
         cards_row.addWidget(self.card_pos)
         cards_row.addWidget(self.card_ar)
         cards_row.addWidget(self.card_combined)

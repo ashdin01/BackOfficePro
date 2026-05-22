@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QObject, QEvent, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 import controllers.product_controller as product_controller
+import config.styles as styles
 
 
 def _btn(text, color=None):
@@ -61,12 +62,12 @@ class _ConfirmAdjustDialog(QDialog):
         self.setWindowTitle("Confirm Adjustment")
         self.setModal(True)
         self.setMinimumWidth(380)
-        self.setStyleSheet("""
-            QDialog  { background: #1a2332; color: #e6edf3; }
-            QLabel   { color: #e6edf3; background: transparent; }
-            QPushButton { border-radius: 4px; padding: 8px 20px;
-                          font-size: 13px; font-weight: bold; }
-            QFrame   { color: #2a3a4a; }
+        self.setStyleSheet(f"""
+            QDialog  {{ background: {styles.CLR_BG}; color: {styles.CLR_TEXT}; }}
+            QLabel   {{ color: {styles.CLR_TEXT}; background: transparent; }}
+            QPushButton {{ border-radius: 4px; padding: 8px 20px;
+                          font-size: 13px; font-weight: bold; }}
+            QFrame   {{ color: {styles.CLR_BORDER}; }}
         """)
         self._build(description, barcode, qty, reason)
 
@@ -77,13 +78,13 @@ class _ConfirmAdjustDialog(QDialog):
         layout.setSpacing(14)
 
         title = QLabel("Confirm Stock Adjustment")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #e6edf3;")
+        title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {styles.CLR_TEXT};")
         layout.addWidget(title)
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #2a3a4a;"); layout.addWidget(sep)
+        sep.setStyleSheet(f"color: {styles.CLR_BORDER};"); layout.addWidget(sep)
 
-        qty_col = "#3fb950" if qty > 0 else "#f85149"
+        qty_col = styles.CLR_SUCCESS if qty > 0 else styles.CLR_DANGER
         qty_str = f"+{qty:.2f}" if qty > 0 else f"{qty:.2f}"
         details = QLabel(
             f"<table cellpadding='4'>"
@@ -97,22 +98,22 @@ class _ConfirmAdjustDialog(QDialog):
         layout.addWidget(details)
 
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #2a3a4a;"); layout.addWidget(sep2)
+        sep2.setStyleSheet(f"color: {styles.CLR_BORDER};"); layout.addWidget(sep2)
 
         btn_row = QHBoxLayout(); btn_row.setSpacing(10)
 
         self.btn_confirm = QPushButton("Confirm Adjustment  [C]")
         self.btn_confirm.setStyleSheet(
-            "QPushButton{background:#2e7d32;color:white;border:1px solid #388e3c;}"
-            "QPushButton:hover{background:#388e3c;}"
+            f"QPushButton{{background:{styles.CLR_SUCCESS_DARK};color:white;border:1px solid {styles.CLR_SUCCESS_HOVER};}}"
+            f"QPushButton:hover{{background:{styles.CLR_SUCCESS_HOVER};}}"
             "QPushButton:focus{border:2px solid #66bb6a;}")
         self.btn_confirm.setDefault(False)
         self.btn_confirm.setAutoDefault(False)
 
         self.btn_cancel = QPushButton("Cancel  [Esc]")
         self.btn_cancel.setStyleSheet(
-            "QPushButton{background:transparent;color:#8b949e;border:1px solid #2a3a4a;}"
-            "QPushButton:hover{background:#1e2a38;color:#e6edf3;}"
+            f"QPushButton{{background:transparent;color:{styles.CLR_MUTED};border:1px solid {styles.CLR_BORDER};}}"
+            f"QPushButton:hover{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};}}"
             "QPushButton:focus{border:2px solid #58a6ff;}")
         self.btn_cancel.setDefault(False)
         self.btn_cancel.setAutoDefault(False)
@@ -158,22 +159,22 @@ class _ReasonLookupDialog(QDialog):
         self.setWindowTitle("Adjustment Reason Codes")
         self.setModal(True)
         self.setMinimumWidth(380)
-        self.setStyleSheet("""
-            QDialog   { background: #1a2332; color: #e6edf3; }
-            QLabel    { color: #e6edf3; background: transparent; }
-            QTableWidget { background: #1a2332; color: #e6edf3;
-                           gridline-color: #2a3a4a;
-                           selection-background-color: #1565c0; }
-            QTableWidget::item { background: #1a2332; color: #e6edf3; }
-            QTableWidget::item:selected { background: #1565c0; }
-            QHeaderView::section { background: #1e2a38; color: #e6edf3;
-                                   border: 1px solid #2a3a4a; padding: 4px; }
+        self.setStyleSheet(f"""
+            QDialog   {{ background: {styles.CLR_BG}; color: {styles.CLR_TEXT}; }}
+            QLabel    {{ color: {styles.CLR_TEXT}; background: transparent; }}
+            QTableWidget {{ background: {styles.CLR_BG}; color: {styles.CLR_TEXT};
+                           gridline-color: {styles.CLR_BORDER};
+                           selection-background-color: {styles.CLR_ACCENT}; }}
+            QTableWidget::item {{ background: {styles.CLR_BG}; color: {styles.CLR_TEXT}; }}
+            QTableWidget::item:selected {{ background: {styles.CLR_ACCENT}; }}
+            QHeaderView::section {{ background: {styles.CLR_BG_PANEL}; color: {styles.CLR_TEXT};
+                                   border: 1px solid {styles.CLR_BORDER}; padding: 4px; }}
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
         lbl = QLabel("Select reason code  (Enter to confirm, Esc to cancel)")
-        lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+        lbl.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 11px;")
         layout.addWidget(lbl)
         self.table = QTableWidget()
         self.table.setColumnCount(2)
@@ -322,8 +323,8 @@ class StockAdjustView(QWidget):
 
         self.selected_label = QLabel("No product selected")
         self.selected_label.setStyleSheet(
-            "font-weight: bold; font-size: 13px; color: steelblue; "
-            "padding: 8px; background: #1e2a38; border-radius: 4px;"
+            f"font-weight: bold; font-size: 13px; color: steelblue; "
+            f"padding: 8px; background: {styles.CLR_BG_PANEL}; border-radius: 4px;"
         )
         layout.addWidget(self.selected_label)
 
@@ -347,7 +348,7 @@ class StockAdjustView(QWidget):
         self.adj_type.setMaximumWidth(120)
         self.adj_type.textChanged.connect(self._on_reason_changed)
         self.reason_desc_lbl = QLabel("")
-        self.reason_desc_lbl.setStyleSheet("color: #4CAF50; font-size: 11px; padding-left: 4px;")
+        self.reason_desc_lbl.setStyleSheet(f"color: {styles.CLR_SUCCESS_ALT}; font-size: 11px; padding-left: 4px;")
         self.reason_desc_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         f2_btn = QPushButton("🔍")
         f2_btn.setFixedSize(36, 36)
@@ -376,7 +377,7 @@ class StockAdjustView(QWidget):
         layout.addLayout(ctrl_row)
 
         btn_row = QHBoxLayout()
-        self.apply_btn = _btn("✓  Apply Adjustment", "#2e7d32")
+        self.apply_btn = _btn("✓  Apply Adjustment", styles.CLR_SUCCESS_DARK)
         self.apply_btn.setEnabled(False)
         self.apply_btn.clicked.connect(self._apply)
         self.clear_btn = _btn("Clear")
@@ -440,10 +441,10 @@ class StockAdjustView(QWidget):
         code = text.strip().upper()
         if code in REASON_MAP:
             self.reason_desc_lbl.setText(REASON_MAP[code])
-            self.reason_desc_lbl.setStyleSheet("color: #4CAF50; font-size: 11px; padding-left: 4px;")
+            self.reason_desc_lbl.setStyleSheet(f"color: {styles.CLR_SUCCESS_ALT}; font-size: 11px; padding-left: 4px;")
         elif code:
             self.reason_desc_lbl.setText("Unknown code")
-            self.reason_desc_lbl.setStyleSheet("color: #f85149; font-size: 11px; padding-left: 4px;")
+            self.reason_desc_lbl.setStyleSheet(f"color: {styles.CLR_DANGER}; font-size: 11px; padding-left: 4px;")
         else:
             self.reason_desc_lbl.setText("")
 
@@ -585,7 +586,7 @@ class StockAdjustView(QWidget):
             self.history_table.setItem(r, 3, _item(row[3] or ""))
             qty = row[4] or 0
             qi = _item(f"{qty:+.0f}", CENTER)
-            qi.setForeground(QColor("#4caf50" if qty > 0 else "#f44336"))
+            qi.setForeground(QColor(styles.CLR_SUCCESS_ALT if qty > 0 else styles.CLR_DANGER_ALT))
             self.history_table.setItem(r, 4, qi)
             self.history_table.setItem(r, 5, _item(row[5] or ""))
             self.history_table.setItem(r, 6, _item(row[6] or ""))

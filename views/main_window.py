@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QIcon, QPixmap, QColor
 from config.settings import APP_NAME, APP_VERSION
 import controllers.backup_controller as backup_ctrl
+import config.styles as styles
 import logging
 import os
 import threading
@@ -90,7 +91,7 @@ class MainWindow(QMainWindow):
             if not is_admin and index not in staff_allowed:
                 btn.setEnabled(False)
                 btn.setToolTip("Admin access required")
-                btn.setStyleSheet("color: #444; border-color: #2a3a4a;")
+                btn.setStyleSheet(f"color: #444; border-color: {styles.CLR_BORDER};")
             else:
                 btn.clicked.connect(lambda _, i=index: self._switch(i))
             nav_inner.addWidget(btn)
@@ -112,16 +113,11 @@ class MainWindow(QMainWindow):
         if is_admin:
             settings_btn = QPushButton("⚙  Settings")
             settings_btn.setFixedHeight(34)
-            settings_btn.setStyleSheet("""
-                QPushButton {
-                    background: #1a2332;
-                    border: 1px solid #2a3a4a;
-                    border-radius: 4px;
-                    color: #8b949e;
-                    font-size: 11px;
-                }
-                QPushButton:hover { color: #e6edf3; border-color: #8b949e; }
-            """)
+            settings_btn.setStyleSheet(
+                f"QPushButton{{background:{styles.CLR_BG};border:1px solid {styles.CLR_BORDER};"
+                f"border-radius:4px;color:{styles.CLR_MUTED};font-size:11px;}}"
+                f"QPushButton:hover{{color:{styles.CLR_TEXT};border-color:{styles.CLR_MUTED};}}"
+            )
             settings_btn.clicked.connect(self._open_settings)
             sidebar_layout.addWidget(settings_btn)
             sidebar_layout.addSpacing(4)
@@ -129,33 +125,21 @@ class MainWindow(QMainWindow):
         # ── Backup button ─────────────────────────────────────────────
         backup_btn = QPushButton("💾  Backup Data")
         backup_btn.setFixedHeight(34)
-        backup_btn.setStyleSheet("""
-            QPushButton {
-                background: #1a3a2a;
-                border: 1px solid #2e7d32;
-                border-radius: 4px;
-                color: #4CAF50;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover { background: #2e7d32; color: white; }
-        """)
+        backup_btn.setStyleSheet(
+            f"QPushButton{{background:#1a3a2a;border:1px solid {styles.CLR_SUCCESS_DARK};"
+            f"border-radius:4px;color:{styles.CLR_SUCCESS_ALT};font-weight:bold;font-size:11px;}}"
+            f"QPushButton:hover{{background:{styles.CLR_SUCCESS_DARK};color:white;}}"
+        )
         backup_btn.clicked.connect(self._manual_backup)
         sidebar_layout.addWidget(backup_btn)
 
         restore_btn = QPushButton("⟳  Restore Backup")
         restore_btn.setFixedHeight(34)
-        restore_btn.setStyleSheet("""
-            QPushButton {
-                background: #1a1a2e;
-                border: 1px solid #1565c0;
-                border-radius: 4px;
-                color: #5c9de8;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover { background: #1565c0; color: white; }
-        """)
+        restore_btn.setStyleSheet(
+            f"QPushButton{{background:#1a1a2e;border:1px solid {styles.CLR_ACCENT};"
+            f"border-radius:4px;color:{styles.CLR_BLUE_LIGHT};font-weight:bold;font-size:11px;}}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT};color:white;}}"
+        )
         restore_btn.clicked.connect(self._restore_backup)
         sidebar_layout.addWidget(restore_btn)
 
@@ -178,15 +162,15 @@ class MainWindow(QMainWindow):
         user_role = self.current_user.get("role", "")
         user_lbl = QLabel(f"👤 {user_name}\n{user_role}")
         user_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        user_lbl.setStyleSheet("color: #4CAF50; font-size: 10px;")
+        user_lbl.setStyleSheet(f"color: {styles.CLR_SUCCESS_ALT}; font-size: 10px;")
         sidebar_layout.addWidget(user_lbl)
 
         logout_btn = QPushButton("🔒 Lock")
         logout_btn.setFixedHeight(28)
         logout_btn.setStyleSheet(
-            "QPushButton{background:#1a2332;color:#8b949e;border:1px solid #2a3a4a;"
-            "border-radius:4px;font-size:10px;}"
-            "QPushButton:hover{color:#e6edf3;border-color:#8b949e;}")
+            f"QPushButton{{background:{styles.CLR_BG};color:{styles.CLR_MUTED};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;font-size:10px;}}"
+            f"QPushButton:hover{{color:{styles.CLR_TEXT};border-color:{styles.CLR_MUTED};}}")
         logout_btn.clicked.connect(self._lock)
         sidebar_layout.addWidget(logout_btn)
 

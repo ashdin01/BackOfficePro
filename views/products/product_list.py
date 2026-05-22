@@ -8,6 +8,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
 import controllers.product_controller as product_ctrl
+import config.styles as styles
 import csv
 import os
 
@@ -198,23 +199,23 @@ class ProductList(KeyboardMixin, QWidget):
             soh_item = NumericTableWidgetItem(str(soh_qty))
             soh_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if is_warning:
-                soh_item.setForeground(QColor('#FF9800'))
+                soh_item.setForeground(QColor(styles.CLR_ORANGE))
             elif soh_qty >= 4:
-                soh_item.setForeground(QColor('#4CAF50'))
+                soh_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
             elif soh_qty >= 0:
-                soh_item.setForeground(QColor('#FF9800'))
+                soh_item.setForeground(QColor(styles.CLR_ORANGE))
             else:
-                soh_item.setForeground(QColor('#f44336'))
+                soh_item.setForeground(QColor(styles.CLR_DANGER_ALT))
             self.table.setItem(r, 9, soh_item)
             status_text = "Active" if is_active else "INACTIVE"
             status_item = QTableWidgetItem(status_text)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if is_warning:
-                status_item.setForeground(QColor('#FF9800'))
+                status_item.setForeground(QColor(styles.CLR_ORANGE))
             elif not is_active:
                 status_item.setForeground(QColor('#666666'))
             else:
-                status_item.setForeground(QColor('#4CAF50'))
+                status_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
             self.table.setItem(r, 10, status_item)
             if row_color:
                 for col in range(self.table.columnCount()):

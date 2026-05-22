@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
+import config.styles as styles
 import controllers.purchase_order_controller as po_ctrl
 import controllers.supplier_controller as supplier_ctrl
 from config.constants import PO_TYPES, PO_TYPE_PO
@@ -20,11 +21,11 @@ class _TypeLookup(QDialog):
         self.setModal(True)
         self.setFixedWidth(360)
         self.setStyleSheet(
-            "QDialog{background:#1a2332;color:#e6edf3;}"
-            "QTableWidget{background:#1e2a38;color:#e6edf3;"
-            "gridline-color:#2a3a4a;border:1px solid #2a3a4a;}"
-            "QTableWidget::item:selected{background:#1565c0;}"
-            "QHeaderView::section{background:#1e2a38;color:#8b949e;"
+            f"QDialog{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};}}"
+            f"QTableWidget{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};"
+            f"gridline-color:{styles.CLR_BORDER};border:1px solid {styles.CLR_BORDER};}}"
+            f"QTableWidget::item:selected{{background:{styles.CLR_ACCENT};}}"
+            f"QHeaderView::section{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_MUTED};"
             "border:none;padding:4px 8px;font-weight:bold;}"
         )
         self.selected_code = None
@@ -34,7 +35,7 @@ class _TypeLookup(QDialog):
         lay.setSpacing(10)
 
         lbl = QLabel("Double-click or press Enter to select:")
-        lbl.setStyleSheet("color:#8b949e; font-size:11px;")
+        lbl.setStyleSheet(styles.STYLE_LABEL_MUTED)
         lay.addWidget(lbl)
 
         self.table = QTableWidget(len(PO_TYPES), 2)
@@ -62,14 +63,14 @@ class _TypeLookup(QDialog):
         btn_row = QHBoxLayout()
         btn_ok = QPushButton("Select  [Enter]")
         btn_ok.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
-            "border-radius:4px;padding:6px 16px;font-weight:bold;}"
-            "QPushButton:hover{background:#1976d2;}")
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
+            "border-radius:4px;padding:6px 16px;font-weight:bold;}}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
         btn_cancel = QPushButton("Cancel  [Esc]")
         btn_cancel.setStyleSheet(
-            "QPushButton{background:transparent;color:#8b949e;"
-            "border:1px solid #2a3a4a;border-radius:4px;padding:6px 14px;}"
-            "QPushButton:hover{background:#1e2a38;color:#e6edf3;}")
+            f"QPushButton{{background:transparent;color:{styles.CLR_MUTED};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;padding:6px 14px;}}"
+            f"QPushButton:hover{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};}}")
         btn_ok.clicked.connect(self._pick)
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_ok)
@@ -116,22 +117,22 @@ class POCreate(QWidget):
         self.type_input.setText(PO_TYPE_PO)
         self.type_input.setPlaceholderText("PO")
         self.type_input.setStyleSheet(
-            "QLineEdit{font-weight:bold;font-size:14px;text-transform:uppercase;"
-            "background:#1e2a38;color:#4CAF50;border:1px solid #2a3a4a;"
+            f"QLineEdit{{font-weight:bold;font-size:14px;text-transform:uppercase;"
+            f"background:{styles.CLR_BG_PANEL};color:{styles.CLR_SUCCESS_ALT};border:1px solid {styles.CLR_BORDER};"
             "border-radius:4px;padding:2px 6px;}"
-            "QLineEdit:focus{border-color:#4CAF50;}")
+            f"QLineEdit:focus{{border-color:{styles.CLR_SUCCESS_ALT};}}")
 
         f2_btn = QPushButton("F2")
         f2_btn.setFixedHeight(32)
         f2_btn.setFixedWidth(34)
         f2_btn.setStyleSheet(
-            "QPushButton{background:#1e2a38;color:#8b949e;"
-            "border:1px solid #2a3a4a;border-radius:4px;font-size:10px;}"
-            "QPushButton:hover{color:#e6edf3;border-color:#8b949e;}")
+            f"QPushButton{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_MUTED};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;font-size:10px;}}"
+            f"QPushButton:hover{{color:{styles.CLR_TEXT};border-color:{styles.CLR_MUTED};}}")
         f2_btn.clicked.connect(self._type_lookup)
 
         self.type_desc_lbl = QLabel(PO_TYPES[PO_TYPE_PO])
-        self.type_desc_lbl.setStyleSheet("color:#8b949e; font-size:11px;")
+        self.type_desc_lbl.setStyleSheet(styles.STYLE_LABEL_MUTED)
 
         type_row.addWidget(self.type_input)
         type_row.addWidget(f2_btn)
@@ -144,7 +145,7 @@ class POCreate(QWidget):
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color:#2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
 
         self.supplier = QComboBox()
         suppliers = supplier_ctrl.get_all()
@@ -175,7 +176,7 @@ class POCreate(QWidget):
 
         # ── Action buttons ────────────────────────────────────────────
         hint = QLabel("Choose how to start this order:")
-        hint.setStyleSheet("color:#8b949e; font-size:11px;")
+        hint.setStyleSheet(styles.STYLE_LABEL_MUTED)
         layout.addWidget(hint)
 
         btns = QHBoxLayout()
@@ -187,10 +188,10 @@ class POCreate(QWidget):
         self.rec_btn.setAutoDefault(False)
         self.rec_btn.setToolTip("Pre-fill with products below reorder point (Purchase Orders only)")
         self.rec_btn.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;font-weight:bold;padding:0 12px;}"
-            "QPushButton:hover{background:#1976d2;}"
-            "QPushButton:disabled{background:#1e2a38;color:#555;}")
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
+            f"QPushButton:disabled{{background:{styles.CLR_BG_PANEL};color:#555;}}")
         self.rec_btn.clicked.connect(lambda: self._save(blank=False))
 
         blank_btn = QPushButton("➕  Blank Order  [Ctrl+B]")
@@ -199,9 +200,9 @@ class POCreate(QWidget):
         blank_btn.setAutoDefault(False)
         blank_btn.setToolTip("Create an empty order — add lines manually")
         blank_btn.setStyleSheet(
-            "QPushButton{background:#2e7d32;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_SUCCESS_DARK};color:white;border:none;"
             "border-radius:4px;font-weight:bold;padding:0 12px;}"
-            "QPushButton:hover{background:#388e3c;}")
+            f"QPushButton:hover{{background:{styles.CLR_SUCCESS_HOVER};}}")
         blank_btn.clicked.connect(lambda: self._save(blank=True))
 
         cancel_btn = QPushButton("Cancel  [Esc]")
@@ -233,14 +234,16 @@ class POCreate(QWidget):
         code = text.upper().strip()
         desc = PO_TYPES.get(code, '')
         self.type_desc_lbl.setText(desc if desc else "— unknown type")
-        self.type_desc_lbl.setStyleSheet(
-            f"color:{'#8b949e' if desc else '#f85149'}; font-size:11px;")
+        _c = styles.CLR_MUTED if desc else styles.CLR_DANGER
+        _ci = styles.CLR_SUCCESS_ALT if desc else styles.CLR_DANGER
+        _b = styles.CLR_BORDER if desc else styles.CLR_DANGER
+        self.type_desc_lbl.setStyleSheet(f"color:{_c}; font-size:11px;")
         self.type_input.setStyleSheet(
             f"QLineEdit{{font-weight:bold;font-size:14px;"
-            f"background:#1e2a38;color:{'#4CAF50' if desc else '#f85149'};"
-            f"border:1px solid {'#2a3a4a' if desc else '#f85149'};"
+            f"background:{styles.CLR_BG_PANEL};color:{_ci};"
+            f"border:1px solid {_b};"
             f"border-radius:4px;padding:2px 6px;}}"
-            f"QLineEdit:focus{{border-color:{'#4CAF50' if desc else '#f85149'};}}")
+            f"QLineEdit:focus{{border-color:{_ci};}}")
         # Recommended PO only makes sense for normal purchase orders
         self.rec_btn.setEnabled(code == PO_TYPE_PO)
 

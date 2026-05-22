@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate, QTimer
 from PyQt6.QtGui import QColor, QAction, QKeySequence, QShortcut
 import csv, os, subprocess, sys, logging
+import config.styles as styles
 import controllers.sales_report_controller as sales_ctrl
 from utils.error_dialog import show_error
 
@@ -48,11 +49,13 @@ def _make_table(headers, stretch_col=1):
     return t
 
 
-def _stat_card(label, value, color="#2196F3"):
+def _stat_card(label, value, color=None):
+    if color is None:
+        color = styles.CLR_BLUE
     frame = QFrame()
     frame.setStyleSheet(f"""
         QFrame {{
-            background: #1e2a38;
+            background: {styles.CLR_BG_PANEL};
             border-radius: 8px;
             border-left: 4px solid {color};
         }}
@@ -62,7 +65,7 @@ def _stat_card(label, value, color="#2196F3"):
     val_lbl = QLabel(value)
     val_lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {color};")
     lbl_lbl = QLabel(label)
-    lbl_lbl.setStyleSheet("font-size: 11px; color: #aaa;")
+    lbl_lbl.setStyleSheet(f"font-size: 11px; color: {styles.CLR_MUTED};")
     layout.addWidget(val_lbl)
     layout.addWidget(lbl_lbl)
     return frame, val_lbl, lbl_lbl
@@ -136,8 +139,8 @@ class _AddProductDialog(QDialog):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         scroll.setWidget(fw); root.addWidget(scroll)
 
-        def req(t): l=QLabel(f"{t} *"); l.setStyleSheet("color:#e6edf3;"); return l
-        def opt(t): l=QLabel(t); l.setStyleSheet("color:#8b949e;"); return l
+        def req(t): l=QLabel(f"{t} *"); l.setStyleSheet(f"color:{styles.CLR_TEXT};"); return l
+        def opt(t): l=QLabel(t); l.setStyleSheet(f"color:{styles.CLR_MUTED};"); return l
 
         self.f_barcode = QLineEdit(pf.get("barcode",""))
         self.f_barcode.setPlaceholderText("Scan or type barcode")
@@ -199,7 +202,7 @@ class _AddProductDialog(QDialog):
         self.f_sell.setValue(float(pf.get("sell_price") or 0))
         form.addRow(opt("Sell Price"), self.f_sell)
 
-        self.f_gp = QLabel("—"); self.f_gp.setStyleSheet("color:#3fb950;")
+        self.f_gp = QLabel("—"); self.f_gp.setStyleSheet(f"color:{styles.CLR_SUCCESS};")
         self.f_cost.valueChanged.connect(self._update_gp)
         self.f_sell.valueChanged.connect(self._update_gp)
         self._update_gp()
@@ -228,9 +231,9 @@ class _AddProductDialog(QDialog):
         btn_row = QHBoxLayout()
         self.btn_save = QPushButton("Save  [Ctrl+S]")
         self.btn_save.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;padding:6px 18px;font-weight:700;}"
-            "QPushButton:hover{background:#1976d2;}")
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
         btn_cancel = QPushButton("Cancel  [Esc]")
         btn_row.addWidget(self.btn_save); btn_row.addWidget(btn_cancel)
         btn_row.addStretch(); root.addLayout(btn_row)
@@ -245,7 +248,7 @@ class _AddProductDialog(QDialog):
         sp, cp = self.f_sell.value(), self.f_cost.value()
         if sp > 0:
             pct = (sp-cp)/sp*100; dol = sp-cp
-            col = "#3fb950" if dol >= 0 else "#f85149"
+            col = styles.CLR_SUCCESS if dol >= 0 else styles.CLR_DANGER
             self.f_gp.setStyleSheet(f"color:{col};")
             self.f_gp.setText(f"{pct:.1f}%  (${dol:.2f})")
         else:
@@ -328,11 +331,11 @@ class _MatchItemDialog(QDialog):
         root.setContentsMargins(0,0,0,0); root.setSpacing(0)
 
         # Title bar
-        tb = QWidget(); tb.setStyleSheet("background:#1e2a38; border-bottom:1px solid #2a3a4a;")
+        tb = QWidget(); tb.setStyleSheet(styles.STYLE_PANEL_HEADER)
         tb_lay = QHBoxLayout(tb); tb_lay.setContentsMargins(16,10,16,10)
         t = QLabel("Match Item"); t.setStyleSheet("font-size:15px;font-weight:700;")
         hint = QLabel("Select an existing product to link, or add as new")
-        hint.setStyleSheet("color:#6e7681;font-size:11px;")
+        hint.setStyleSheet(styles.STYLE_LABEL_EXTRA_DIM)
         tb_lay.addWidget(t); tb_lay.addSpacing(12); tb_lay.addWidget(hint); tb_lay.addStretch()
         root.addWidget(tb)
 
@@ -342,7 +345,7 @@ class _MatchItemDialog(QDialog):
 
         # LEFT: sales row details
         left = QWidget(); left.setFixedWidth(270)
-        left.setStyleSheet("background:#1e2a38; border-right:1px solid #2a3a4a;")
+        left.setStyleSheet(styles.STYLE_PANEL_SIDEBAR)
         ll = QVBoxLayout(left); ll.setContentsMargins(16,16,16,16); ll.setSpacing(10)
         ll.addWidget(self._sec_lbl("SALES ROW"))
 
@@ -355,17 +358,17 @@ class _MatchItemDialog(QDialog):
 
         self._add_detail(ll, "PLU",         str(plu))
         self._add_detail(ll, "Barcode",     bc or "⚠ None",
-                         color="#f85149" if not bc else "#58a6ff")
+                         color=styles.CLR_DANGER if not bc else "#58a6ff")
         self._add_detail(ll, "Name",        name)
         self._add_detail(ll, "Sub Group",   sg or "—")
-        self._add_detail(ll, "Total Sales", f"${sales:,.2f}", color="#4CAF50")
-        self._add_detail(ll, "Total Qty",   str(int(qty)), color="#2196F3")
+        self._add_detail(ll, "Total Sales", f"${sales:,.2f}", color=styles.CLR_SUCCESS_ALT)
+        self._add_detail(ll, "Total Qty",   str(int(qty)), color=styles.CLR_BLUE)
 
         ll.addStretch()
 
         self.btn_add_new = QPushButton("+ Add New Product")
         self.btn_add_new.setStyleSheet(
-            "QPushButton{background:#1b3a2a;border:1px solid #3fb950;color:#3fb950;"
+            f"QPushButton{{background:#1b3a2a;border:1px solid {styles.CLR_SUCCESS};color:{styles.CLR_SUCCESS};"
             "border-radius:4px;padding:7px 0;font-weight:700;font-size:12px;}"
             "QPushButton:hover{background:#2ea04333;}")
         self.btn_add_new.clicked.connect(self._add_new)
@@ -376,7 +379,7 @@ class _MatchItemDialog(QDialog):
         right = QWidget(); rl = QVBoxLayout(right)
         rl.setContentsMargins(0,0,0,0); rl.setSpacing(0)
 
-        sb = QWidget(); sb.setStyleSheet("background:#1a2433;border-bottom:1px solid #2a3a4a;")
+        sb = QWidget(); sb.setStyleSheet(f"background:{styles.CLR_BG};border-bottom:1px solid {styles.CLR_BORDER};")
         sb_lay = QHBoxLayout(sb); sb_lay.setContentsMargins(12,8,12,8); sb_lay.setSpacing(8)
         sb_lay.addWidget(QLabel("Search:"))
         self.search_edit = QLineEdit()
@@ -384,7 +387,7 @@ class _MatchItemDialog(QDialog):
         self.search_edit.setText(self.sales_row.get("plu_name",""))
         self.search_edit.textChanged.connect(lambda _: self._timer.start(500))
         sb_lay.addWidget(self.search_edit, stretch=1)
-        self.lbl_count = QLabel(""); self.lbl_count.setStyleSheet("color:#6e7681;font-size:11px;")
+        self.lbl_count = QLabel(""); self.lbl_count.setStyleSheet(styles.STYLE_LABEL_EXTRA_DIM)
         sb_lay.addWidget(self.lbl_count)
         rl.addWidget(sb)
 
@@ -412,15 +415,15 @@ class _MatchItemDialog(QDialog):
         body.addWidget(right, stretch=1)
 
         # Action bar
-        ab = QWidget(); ab.setStyleSheet("background:#1e2a38;border-top:1px solid #2a3a4a;")
+        ab = QWidget(); ab.setStyleSheet(styles.STYLE_PANEL_FOOTER)
         ab_lay = QHBoxLayout(ab); ab_lay.setContentsMargins(16,10,16,10); ab_lay.setSpacing(10)
 
         self.btn_assign = QPushButton("✓  Assign Match")
         self.btn_assign.setEnabled(False)
         self.btn_assign.setStyleSheet(
-            "QPushButton{background:#1565c0;border:1px solid #1976d2;color:white;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};border:1px solid {styles.CLR_ACCENT_HOVER};color:white;"
             "border-radius:4px;padding:7px 20px;font-weight:700;font-size:13px;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
             "QPushButton:disabled{opacity:0.4;}")
         self.btn_assign.clicked.connect(self._assign)
 
@@ -428,11 +431,11 @@ class _MatchItemDialog(QDialog):
         btn_cancel.setStyleSheet(
             "QPushButton{background:transparent;border:1px solid #444;color:#888;"
             "border-radius:4px;padding:7px 16px;}"
-            "QPushButton:hover{border-color:#888;color:#e6edf3;}")
+            f"QPushButton:hover{{border-color:#888;color:{styles.CLR_TEXT};}}")
         btn_cancel.clicked.connect(self.reject)
 
         hint2 = QLabel("Double-click a row to assign immediately")
-        hint2.setStyleSheet("color:#6e7681;font-size:11px;")
+        hint2.setStyleSheet(styles.STYLE_LABEL_EXTRA_DIM)
 
         ab_lay.addWidget(self.btn_assign); ab_lay.addWidget(btn_cancel)
         ab_lay.addSpacing(12); ab_lay.addWidget(hint2); ab_lay.addStretch()
@@ -441,12 +444,14 @@ class _MatchItemDialog(QDialog):
         QShortcut(QKeySequence("Escape"), self).activated.connect(self.reject)
 
     def _sec_lbl(self, text):
-        l = QLabel(text); l.setStyleSheet("color:#6e7681;font-size:10px;letter-spacing:1.5px;")
+        l = QLabel(text); l.setStyleSheet(f"color:{styles.CLR_EXTRA_DIM};font-size:10px;letter-spacing:1.5px;")
         return l
 
-    def _add_detail(self, layout, label, value, color="#e6edf3"):
+    def _add_detail(self, layout, label, value, color=None):
+        if color is None:
+            color = styles.CLR_TEXT
         w = QWidget(); wl = QVBoxLayout(w); wl.setContentsMargins(0,0,0,0); wl.setSpacing(1)
-        lbl = QLabel(label); lbl.setStyleSheet("color:#6e7681;font-size:10px;")
+        lbl = QLabel(label); lbl.setStyleSheet(f"color:{styles.CLR_EXTRA_DIM};font-size:10px;")
         val = QLabel(value); val.setWordWrap(True)
         val.setStyleSheet(f"color:{color};font-size:13px;font-weight:600;")
         wl.addWidget(lbl); wl.addWidget(val); layout.addWidget(w)
@@ -478,7 +483,7 @@ class _MatchItemDialog(QDialog):
         for r, (score, p) in enumerate(scored):
             sc_item = _item(str(score), CENTER)
             sc_item.setForeground(QColor(
-                "#3fb950" if score>=70 else "#f0c040" if score>=40 else "#8b949e"))
+                styles.CLR_SUCCESS if score>=70 else "#f0c040" if score>=40 else styles.CLR_MUTED))
             desc_item = _item(p.get("description",""))
             desc_item.setData(Qt.ItemDataRole.UserRole, p)
 
@@ -604,13 +609,13 @@ class SalesReportView(QWidget):
 
         load_btn = QPushButton("Apply")
         load_btn.setMinimumHeight(34)
-        load_btn.setStyleSheet("background:#1565c0;color:white;font-weight:bold;padding:0 16px;")
+        load_btn.setStyleSheet(f"background:{styles.CLR_ACCENT};color:white;font-weight:bold;padding:0 16px;")
         load_btn.clicked.connect(self._load)
         filter_row.addWidget(load_btn)
 
         import_btn = QPushButton("⬆  Import Sales")
         import_btn.setMinimumHeight(34)
-        import_btn.setStyleSheet("background:#2e7d32;color:white;font-weight:bold;padding:0 16px;")
+        import_btn.setStyleSheet(styles.STYLE_BTN_SUCCESS)
         import_btn.clicked.connect(self._import_sales)
         filter_row.addWidget(import_btn)
 
@@ -623,10 +628,10 @@ class SalesReportView(QWidget):
 
         # Stat cards
         cards_row = QHBoxLayout()
-        self._card_revenue, self._val_revenue, _ = _stat_card("Net Revenue",      "$0.00", "#4CAF50")
-        self._card_qty,     self._val_qty,     _ = _stat_card("Total Items Sold", "0",     "#2196F3")
-        self._card_days,    self._val_days,    _ = _stat_card("Days of Data",     "0",     "#FF9800")
-        self._card_top,     self._val_top, self._lbl_top = _stat_card("Top Seller", "—",  "#9C27B0")
+        self._card_revenue, self._val_revenue, _ = _stat_card("Net Revenue",      "$0.00", styles.CLR_SUCCESS_ALT)
+        self._card_qty,     self._val_qty,     _ = _stat_card("Total Items Sold", "0",     styles.CLR_BLUE)
+        self._card_days,    self._val_days,    _ = _stat_card("Days of Data",     "0",     styles.CLR_ORANGE)
+        self._card_top,     self._val_top, self._lbl_top = _stat_card("Top Seller", "—",  styles.CLR_PURPLE)
         for c in [self._card_revenue, self._card_qty, self._card_days, self._card_top]:
             cards_row.addWidget(c)
         layout.addLayout(cards_row)
@@ -680,7 +685,7 @@ class SalesReportView(QWidget):
         layout.addWidget(tabs)
 
         self.footer_label = QLabel("")
-        self.footer_label.setStyleSheet("color:#aaa;font-size:11px;")
+        self.footer_label.setStyleSheet(f"color:{styles.CLR_MUTED};font-size:11px;")
         layout.addWidget(self.footer_label)
 
     # ── Data loading ──────────────────────────────────────────────────────────
@@ -821,7 +826,7 @@ class SalesReportView(QWidget):
 
             bc_item = _item(barcode, CENTER)
             if not barcode:
-                bc_item.setForeground(QColor("#f85149"))   # red = unmatched
+                bc_item.setForeground(QColor(styles.CLR_DANGER))   # red = unmatched
 
             desc_item = _item(description)
             desc_item.setData(Qt.ItemDataRole.UserRole, {
@@ -837,13 +842,13 @@ class SalesReportView(QWidget):
 
             pct_item = _item(f"{pct:.1f}%", RIGHT, numeric=True)
             if pct > 5:
-                pct_item.setForeground(QColor("#4CAF50"))
+                pct_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
 
             on_hand_item = _item(
                 f"{on_hand:.0f}" if on_hand != "" else "—", RIGHT, numeric=bool(on_hand)
             )
             if isinstance(on_hand, (int, float)) and on_hand < 0:
-                on_hand_item.setForeground(QColor("#f85149"))
+                on_hand_item.setForeground(QColor(styles.CLR_DANGER))
 
             self.product_table.setItem(r, 0, bc_item)
             self.product_table.setItem(r, 1, _item(str(plu), CENTER))
@@ -902,12 +907,12 @@ class SalesReportView(QWidget):
         if not row_data: return
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu{background:#1e2a38;border:1px solid #2a3a4a;
-                  color:#e6edf3;font-size:12px;padding:4px;}
-            QMenu::item{padding:7px 20px;border-radius:4px;}
-            QMenu::item:selected{background:#1565c0;}
-            QMenu::separator{height:1px;background:#2a3a4a;margin:4px 8px;}
+        menu.setStyleSheet(f"""
+            QMenu{{background:{styles.CLR_BG_PANEL};border:1px solid {styles.CLR_BORDER};
+                  color:{styles.CLR_TEXT};font-size:12px;padding:4px;}}
+            QMenu::item{{padding:7px 20px;border-radius:4px;}}
+            QMenu::item:selected{{background:{styles.CLR_ACCENT};}}
+            QMenu::separator{{height:1px;background:{styles.CLR_BORDER};margin:4px 8px;}}
         """)
 
         act_match = QAction("🔗  Match Item…", self)

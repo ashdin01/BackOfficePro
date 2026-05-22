@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
+import config.styles as styles
 import controllers.report_controller as report_ctrl
 from utils.error_dialog import show_error
 
@@ -51,7 +52,7 @@ class WriteOffReport(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         cost_note = QLabel("⚠  Cost values based on current product cost price (ex. GST)")
-        cost_note.setStyleSheet("color: #FF9800; font-size: 11px;")
+        cost_note.setStyleSheet(f"color: {styles.CLR_ORANGE}; font-size: 11px;")
         layout.addWidget(cost_note)
 
         filter_row = QHBoxLayout()
@@ -69,22 +70,17 @@ class WriteOffReport(QWidget):
         self.date_to.setMinimumHeight(32)
         filter_row.addWidget(self.date_to)
 
-        btn_style = (
-            "QPushButton{background:#1e2a38;color:#e6edf3;border:1px solid #2a3a4a;"
-            "border-radius:3px;padding:0 10px;font-size:11px;height:30px;}"
-            "QPushButton:hover{background:#2a3a4a;}"
-        )
         for label, fn in [("This Month", self._set_this_month),
                            ("Last Month", self._set_last_month),
                            ("This FY",    self._set_this_fy)]:
             btn = QPushButton(label)
-            btn.setStyleSheet(btn_style)
+            btn.setStyleSheet(styles.STYLE_BTN_PERIOD)
             btn.clicked.connect(fn)
             filter_row.addWidget(btn)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
         filter_row.addWidget(sep)
 
         filter_row.addWidget(QLabel("Category:"))
@@ -107,9 +103,9 @@ class WriteOffReport(QWidget):
         apply_btn = QPushButton("Apply")
         apply_btn.setMinimumHeight(32)
         apply_btn.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;padding:0 16px;font-weight:bold;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
         apply_btn.clicked.connect(self._load)
         filter_row.addWidget(apply_btn)
@@ -122,11 +118,11 @@ class WriteOffReport(QWidget):
 
         cards_row = QHBoxLayout()
         cards_row.setSpacing(12)
-        self.card_total_units = self._make_card("Total Units", "0", "#e6edf3")
-        self.card_total_value = self._make_card("Total Cost Value", "$0.00", "#f85149")
-        self.card_spoilage    = self._make_card("Spoilage", "0 units", "#FF9800")
-        self.card_shrinkage   = self._make_card("Shrinkage", "0 units", "#f85149")
-        self.card_admin       = self._make_card("Admin Corrections", "0 units", "#5c9de8")
+        self.card_total_units = self._make_card("Total Units", "0", styles.CLR_TEXT)
+        self.card_total_value = self._make_card("Total Cost Value", "$0.00", styles.CLR_DANGER)
+        self.card_spoilage    = self._make_card("Spoilage", "0 units", styles.CLR_ORANGE)
+        self.card_shrinkage   = self._make_card("Shrinkage", "0 units", styles.CLR_DANGER)
+        self.card_admin       = self._make_card("Admin Corrections", "0 units", styles.CLR_BLUE_LIGHT)
         for card in [self.card_total_units, self.card_total_value,
                      self.card_spoilage, self.card_shrinkage, self.card_admin]:
             cards_row.addWidget(card[0])
@@ -168,18 +164,18 @@ class WriteOffReport(QWidget):
 
         layout.addWidget(self.tabs)
         self.footer = QLabel("")
-        self.footer.setStyleSheet("color: #8b949e; font-size: 11px;")
+        self.footer.setStyleSheet(styles.STYLE_LABEL_MUTED)
         layout.addWidget(self.footer)
 
     def _make_card(self, title, value, color):
         frame = QFrame()
         frame.setStyleSheet(
-            "QFrame{background:#1e2a38;border:1px solid #2a3a4a;border-radius:6px;}"
+            f"QFrame{{background:{styles.CLR_BG_PANEL};border:1px solid {styles.CLR_BORDER};border-radius:6px;}}"
         )
         card_layout = QVBoxLayout(frame)
         card_layout.setContentsMargins(12, 8, 12, 8)
         lbl_title = QLabel(title)
-        lbl_title.setStyleSheet("color: #8b949e; font-size: 11px;")
+        lbl_title.setStyleSheet(styles.STYLE_LABEL_MUTED)
         lbl_val = QLabel(value)
         lbl_val.setStyleSheet(f"color: {color}; font-size: 16px; font-weight: bold;")
         card_layout.addWidget(lbl_title)
@@ -224,7 +220,7 @@ class WriteOffReport(QWidget):
 
             r = self.item_table.rowCount()
             self.item_table.insertRow(r)
-            cat_color = {'Spoilage': '#FF9800', 'Shrinkage': '#f85149', 'Admin': '#5c9de8'}.get(cat, '#8b949e')
+            cat_color = {'Spoilage': styles.CLR_ORANGE, 'Shrinkage': styles.CLR_DANGER, 'Admin': styles.CLR_BLUE_LIGHT}.get(cat, styles.CLR_MUTED)
 
             self.item_table.setItem(r, 0, QTableWidgetItem(str(row['created_at'])[:16]))
             self.item_table.setItem(r, 1, QTableWidgetItem(row['barcode']))
@@ -240,7 +236,7 @@ class WriteOffReport(QWidget):
             self.item_table.setItem(r, 7, u_item)
             v_item = NumItem(f"${value:.2f}")
             v_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            v_item.setForeground(QColor('#f85149') if value > 0 else QColor('#8b949e'))
+            v_item.setForeground(QColor(styles.CLR_DANGER) if value > 0 else QColor(styles.CLR_MUTED))
             self.item_table.setItem(r, 8, v_item)
 
         self.item_table.setSortingEnabled(True)
@@ -250,7 +246,7 @@ class WriteOffReport(QWidget):
         for t, data in sorted(type_summary.items(), key=lambda x: -x[1]['value']):
             r = self.type_table.rowCount()
             self.type_table.insertRow(r)
-            cat_color = {'Spoilage': '#FF9800', 'Shrinkage': '#f85149', 'Admin': '#5c9de8'}.get(data['cat'], '#8b949e')
+            cat_color = {'Spoilage': styles.CLR_ORANGE, 'Shrinkage': styles.CLR_DANGER, 'Admin': styles.CLR_BLUE_LIGHT}.get(data['cat'], styles.CLR_MUTED)
             self.type_table.setItem(r, 0, QTableWidgetItem(t))
             ci = QTableWidgetItem(data['cat'])
             ci.setForeground(QColor(cat_color))
@@ -263,7 +259,7 @@ class WriteOffReport(QWidget):
             self.type_table.setItem(r, 3, ui)
             vi = NumItem(f"${data['value']:.2f}")
             vi.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            vi.setForeground(QColor('#f85149'))
+            vi.setForeground(QColor(styles.CLR_DANGER))
             self.type_table.setItem(r, 4, vi)
         self.type_table.setSortingEnabled(True)
 

@@ -8,6 +8,7 @@ from utils.keyboard_mixin import KeyboardMixin
 from utils.validators import validate_abn, validate_email, validate_phone, validate_bsb
 from utils.error_dialog import show_error
 import controllers.supplier_controller as supplier_ctrl
+import config.styles as styles
 
 
 class SupplierEdit(KeyboardMixin, QWidget):
@@ -128,7 +129,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
         days_row.addStretch()
 
         order_hint = QLabel("Days an order should be placed with this supplier")
-        order_hint.setStyleSheet("color:#8b949e; font-size:11px;")
+        order_hint.setStyleSheet(styles.STYLE_LABEL_MUTED)
         order_form.addRow("", order_hint)
         order_form.addRow("Order Days", days_row)
 
@@ -162,7 +163,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
             delivery_days_row.addWidget(cb)
         delivery_days_row.addStretch()
         delivery_hint = QLabel("Days this supplier delivers (used for milk demand forecasting)")
-        delivery_hint.setStyleSheet("color:#8b949e; font-size:11px;")
+        delivery_hint.setStyleSheet(styles.STYLE_LABEL_MUTED)
         order_form.addRow("", delivery_hint)
         order_form.addRow("Delivery Days", delivery_days_row)
 
@@ -223,9 +224,9 @@ class SupplierEdit(KeyboardMixin, QWidget):
         self._save_btn = save_btn = QPushButton("Save  [Ctrl+S]")
         save_btn.setFixedHeight(35)
         save_btn.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;padding:0 18px;font-weight:bold;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
         save_btn.clicked.connect(self._save)
         cancel_btn = QPushButton("Cancel  [Esc]")
@@ -304,10 +305,10 @@ class SupplierEdit(KeyboardMixin, QWidget):
             _, bank_name = validate_bsb(raw)
             if bank_name:
                 self._bsb_indicator.setText(f"✓  {bank_name}")
-                self._bsb_indicator.setStyleSheet("color: #4CAF50; font-weight: bold;")
+                self._bsb_indicator.setStyleSheet(f"color: {styles.CLR_SUCCESS_ALT}; font-weight: bold;")
             else:
                 self._bsb_indicator.setText("✓  Valid format")
-                self._bsb_indicator.setStyleSheet("color: #4CAF50;")
+                self._bsb_indicator.setStyleSheet(f"color: {styles.CLR_SUCCESS_ALT};")
         except ValueError:
             if len(digits) == 6:
                 self._bsb_indicator.setText("✗  Invalid BSB")

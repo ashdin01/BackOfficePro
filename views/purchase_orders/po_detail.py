@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, QDate
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.error_dialog import show_error
+import config.styles as styles
 import controllers.purchase_order_controller as po_controller
 import controllers.product_controller as product_ctrl
 import controllers.supplier_controller as supplier_ctrl
@@ -161,10 +162,7 @@ class PODetail(QWidget):
 
         self.supplier_notes_banner = QLabel("")
         self.supplier_notes_banner.setWordWrap(True)
-        self.supplier_notes_banner.setStyleSheet(
-            "color: #e6c84e; background: #2a2200; border: 1px solid #6b5500;"
-            "border-radius: 4px; padding: 6px 10px;"
-        )
+        self.supplier_notes_banner.setStyleSheet(styles.STYLE_WARNING_BANNER)
         self.supplier_notes_banner.hide()
         layout.addWidget(self.supplier_notes_banner)
 
@@ -173,11 +171,6 @@ class PODetail(QWidget):
         period_row.setSpacing(6)
         period_row.addWidget(QLabel("Sales period:"))
 
-        _btn_style = (
-            "QPushButton{background:#1e2a38;color:#e6edf3;border:1px solid #2a3a4a;"
-            "border-radius:3px;padding:0 8px;font-size:11px;height:26px;}"
-            "QPushButton:hover{background:#2a3a4a;}"
-        )
         for label, fn in [
             ("This Wk",    self._set_this_week),
             ("Last Wk",    self._set_last_week),
@@ -189,14 +182,14 @@ class PODetail(QWidget):
             ("All Time",   self._set_all_time),
         ]:
             btn = QPushButton(label)
-            btn.setStyleSheet(_btn_style)
+            btn.setStyleSheet(styles.STYLE_BTN_PERIOD)
             btn.setFixedHeight(26)
             btn.clicked.connect(fn)
             period_row.addWidget(btn)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color:#2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
         period_row.addWidget(sep)
 
         period_row.addWidget(QLabel("From:"))
@@ -218,9 +211,9 @@ class PODetail(QWidget):
         apply_btn = QPushButton("Apply")
         apply_btn.setFixedHeight(26)
         apply_btn.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:3px;padding:0 10px;font-size:11px;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
         apply_btn.clicked.connect(self._refresh_sales_column)
         period_row.addWidget(apply_btn)
@@ -257,7 +250,7 @@ class PODetail(QWidget):
         self.gst_label = QLabel()
         self.gst_label.setStyleSheet("font-size:12px; color:#aaa;")
         self.total_label = QLabel()
-        self.total_label.setStyleSheet("font-size:13px; font-weight:bold; color:#4CAF50;")
+        self.total_label.setStyleSheet(f"font-size:13px; font-weight:bold; color:{styles.CLR_SUCCESS_ALT};")
         totals_row.addWidget(self.subtotal_label)
         totals_row.addSpacing(24)
         totals_row.addWidget(self.gst_label)
@@ -290,18 +283,18 @@ class PODetail(QWidget):
         btn_pdf = QPushButton("📄 Export PDF")
         btn_pdf.setFixedHeight(35)
         btn_pdf.setStyleSheet(
-            "QPushButton{background:#6a1b9a;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_PURPLE_DARK};color:white;border:none;"
             "border-radius:4px;padding:0 10px;font-weight:bold;}"
-            "QPushButton:hover{background:#7b1fa2;}"
+            f"QPushButton:hover{{background:{styles.CLR_PURPLE_HOVER};}}"
         )
         btn_pdf.clicked.connect(self._export_pdf)
 
         btn_email = QPushButton("📧 Email PO")
         btn_email.setFixedHeight(35)
         btn_email.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;padding:0 10px;font-weight:bold;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
         btn_email.clicked.connect(self._email_po)
 
@@ -541,8 +534,8 @@ class PODetail(QWidget):
 
                 # ── Note line ─────────────────────────────────────────────
                 if line['is_note']:
-                    note_colour = QColor('#8b949e')
-                    note_bg     = QColor('#1e2a38')
+                    note_colour = QColor(styles.CLR_MUTED)
+                    note_bg     = QColor(styles.CLR_BG_PANEL)
                     note_item   = QTableWidgetItem(f"📝  {line['description']}")
                     note_item.setForeground(note_colour)
                     note_item.setBackground(note_bg)
@@ -627,7 +620,7 @@ class PODetail(QWidget):
                     sales_cell.setForeground(QColor("#666666"))
                 else:
                     sales_cell = QTableWidgetItem(str(sales_val) if sales_val > 0 else "0")
-                    sales_cell.setForeground(QColor("#4CAF50" if sales_val > 0 else "#666666"))
+                    sales_cell.setForeground(QColor(styles.CLR_SUCCESS_ALT if sales_val > 0 else "#666666"))
                 sales_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 sales_cell.setFlags(sales_cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, 9, sales_cell)
@@ -716,7 +709,7 @@ class PODetail(QWidget):
                     cell.setForeground(QColor("#666666"))
                 else:
                     cell = QTableWidgetItem(str(sales_val) if sales_val > 0 else "0")
-                    cell.setForeground(QColor("#4CAF50" if sales_val > 0 else "#666666"))
+                    cell.setForeground(QColor(styles.CLR_SUCCESS_ALT if sales_val > 0 else "#666666"))
                 cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, 9, cell)
@@ -1101,17 +1094,14 @@ class AddLineDialog(QDialog):
             self._pack_unit = product['pack_unit']
             on_hand = product['on_hand']
             reorder = product['reorder_point']
-            color   = "red" if on_hand <= reorder else "green"
-            self.on_hand_label.setText(
-                f"<span style='color:{color}'>{on_hand}</span> (reorder at {reorder})"
-            )
+            self.on_hand_label.setText(styles.html_colored_label(on_hand, reorder))
             self.pack_label.setText(f"{self._pack_qty} × {self._pack_unit} per carton")
             self.qty.setValue(product['suggested_qty'])
             self._update_unit_preview()
         else:
             self.description.clear()
             self.pack_label.setText("")
-            self.on_hand_label.setText("<span style='color:red'>Product not found</span>")
+            self.on_hand_label.setText(styles.html_span("Product not found", styles.CLR_GP_BAD))
 
     def _update_unit_preview(self):
         qty = int(self.qty.value())

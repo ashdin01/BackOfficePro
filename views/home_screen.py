@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QDateTime
 from PyQt6.QtGui import QFont
+import config.styles as styles
 import controllers.dashboard_controller as dash_ctrl
 import os
 import sys
@@ -12,12 +13,14 @@ import logging
 from datetime import date, timedelta
 
 
-def _stat(label, value, color="#2196F3", sub=None):
+def _stat(label, value, color=None, sub=None):
     """Create a stat card widget."""
+    if color is None:
+        color = styles.CLR_BLUE
     frame = QFrame()
     frame.setStyleSheet(f"""
         QFrame {{
-            background: #1e2a38;
+            background: {styles.CLR_BG_PANEL};
             border-radius: 10px;
             border-left: 4px solid {color};
         }}
@@ -29,11 +32,11 @@ def _stat(label, value, color="#2196F3", sub=None):
     val_lbl.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color}; background: transparent;")
     lay.addWidget(val_lbl)
     lbl_lbl = QLabel(label)
-    lbl_lbl.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+    lbl_lbl.setStyleSheet(f"font-size: 12px; color: {styles.CLR_MUTED}; background: transparent;")
     lay.addWidget(lbl_lbl)
     if sub:
         sub_lbl = QLabel(sub)
-        sub_lbl.setStyleSheet("font-size: 10px; color: #6e7681; background: transparent;")
+        sub_lbl.setStyleSheet(f"font-size: 10px; color: {styles.CLR_EXTRA_DIM}; background: transparent;")
         lay.addWidget(sub_lbl)
     return frame, val_lbl, lbl_lbl
 
@@ -93,7 +96,7 @@ class HomeScreen(QWidget):
         self._refresh()
 
     def _build_ui(self):
-        self.setStyleSheet("QWidget { background: #1a2332; color: #e6edf3; }")
+        self.setStyleSheet(f"QWidget {{ background: {styles.CLR_BG}; color: {styles.CLR_TEXT}; }}")
         root = QVBoxLayout(self)
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(28)
@@ -103,36 +106,36 @@ class HomeScreen(QWidget):
         store_col = QVBoxLayout()
         self._store_lbl = QLabel("Loading…")
         self._store_lbl.setStyleSheet(
-            "font-size: 32px; font-weight: bold; color: #e6edf3; background: transparent;")
+            f"font-size: 32px; font-weight: bold; color: {styles.CLR_TEXT}; background: transparent;")
         store_col.addWidget(self._store_lbl)
         self._date_lbl = QLabel()
         self._date_lbl.setStyleSheet(
-            "font-size: 14px; color: #8b949e; background: transparent;")
+            f"font-size: 14px; color: {styles.CLR_MUTED}; background: transparent;")
         store_col.addWidget(self._date_lbl)
         top.addLayout(store_col)
         top.addStretch()
         self._clock_lbl = QLabel()
         self._clock_lbl.setStyleSheet(
-            "font-size: 42px; font-weight: bold; color: #3fb950; background: transparent;")
+            f"font-size: 42px; font-weight: bold; color: {styles.CLR_SUCCESS}; background: transparent;")
         self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         top.addWidget(self._clock_lbl)
         root.addLayout(top)
 
         # Divider
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
         root.addWidget(sep)
 
         # ── Stat cards row ────────────────────────────────────────────
         cards = QHBoxLayout(); cards.setSpacing(16)
         self._card_sales, self._val_sales, _ = _stat(
-            "Today's Sales", "$0.00", "#4CAF50")
+            "Today's Sales", "$0.00", styles.CLR_SUCCESS_ALT)
         self._card_pos, self._val_pos, _ = _stat(
-            "Open Purchase Orders", "0", "#2196F3")
+            "Open Purchase Orders", "0", styles.CLR_BLUE)
         self._card_low, self._val_low, _ = _stat(
-            "Low Stock Items", "0", "#FF9800")
+            "Low Stock Items", "0", styles.CLR_ORANGE)
         self._card_products, self._val_products, _ = _stat(
-            "Active Products", "0", "#9C27B0")
+            "Active Products", "0", styles.CLR_PURPLE)
         for card in [self._card_sales, self._card_pos,
                      self._card_low, self._card_products]:
             cards.addWidget(card)
@@ -140,7 +143,7 @@ class HomeScreen(QWidget):
 
         # ── Import Sales section ──────────────────────────────────────
         sep_imp = QFrame(); sep_imp.setFrameShape(QFrame.Shape.HLine)
-        sep_imp.setStyleSheet("color: #2a3a4a;")
+        sep_imp.setStyleSheet(f"color: {styles.CLR_BORDER};")
         root.addWidget(sep_imp)
 
         import_row = QHBoxLayout()
@@ -151,7 +154,7 @@ class HomeScreen(QWidget):
         import_label_row.setSpacing(6)
         imp_lbl = QLabel("Import Sales")
         imp_lbl.setStyleSheet(
-            "font-size: 12px; color: #6e7681; letter-spacing: 1px; background: transparent;")
+            f"font-size: 12px; color: {styles.CLR_EXTRA_DIM}; letter-spacing: 1px; background: transparent;")
         import_label_row.addWidget(imp_lbl)
         self._flash_lbl = QLabel("✱")
         self._flash_lbl.setStyleSheet(
@@ -167,24 +170,24 @@ class HomeScreen(QWidget):
         # Last import status label
         self._import_status_lbl = QLabel("Last import: checking…")
         self._import_status_lbl.setStyleSheet(
-            "font-size: 12px; color: #8b949e; background: transparent;")
+            f"font-size: 12px; color: {styles.CLR_MUTED}; background: transparent;")
         import_col.addWidget(self._import_status_lbl)
         import_row.addLayout(import_col)
 
         # Import button
         self._import_btn = QPushButton("⬆  Import Sales")
         self._import_btn.setFixedHeight(40)
-        self._import_btn.setStyleSheet("""
-            QPushButton {
-                background: #2e7d32;
+        self._import_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {styles.CLR_SUCCESS_DARK};
                 color: white;
                 border: none;
                 border-radius: 6px;
                 font-size: 13px;
                 font-weight: bold;
                 padding: 0 16px;
-            }
-            QPushButton:hover { background: #388e3c; }
+            }}
+            QPushButton:hover {{ background: {styles.CLR_SUCCESS_HOVER}; }}
         """)
         self._import_btn.clicked.connect(self._import_sales)
         import_row.addWidget(self._import_btn)
@@ -193,17 +196,17 @@ class HomeScreen(QWidget):
 
         # ── Order Today section ───────────────────────────────────────
         sep_ord = QFrame(); sep_ord.setFrameShape(QFrame.Shape.HLine)
-        sep_ord.setStyleSheet("color: #2a3a4a;")
+        sep_ord.setStyleSheet(f"color: {styles.CLR_BORDER};")
         root.addWidget(sep_ord)
 
         self._order_today_hdr = QLabel()
         self._order_today_hdr.setStyleSheet(
-            "font-size: 12px; color: #6e7681; letter-spacing: 1px; background: transparent;")
+            f"font-size: 12px; color: {styles.CLR_EXTRA_DIM}; letter-spacing: 1px; background: transparent;")
         root.addWidget(self._order_today_hdr)
 
         # Cards go inside a scroll area so many suppliers don't squash the layout
         self._order_today_inner = QWidget()
-        self._order_today_inner.setStyleSheet("background: #1a2332;")
+        self._order_today_inner.setStyleSheet(f"background: {styles.CLR_BG};")
         self._order_today_container = QVBoxLayout(self._order_today_inner)
         self._order_today_container.setSpacing(6)
         self._order_today_container.setContentsMargins(0, 2, 0, 2)
@@ -215,28 +218,28 @@ class HomeScreen(QWidget):
         self._order_today_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._order_today_scroll.setStyleSheet(
-            "QScrollArea{border:none;background:#1a2332;}"
-            "QScrollBar:vertical{background:#1e2a38;width:8px;border-radius:4px;margin:0;}"
-            "QScrollBar::handle:vertical{background:#2a3a4a;border-radius:4px;min-height:20px;}"
+            f"QScrollArea{{border:none;background:{styles.CLR_BG};}}"
+            f"QScrollBar:vertical{{background:{styles.CLR_BG_PANEL};width:8px;border-radius:4px;margin:0;}}"
+            f"QScrollBar::handle:vertical{{background:{styles.CLR_BORDER};border-radius:4px;min-height:20px;}}"
             "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}")
         root.addWidget(self._order_today_scroll)
 
         # ── Quick nav buttons ─────────────────────────────────────────
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #2a3a4a;")
+        sep2.setStyleSheet(f"color: {styles.CLR_BORDER};")
         root.addWidget(sep2)
 
         nav_lbl = QLabel("Quick Navigation")
         nav_lbl.setStyleSheet(
-            "font-size: 12px; color: #6e7681; letter-spacing: 1px; background: transparent;")
+            f"font-size: 12px; color: {styles.CLR_EXTRA_DIM}; letter-spacing: 1px; background: transparent;")
         root.addWidget(nav_lbl)
 
         nav_row = QHBoxLayout(); nav_row.setSpacing(12)
         nav_items = [
-            ("Products  [P]",        1, "#1565c0"),
+            ("Products  [P]",        1, styles.CLR_ACCENT),
             ("Suppliers  [S]",       2, "#37474f"),
-            ("Purchase Orders  [O]", 4, "#2e7d32"),
-            ("Reports  [R]",         5, "#6a1b9a"),
+            ("Purchase Orders  [O]", 4, styles.CLR_SUCCESS_DARK),
+            ("Reports  [R]",         5, styles.CLR_PURPLE_DARK),
         ]
         for label, idx, color in nav_items:
             btn = QPushButton(label)
@@ -277,7 +280,7 @@ class HomeScreen(QWidget):
             self._flash_state = not self._flash_state
             self._flash_lbl.setStyleSheet(
                 f"font-size: 14px; font-weight: bold; background: transparent; "
-                f"color: {'#EF9F27' if self._flash_state else '#1a2332'};"
+                f"color: {'#EF9F27' if self._flash_state else styles.CLR_BG};"
             )
 
     def _update_import_status(self):
@@ -289,7 +292,7 @@ class HomeScreen(QWidget):
         if last is None:
             self._import_status_lbl.setText("No sales data imported yet")
             self._import_status_lbl.setStyleSheet(
-                "font-size: 12px; color: #f85149; background: transparent;")
+                f"font-size: 12px; color: {styles.CLR_DANGER}; background: transparent;")
             self._flash_lbl.setVisible(True)
         elif last < yesterday:
             days_ago = (today - last).days
@@ -304,7 +307,7 @@ class HomeScreen(QWidget):
             self._import_status_lbl.setText(
                 f"Last import: {last.strftime('%A, %d %B %Y')}  ✓")
             self._import_status_lbl.setStyleSheet(
-                "font-size: 12px; color: #3fb950; background: transparent;")
+                f"font-size: 12px; color: {styles.CLR_SUCCESS}; background: transparent;")
             self._flash_lbl.setVisible(False)
 
     def _import_sales(self):
@@ -342,7 +345,7 @@ class HomeScreen(QWidget):
 
         if not due:
             none_lbl = QLabel("No orders scheduled for today")
-            none_lbl.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+            none_lbl.setStyleSheet(f"font-size: 12px; color: {styles.CLR_MUTED}; background: transparent;")
             self._order_today_container.addWidget(none_lbl)
             self._order_today_container.addStretch()
             return
@@ -353,24 +356,24 @@ class HomeScreen(QWidget):
 
             name_lbl = QLabel(f"🛒  {supplier['name']}")
             name_lbl.setStyleSheet(
-                "font-size: 13px; font-weight: bold; color: #e6edf3; background: transparent;")
+                f"font-size: 13px; font-weight: bold; color: {styles.CLR_TEXT}; background: transparent;")
             row.addWidget(name_lbl)
             row.addStretch()
 
             po_btn = QPushButton("New PO →")
             po_btn.setFixedHeight(30)
             po_btn.setStyleSheet(
-                "QPushButton{background:#1565c0;color:white;border:none;"
+                f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
                 "border-radius:4px;padding:0 14px;font-weight:bold;font-size:12px;}"
-                "QPushButton:hover{background:#1976d2;}")
+                f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
             sid = supplier['id']
             po_btn.clicked.connect(lambda _, s=sid: self._new_po_for(s))
             row.addWidget(po_btn)
 
             frame = QFrame()
             frame.setStyleSheet(
-                "QFrame{background:#1e2a38;border-radius:6px;"
-                "border-left:4px solid #1565c0;}")
+                f"QFrame{{background:{styles.CLR_BG_PANEL};border-radius:6px;"
+                f"border-left:4px solid {styles.CLR_ACCENT};}}")
             frame_layout = QHBoxLayout(frame)
             frame_layout.setContentsMargins(12, 6, 12, 6)
             frame_layout.addLayout(row)
@@ -391,10 +394,10 @@ class HomeScreen(QWidget):
             self._val_pos.setText(str(stats['open_po_count']))
             self._val_low.setText(str(stats['low_stock_count']))
             self._val_products.setText(f"{stats['active_product_count']:,}")
-            low_color = "#f85149" if stats['low_stock_count'] > 0 else "#FF9800"
+            low_color = styles.CLR_DANGER if stats['low_stock_count'] > 0 else styles.CLR_ORANGE
             self._card_low.setStyleSheet(f"""
                 QFrame {{
-                    background: #1e2a38;
+                    background: {styles.CLR_BG_PANEL};
                     border-radius: 10px;
                     border-left: 4px solid {low_color};
                 }}

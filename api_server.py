@@ -4,7 +4,9 @@ Run alongside the desktop app:
     python api_server.py [--host 0.0.0.0] [--port 5050]
 """
 import argparse
+import hmac
 import re
+import secrets
 import sys
 import os
 
@@ -14,9 +16,35 @@ from flask import Flask, request, jsonify, send_file
 from database.connection import get_connection
 from models import stocktake
 from models.barcode_alias import resolve as resolve_alias
+from models.settings import get_setting, set_setting
 import models.product as product_model
 
 app = Flask(__name__)
+
+# Routes that do not require authentication (liveness check only)
+_AUTH_EXEMPT = {"/api/v1/health"}
+
+
+def _get_api_key():
+    """Return the stored API key, generating one on first use."""
+    key = get_setting("api_key", "")
+    if not key:
+        key = secrets.token_hex(32)
+        set_setting("api_key", key)
+    return key
+
+
+@app.before_request
+def _require_api_key():
+    if request.path in _AUTH_EXEMPT:
+        return
+    provided = (
+        request.headers.get("X-API-Key", "")
+        or request.args.get("api_key", "")
+    )
+    expected = _get_api_key()
+    if not provided or not hmac.compare_digest(provided, expected):
+        return jsonify({"error": "Unauthorized"}), 401
 
 
 def _row(row):
@@ -439,5 +467,8 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default 0.0.0.0)")
     parser.add_argument("--port", type=int, default=5050, help="Port (default 5050)")
     args = parser.parse_args()
+    api_key = _get_api_key()
     print(f"BackOfficePro API → http://{args.host}:{args.port}")
+    print(f"API key           → {api_key}")
+    print("Pass as header:   X-API-Key: <key>")
     app.run(host=args.host, port=args.port, debug=False)

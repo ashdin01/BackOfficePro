@@ -6,13 +6,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QColor
 import controllers.ar_controller as ar_ctrl
+import config.styles as styles
 
 
 STATUS_COLOURS = {
     'DRAFT':   '#555555',
-    'SENT':    '#1565c0',
+    'SENT':    styles.CLR_ACCENT,
     'PARTIAL': '#e65100',
-    'PAID':    '#2e7d32',
+    'PAID':    styles.CLR_SUCCESS_DARK,
     'OVERDUE': '#b71c1c',
     'VOID':    '#424242',
 }

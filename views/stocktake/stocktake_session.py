@@ -8,6 +8,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
 import controllers.stocktake_controller as stocktake_ctrl
 import controllers.product_controller as product_ctrl
+import config.styles as styles
 
 
 class StocktakeSession(QWidget):
@@ -117,7 +118,7 @@ class StocktakeSession(QWidget):
 
         btn_apply = QPushButton("✓ &Apply && Close Session")
         btn_apply.setFixedHeight(34)
-        btn_apply.setStyleSheet("background-color: #2e7d32; color: white;")
+        btn_apply.setStyleSheet(f"background-color: {styles.CLR_SUCCESS_DARK}; color: white;")
         btn_apply.clicked.connect(self._apply_session)
 
         btn_close = QPushButton("Close [Esc]")

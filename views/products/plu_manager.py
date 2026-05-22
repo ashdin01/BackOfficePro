@@ -11,14 +11,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QTimer
 from PyQt6.QtGui import QColor, QFont
 
+import config.styles as styles
 import controllers.product_controller as product_ctrl
 from utils.error_dialog import show_error
 
-_RED    = "#f85149"
-_ORANGE = "#FF9800"
-_GREEN  = "#4CAF50"
-_DIM    = "#8b949e"
-_BLUE   = "#5c9de8"
+_RED    = styles.CLR_DANGER
+_ORANGE = styles.CLR_ORANGE
+_GREEN  = styles.CLR_SUCCESS_ALT
+_DIM    = styles.CLR_MUTED
+_BLUE   = styles.CLR_BLUE_LIGHT
 
 
 def _item(text, align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -47,7 +48,7 @@ class _PLUDialog(QDialog):
         layout = QVBoxLayout(self)
 
         desc_lbl = QLabel(description)
-        desc_lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
+        desc_lbl.setStyleSheet(styles.STYLE_LABEL_MUTED)
         desc_lbl.setWordWrap(True)
         layout.addWidget(desc_lbl)
 
@@ -125,7 +126,7 @@ class PLUManager(QWidget):
         self._clear_btn.setFixedHeight(30)
         self._clear_btn.setEnabled(False)
         self._clear_btn.setStyleSheet(
-            "QPushButton{color:#f85149;}"
+            f"QPushButton{{color:{styles.CLR_DANGER};}}"
             "QPushButton:disabled{color:#444;}"
         )
         self._clear_btn.clicked.connect(self._clear_plu)

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 import controllers.purchase_order_controller as po_ctrl
+import config.styles as styles
 
 
 class CreditClose(QWidget):
@@ -36,13 +37,13 @@ class CreditClose(QWidget):
             "Confirm the quantities being returned below.  "
             "Stock on hand will be reduced when you close the return."
         )
-        info.setStyleSheet("color:#8b949e; font-size:11px;")
+        info.setStyleSheet(f"color:{styles.CLR_MUTED}; font-size:11px;")
         info.setWordWrap(True)
         layout.addWidget(info)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color:#2a3a4a;")
+        sep.setStyleSheet(f"color:{styles.CLR_BORDER};")
         layout.addWidget(sep)
 
         # ── Line items table ──────────────────────────────────────────
@@ -79,9 +80,9 @@ class CreditClose(QWidget):
         fill_btn = QPushButton("Fill All Returns")
         fill_btn.setFixedHeight(34)
         fill_btn.setStyleSheet(
-            "QPushButton{background:#1e2a38;color:#8b949e;"
-            "border:1px solid #2a3a4a;border-radius:4px;padding:0 12px;}"
-            "QPushButton:hover{color:#e6edf3;border-color:#8b949e;}")
+            f"QPushButton{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_MUTED};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;padding:0 12px;}}"
+            f"QPushButton:hover{{color:{styles.CLR_TEXT};border-color:{styles.CLR_MUTED};}}")
         fill_btn.clicked.connect(self._fill_all)
 
         confirm_btn = QPushButton("✓  Confirm & Close Return  [Enter]")
@@ -95,9 +96,9 @@ class CreditClose(QWidget):
         cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(34)
         cancel_btn.setStyleSheet(
-            "QPushButton{background:transparent;color:#8b949e;"
-            "border:1px solid #2a3a4a;border-radius:4px;padding:0 12px;}"
-            "QPushButton:hover{background:#1e2a38;color:#e6edf3;}")
+            f"QPushButton{{background:transparent;color:{styles.CLR_MUTED};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;padding:0 12px;}}"
+            f"QPushButton:hover{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};}}")
         cancel_btn.clicked.connect(self.close)
 
         btns.addWidget(fill_btn)

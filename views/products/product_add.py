@@ -9,6 +9,7 @@ from utils.error_dialog import show_error
 import controllers.product_controller as product_ctrl
 import controllers.department_controller as dept_ctrl
 import controllers.supplier_controller as supplier_ctrl
+import config.styles as styles
 
 
 class ProductAdd(KeyboardMixin, QWidget):
@@ -185,7 +186,7 @@ class ProductAdd(KeyboardMixin, QWidget):
         cost = self.cost_price.value()
         rate = self.tax_rate.currentData() or 0.0
         inc = cost * (1 + rate / 100)
-        color = '#4CAF50' if rate > 0 else 'grey'
+        color = styles.CLR_SUCCESS_ALT if rate > 0 else 'grey'
         self.cost_inc_label.setText(f"<b style='color:{color}'>${inc:.2f}</b>")
 
     def _save(self):

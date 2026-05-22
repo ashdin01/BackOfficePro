@@ -1,6 +1,16 @@
 from database.connection import get_connection
 
 
+def get_all_settings():
+    """Return all settings as a {key: value} dict."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        return {r[0]: (r[1] or "") for r in rows}
+    finally:
+        conn.close()
+
+
 def get_setting(key, default=''):
     conn = get_connection()
     try:

@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut, QColor
 from config.constants import PO_STATUSES
+import config.styles as styles
 import controllers.purchase_order_controller as po_ctrl
 
 
@@ -29,14 +30,14 @@ class POList(QWidget):
 
         # ── Tabs: Active | Archive ────────────────────────────────────
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane { border: none; }
-            QTabBar::tab {
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: none; }}
+            QTabBar::tab {{
                 padding: 8px 24px;
                 font-size: 12px;
                 font-weight: bold;
-            }
-            QTabBar::tab:selected { color: #4CAF50; border-bottom: 2px solid #4CAF50; }
+            }}
+            QTabBar::tab:selected {{ color: {styles.CLR_SUCCESS_ALT}; border-bottom: 2px solid {styles.CLR_SUCCESS_ALT}; }}
         """)
 
         # ── Active tab ────────────────────────────────────────────────
@@ -53,14 +54,14 @@ class POList(QWidget):
         active_layout.addWidget(self.active_table)
 
         self.active_status = QLabel("")
-        self.active_status.setStyleSheet("color:#aaa; font-size:11px; padding:4px 0;")
+        self.active_status.setStyleSheet(f"color:{styles.CLR_MUTED}; font-size:11px; padding:4px 0;")
         active_layout.addWidget(self.active_status)
 
         # ── Active bottom buttons ─────────────────────────────────────
         active_btns = QHBoxLayout()
-        self.btn_new     = self._btn("＋ New PO  [Ctrl+N]",     "#1565c0", self._create)
+        self.btn_new     = self._btn("＋ New PO  [Ctrl+N]",     styles.CLR_ACCENT, self._create)
         self.btn_open    = self._btn("📋 Open PO  [Ctrl+O]",    "#37474f", self._open)
-        self.btn_receive = self._btn("📦 Receive PO  [Ctrl+R]", "#2e7d32", self._open_receive)
+        self.btn_receive = self._btn("📦 Receive PO  [Ctrl+R]", styles.CLR_SUCCESS_DARK, self._open_receive)
         self.btn_close_po = self._btn("✓ Close PO",             "#5d4037", self._close_po)
         self.btn_close_po.setToolTip("Close a PARTIAL PO — marks remaining lines as not supplied")
         self.btn_cancel  = self._btn("✕ Cancel PO",             "#7f1d1d", self._cancel_po)
@@ -99,7 +100,7 @@ class POList(QWidget):
         archive_layout.addWidget(self.archive_table)
 
         self.archive_status = QLabel("")
-        self.archive_status.setStyleSheet("color:#aaa; font-size:11px; padding:4px 0;")
+        self.archive_status.setStyleSheet(f"color:{styles.CLR_MUTED}; font-size:11px; padding:4px 0;")
         archive_layout.addWidget(self.archive_status)
 
         # Archive bottom buttons
@@ -176,19 +177,19 @@ class POList(QWidget):
         # Colour-code status and type columns
         status_colours = {
             'DRAFT':   '#888888',
-            'SENT':    '#2196F3',
-            'PARTIAL': '#FF9800',
+            'SENT':    styles.CLR_BLUE,
+            'PARTIAL': styles.CLR_ORANGE,
         }
         type_colours = {
-            'PO': '#4CAF50',
-            'RO': '#f85149',
-            'IO': '#FF9800',
+            'PO': styles.CLR_SUCCESS_ALT,
+            'RO': styles.CLR_DANGER,
+            'IO': styles.CLR_ORANGE,
         }
         for r in range(self.active_table.rowCount()):
             status  = self.active_table.item(r, 3).text()
             po_type = self.active_table.item(r, 1).text()
             self.active_table.item(r, 3).setForeground(QColor(status_colours.get(status, '#888888')))
-            self.active_table.item(r, 1).setForeground(QColor(type_colours.get(po_type, '#8b949e')))
+            self.active_table.item(r, 1).setForeground(QColor(type_colours.get(po_type, styles.CLR_MUTED)))
 
         self.active_status.setText(
             f"{self.active_table.rowCount()} active purchase orders  "
@@ -208,17 +209,17 @@ class POList(QWidget):
         self._populate_table(self.archive_table, rows)
 
         status_colours = {
-            'RECEIVED':  '#4CAF50',
-            'CANCELLED': '#f44336',
-            'REVERSED':  '#9C27B0',
+            'RECEIVED':  styles.CLR_SUCCESS_ALT,
+            'CANCELLED': styles.CLR_DANGER_ALT,
+            'REVERSED':  styles.CLR_PURPLE,
             'CLOSED':    '#26A69A',
         }
-        type_colours = {'PO': '#4CAF50', 'RO': '#f85149', 'IO': '#FF9800'}
+        type_colours = {'PO': styles.CLR_SUCCESS_ALT, 'RO': styles.CLR_DANGER, 'IO': styles.CLR_ORANGE}
         for r in range(self.archive_table.rowCount()):
             status  = self.archive_table.item(r, 3).text()
             po_type = self.archive_table.item(r, 1).text()
             self.archive_table.item(r, 3).setForeground(QColor(status_colours.get(status, '#888888')))
-            self.archive_table.item(r, 1).setForeground(QColor(type_colours.get(po_type, '#8b949e')))
+            self.archive_table.item(r, 1).setForeground(QColor(type_colours.get(po_type, styles.CLR_MUTED)))
 
         self.archive_status.setText(
             f"{self.archive_table.rowCount()} archived purchase orders"
@@ -422,10 +423,10 @@ class POList(QWidget):
         dlg.setModal(True)
         dlg.setMinimumWidth(480)
         dlg.setStyleSheet(
-            "QDialog{background:#1a2332;color:#e6edf3;}"
-            "QLabel{color:#e6edf3;background:transparent;}"
-            "QLineEdit{background:#1e2a38;color:#e6edf3;"
-            "border:1px solid #2a3a4a;border-radius:4px;padding:6px;}"
+            f"QDialog{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};}}"
+            f"QLabel{{color:{styles.CLR_TEXT};background:transparent;}}"
+            f"QLineEdit{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;padding:6px;}}"
             "QPushButton{border-radius:4px;padding:8px 18px;font-weight:bold;}"
         )
         lay = QVBoxLayout(dlg)
@@ -433,13 +434,13 @@ class POList(QWidget):
         lay.setSpacing(12)
         lay.addWidget(QLabel(f"<b>{po['po_number']}</b> — {po['supplier_name']}"))
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color:#2a3a4a;"); lay.addWidget(sep)
+        sep.setStyleSheet(styles.STYLE_SEPARATOR); lay.addWidget(sep)
         lay.addWidget(QLabel(f"<b>{len(unreceived)}</b> unreceived line(s) will be closed:"))
         detail = QLabel(lines_text)
-        detail.setStyleSheet("color:#8b949e; font-size:11px;")
+        detail.setStyleSheet(styles.STYLE_LABEL_MUTED)
         lay.addWidget(detail)
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color:#2a3a4a;"); lay.addWidget(sep2)
+        sep2.setStyleSheet(styles.STYLE_SEPARATOR); lay.addWidget(sep2)
         lay.addWidget(QLabel("Reason (applied to all unreceived lines):"))
         reason_input = QLineEdit()
         reason_input.setPlaceholderText("e.g. Out of stock, Discontinued, Short supply…")
@@ -452,8 +453,8 @@ class POList(QWidget):
             "QPushButton:hover{background:#795548;}")
         btn_no = QPushButton("Cancel  [Esc]")
         btn_no.setStyleSheet(
-            "QPushButton{background:transparent;color:#8b949e;border:1px solid #2a3a4a;}"
-            "QPushButton:hover{background:#1e2a38;color:#e6edf3;}")
+            f"QPushButton{{background:transparent;color:{styles.CLR_MUTED};border:1px solid {styles.CLR_BORDER};}}"
+            f"QPushButton:hover{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};}}")
         btn_ok.clicked.connect(dlg.accept)
         btn_no.clicked.connect(dlg.reject)
         btn_row.addWidget(btn_ok); btn_row.addStretch(); btn_row.addWidget(btn_no)
@@ -481,12 +482,12 @@ class POList(QWidget):
         po_id, status = self._get_selected()
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background:#1e2a38; border:1px solid #2a3a4a;
-                    color:#e6edf3; font-size:12px; padding:4px; }
-            QMenu::item { padding:7px 20px; border-radius:4px; }
-            QMenu::item:selected { background:#1565c0; }
-            QMenu::separator { height:1px; background:#2a3a4a; margin:4px 8px; }
+        menu.setStyleSheet(f"""
+            QMenu {{ background:{styles.CLR_BG_PANEL}; border:1px solid {styles.CLR_BORDER};
+                    color:{styles.CLR_TEXT}; font-size:12px; padding:4px; }}
+            QMenu::item {{ padding:7px 20px; border-radius:4px; }}
+            QMenu::item:selected {{ background:{styles.CLR_ACCENT}; }}
+            QMenu::separator {{ height:1px; background:{styles.CLR_BORDER}; margin:4px 8px; }}
         """)
 
         act_open = QAction("📋  Open / Edit", self)

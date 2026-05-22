@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from datetime import datetime, timedelta
 import controllers.user_controller as user_ctrl
+import config.styles as styles
 
 _MAX_ATTEMPTS = 5
 _LOCKOUT_SECONDS = 30
@@ -26,16 +27,16 @@ class _SetupPinDialog(QDialog):
         self.setWindowTitle("Set Up Admin PIN")
         self.setModal(True)
         self.setMinimumWidth(360)
-        self.setStyleSheet("""
-            QDialog  { background: #1a2332; color: #e6edf3; }
-            QLabel   { color: #e6edf3; background: transparent; }
-            QLineEdit { background: #1e2a38; color: #e6edf3;
-                        border: 1px solid #2a3a4a; border-radius: 4px;
-                        padding: 6px; font-size: 18px; letter-spacing: 4px; }
-            QPushButton { background: #1565c0; color: white; border: none;
-                          border-radius: 4px; padding: 8px 20px; font-weight: bold; }
-            QPushButton:hover { background: #1976d2; }
-        """)
+        self.setStyleSheet(
+            f"QDialog{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};}}"
+            f"QLabel{{color:{styles.CLR_TEXT};background:transparent;}}"
+            f"QLineEdit{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;"
+            "padding:6px;font-size:18px;letter-spacing:4px;}"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
+            "border-radius:4px;padding:8px 20px;font-weight:bold;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
@@ -45,12 +46,12 @@ class _SetupPinDialog(QDialog):
         layout.addWidget(title)
 
         info = QLabel("No PIN has been set yet.\nCreate a 4-digit PIN for the Admin account to continue.")
-        info.setStyleSheet("color: #8b949e; font-size: 12px;")
+        info.setStyleSheet(styles.STYLE_LABEL_MUTED)
         info.setWordWrap(True)
         layout.addWidget(info)
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
         layout.addWidget(sep)
 
         form = QFormLayout()
@@ -102,10 +103,10 @@ class LoginScreen(QWidget):
         self._countdown_username = None
         self.setWindowTitle("BackOfficePro — Login")
         self.setMinimumSize(500, 400)
-        self.setStyleSheet("""
-            QWidget  { background: #1a2332; color: #e6edf3; }
-            QLabel   { background: transparent; }
-        """)
+        self.setStyleSheet(
+            f"QWidget{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};}}"
+            "QLabel{background:transparent;}"
+        )
         self._build_ui()
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
@@ -121,26 +122,26 @@ class LoginScreen(QWidget):
         centre.addStretch()
         card = QWidget()
         card.setFixedWidth(380)
-        card.setStyleSheet("""
-            QWidget { background: #1e2a38; border-radius: 12px; }
-        """)
+        card.setStyleSheet(
+            f"QWidget{{background:{styles.CLR_BG_PANEL};border-radius:12px;}}"
+        )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(32, 32, 32, 32)
         card_layout.setSpacing(16)
 
         # Title
         title = QLabel("BackOfficePro")
-        title.setStyleSheet("font-size: 22px; font-weight: bold; color: #e6edf3; background: transparent;")
+        title.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {styles.CLR_TEXT}; background: transparent;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(title)
 
         sub = QLabel("Select your name and enter your PIN")
-        sub.setStyleSheet("font-size: 12px; color: #8b949e; background: transparent;")
+        sub.setStyleSheet(f"font-size: 12px; color: {styles.CLR_MUTED}; background: transparent;")
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(sub)
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #2a3a4a; background: transparent;")
+        sep.setStyleSheet(f"{styles.STYLE_SEPARATOR} background: transparent;")
         card_layout.addWidget(sep)
 
         # User buttons
@@ -150,7 +151,7 @@ class LoginScreen(QWidget):
 
         # PIN entry
         self.pin_label = QLabel("PIN")
-        self.pin_label.setStyleSheet("color: #8b949e; font-size: 11px; background: transparent;")
+        self.pin_label.setStyleSheet(f"{styles.STYLE_LABEL_MUTED} background: transparent;")
         card_layout.addWidget(self.pin_label)
 
         self.pin_input = QLineEdit()
@@ -158,32 +159,30 @@ class LoginScreen(QWidget):
         self.pin_input.setMaxLength(4)
         self.pin_input.setPlaceholderText("••••")
         self.pin_input.setFixedHeight(48)
-        self.pin_input.setStyleSheet("""
-            QLineEdit {
-                background: #1a2332; color: #e6edf3;
-                border: 2px solid #2a3a4a; border-radius: 6px;
-                padding: 8px; font-size: 22px; letter-spacing: 8px;
-            }
-            QLineEdit:focus { border-color: #1565c0; }
-        """)
+        self.pin_input.setStyleSheet(
+            f"QLineEdit{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};"
+            f"border:2px solid {styles.CLR_BORDER};border-radius:6px;"
+            "padding:8px;font-size:22px;letter-spacing:8px;}"
+            f"QLineEdit:focus{{border-color:{styles.CLR_ACCENT};}}"
+        )
         self.pin_input.returnPressed.connect(self._attempt_login)
         card_layout.addWidget(self.pin_input)
 
         # Status label
         self.status_lbl = QLabel("")
-        self.status_lbl.setStyleSheet("color: #f85149; font-size: 11px; background: transparent;")
+        self.status_lbl.setStyleSheet(f"color: {styles.CLR_DANGER}; font-size: 11px; background: transparent;")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(self.status_lbl)
 
         # Login button
         self.login_btn = QPushButton("Login")
         self.login_btn.setFixedHeight(42)
-        self.login_btn.setStyleSheet("""
-            QPushButton { background: #1565c0; color: white; border: none;
-                          border-radius: 6px; font-size: 14px; font-weight: bold; }
-            QPushButton:hover { background: #1976d2; }
-            QPushButton:disabled { background: #2a3a4a; color: #6e7681; }
-        """)
+        self.login_btn.setStyleSheet(
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
+            "border-radius:6px;font-size:14px;font-weight:bold;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
+            f"QPushButton:disabled{{background:{styles.CLR_BORDER};color:{styles.CLR_EXTRA_DIM};}}"
+        )
         self.login_btn.clicked.connect(self._attempt_login)
         card_layout.addWidget(self.login_btn)
 
@@ -208,17 +207,13 @@ class LoginScreen(QWidget):
             btn = QPushButton(name)
             btn.setFixedHeight(38)
             btn.setCheckable(True)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: #1a2332; color: #e6edf3;
-                    border: 1px solid #2a3a4a; border-radius: 6px;
-                    font-size: 13px; text-align: left; padding: 0 12px;
-                }
-                QPushButton:checked {
-                    background: #1565c0; border-color: #1976d2;
-                }
-                QPushButton:hover { background: #2a3a4a; }
-            """)
+            btn.setStyleSheet(
+                f"QPushButton{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};"
+                f"border:1px solid {styles.CLR_BORDER};border-radius:6px;"
+                "font-size:13px;text-align:left;padding:0 12px;}"
+                f"QPushButton:checked{{background:{styles.CLR_ACCENT};border-color:{styles.CLR_ACCENT_HOVER};}}"
+                f"QPushButton:hover{{background:{styles.CLR_BORDER};}}"
+            )
             btn.clicked.connect(lambda _, u=user, b=btn: self._select_user(u, b))
             self._user_btn_area.addWidget(btn)
 

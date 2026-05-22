@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
+import config.styles as styles
 import controllers.report_controller as report_ctrl
 from datetime import date, timedelta
 
@@ -57,7 +58,7 @@ def _num_item(value: int, align=RIGHT, bold=False, color=None):
     i.setData(Qt.ItemDataRole.UserRole, value)
     i.setTextAlignment(align)
     i.setFlags(i.flags() & ~Qt.ItemFlag.ItemIsEditable)
-    i.setForeground(QColor(color or ("#4CAF50" if value > 0 else "#6e7681")))
+    i.setForeground(QColor(color or (styles.CLR_SUCCESS_ALT if value > 0 else styles.CLR_EXTRA_DIM)))
     if bold:
         f = i.font(); f.setBold(True); i.setFont(f)
     return i
@@ -93,7 +94,7 @@ class SupplierSalesReport(QWidget):
         filter_row.addWidget(self.supplier_combo)
 
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
         filter_row.addWidget(sep)
 
         for label, fn in [
@@ -107,10 +108,7 @@ class SupplierSalesReport(QWidget):
         ]:
             btn = QPushButton(label)
             btn.setFixedHeight(30)
-            btn.setStyleSheet(
-                "QPushButton{background:#1e2a38;color:#e6edf3;border:1px solid #2a3a4a;"
-                "border-radius:3px;padding:0 8px;font-size:11px;}"
-                "QPushButton:hover{background:#2a3a4a;}")
+            btn.setStyleSheet(styles.STYLE_BTN_PERIOD)
             btn.clicked.connect(fn)
             filter_row.addWidget(btn)
 
@@ -118,9 +116,9 @@ class SupplierSalesReport(QWidget):
         apply_btn = QPushButton("Apply")
         apply_btn.setFixedHeight(32)
         apply_btn.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;padding:0 16px;font-weight:bold;}"
-            "QPushButton:hover{background:#1976d2;}")
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
         apply_btn.clicked.connect(self._load)
         filter_row.addWidget(apply_btn)
         root.addLayout(filter_row)
@@ -185,7 +183,7 @@ class SupplierSalesReport(QWidget):
         self.totals_bar.setFixedHeight(30)
         self.totals_bar.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.totals_bar.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.totals_bar.setStyleSheet("QTableWidget { background: #1a2332; border: none; }")
+        self.totals_bar.setStyleSheet(f"QTableWidget {{ background: {styles.CLR_BG}; border: none; }}")
         tb_hdr = self.totals_bar.horizontalHeader()
         tb_hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         for c in [0, 1, 3, 4, 5, 6, 7, 8, 9, 10]:
@@ -196,7 +194,7 @@ class SupplierSalesReport(QWidget):
         root.addWidget(self.totals_bar)
 
         self.footer = QLabel("")
-        self.footer.setStyleSheet("color: #8b949e; font-size: 11px;")
+        self.footer.setStyleSheet(styles.STYLE_LABEL_MUTED)
         root.addWidget(self.footer)
 
     def _load_suppliers(self):
@@ -247,13 +245,13 @@ class SupplierSalesReport(QWidget):
         self.table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
         self.table.setSortingEnabled(True)
 
-        self.totals_bar.setItem(0, 0, _text_item("TOTALS", bold=True, color="#e6edf3"))
+        self.totals_bar.setItem(0, 0, _text_item("TOTALS", bold=True, color=styles.CLR_TEXT))
         self.totals_bar.setItem(0, 1, _text_item(""))
         self.totals_bar.setItem(0, 2, _text_item(""))
         for c in range(11):
             self.totals_bar.setColumnWidth(c, self.table.columnWidth(c))
         for ci, val in enumerate(totals, start=3):
-            self.totals_bar.setItem(0, ci, _num_item(val, color="#FFB300", bold=True))
+            self.totals_bar.setItem(0, ci, _num_item(val, color=styles.CLR_AMBER, bold=True))
 
         self.footer.setText(
             f"{len(computed)} products  |  Double-click a row to open product detail"

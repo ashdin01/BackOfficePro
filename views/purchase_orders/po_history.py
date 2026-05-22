@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 import csv, os
 from utils.error_dialog import show_error
+import config.styles as styles
 import controllers.purchase_order_controller as po_ctrl
 import controllers.product_controller as product_ctrl
 import controllers.supplier_controller as supplier_ctrl
@@ -42,17 +43,17 @@ class POHistory(QWidget):
         self.setWindowTitle(f"PO History: {po['po_number']}")
 
         status_colour = {
-            'RECEIVED': '#4CAF50', 'CANCELLED': '#f44336',
-            'REVERSED': '#9C27B0', 'PARTIAL':   '#FF9800',
-        }.get(po['status'], '#8b949e')
+            'RECEIVED': styles.CLR_SUCCESS_ALT, 'CANCELLED': styles.CLR_DANGER_ALT,
+            'REVERSED': styles.CLR_PURPLE, 'PARTIAL':   styles.CLR_ORANGE,
+        }.get(po['status'], styles.CLR_MUTED)
 
         inv_num = po['supplier_invoice_number'] or '—'
         self.header = QLabel(
             f"<b>{po['po_number']}</b> &nbsp;—&nbsp; {po['supplier_name']} &nbsp;—&nbsp; "
             f"Status: <b style='color:{status_colour}'>{po['status']}</b>"
             f"&nbsp;&nbsp;&nbsp;"
-            f"<span style='color:#8b949e;'>Supplier Invoice:</span> "
-            f"<b style='color:#e6edf3'>{inv_num}</b>"
+            f"{styles.html_span('Supplier Invoice:', styles.CLR_MUTED)} "
+            f"{styles.html_bold(inv_num, styles.CLR_TEXT)}"
         )
         self.header.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(self.header)
@@ -65,14 +66,14 @@ class POHistory(QWidget):
         if bank_name or bank_bsb or bank_acct:
             parts = []
             if bank_name:
-                parts.append(f"<span style='color:#8b949e;'>Account Name:</span> "
-                             f"<b style='color:#e6edf3'>{bank_name}</b>")
+                parts.append(f"{styles.html_span('Account Name:', styles.CLR_MUTED)} "
+                             f"{styles.html_bold(bank_name, styles.CLR_TEXT)}")
             if bank_bsb:
-                parts.append(f"<span style='color:#8b949e;'>BSB:</span> "
-                             f"<b style='color:#e6edf3'>{bank_bsb}</b>")
+                parts.append(f"{styles.html_span('BSB:', styles.CLR_MUTED)} "
+                             f"{styles.html_bold(bank_bsb, styles.CLR_TEXT)}")
             if bank_acct:
-                parts.append(f"<span style='color:#8b949e;'>Account:</span> "
-                             f"<b style='color:#e6edf3'>{bank_acct}</b>")
+                parts.append(f"{styles.html_span('Account:', styles.CLR_MUTED)} "
+                             f"{styles.html_bold(bank_acct, styles.CLR_TEXT)}")
             self.bank_lbl = QLabel("&nbsp;&nbsp;&nbsp;".join(parts))
             self.bank_lbl.setTextFormat(Qt.TextFormat.RichText)
             self.bank_lbl.setStyleSheet("font-size: 11px; margin-bottom: 2px;")
@@ -80,7 +81,7 @@ class POHistory(QWidget):
 
         # ── Lines table ──────────────────────────────────────────────────────
         line_lbl = QLabel("Order Lines")
-        line_lbl.setStyleSheet("font-weight: bold; color: #8b949e; font-size: 11px;"
+        line_lbl.setStyleSheet(f"font-weight: bold; color: {styles.CLR_MUTED}; font-size: 11px;"
                                " margin-top: 6px;")
         layout.addWidget(line_lbl)
 
@@ -113,7 +114,7 @@ class POHistory(QWidget):
         charges = po_ctrl.get_po_charges(self.po_id)
         if charges:
             chg_lbl = QLabel("Additional Charges")
-            chg_lbl.setStyleSheet("font-weight: bold; color: #8b949e; font-size: 11px;"
+            chg_lbl.setStyleSheet(f"font-weight: bold; color: {styles.CLR_MUTED}; font-size: 11px;"
                                   " margin-top: 4px;")
             layout.addWidget(chg_lbl)
 
@@ -136,7 +137,7 @@ class POHistory(QWidget):
 
         # ── Totals ───────────────────────────────────────────────────────────
         sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
         layout.addWidget(sep)
 
         self.totals_lbl = QLabel()
@@ -152,9 +153,9 @@ class POHistory(QWidget):
             btn_reverse = QPushButton("↩ Reverse PO")
             btn_reverse.setFixedHeight(35)
             btn_reverse.setStyleSheet(
-                "QPushButton{background:#6a1b9a;color:white;font-weight:bold;"
+                f"QPushButton{{background:{styles.CLR_PURPLE_DARK};color:white;font-weight:bold;"
                 "border:none;border-radius:4px;padding:0 16px;}"
-                "QPushButton:hover{background:#7b1fa2;}"
+                f"QPushButton:hover{{background:{styles.CLR_PURPLE_HOVER};}}"
             )
             btn_reverse.setToolTip(
                 "Reverse this PO — reduces stock on hand by all received quantities"
@@ -206,8 +207,8 @@ class POHistory(QWidget):
             total_ex     += line_ex
             total_gst    += line_gst
 
-            recv_colour = '#4CAF50' if recv_cartons > 0 else None
-            promo_colour = '#FFB300' if line['is_promo'] else None
+            recv_colour = styles.CLR_SUCCESS_ALT if recv_cartons > 0 else None
+            promo_colour = styles.CLR_AMBER if line['is_promo'] else None
 
             self.table.setItem(r, 0, _item(line['barcode'], _CENTER))
             desc = line['description']
@@ -221,10 +222,10 @@ class POHistory(QWidget):
             self.table.setItem(r, 5, _item(f"${cost:.4f}", _RIGHT))
             self.table.setItem(r, 6, _item(
                 f"{tax_rate:.0f}%" if tax_rate > 0 else "Free", _CENTER,
-                colour='#4CAF50' if tax_rate > 0 else '#555'))
+                colour=styles.CLR_SUCCESS_ALT if tax_rate > 0 else '#555'))
             self.table.setItem(r, 7, _item(f"${line_ex:.2f}", _RIGHT))
             self.table.setItem(r, 8, _item(f"${line_inc:.2f}", _RIGHT,
-                                           colour='#4CAF50' if tax_rate > 0 else None))
+                                           colour=styles.CLR_SUCCESS_ALT if tax_rate > 0 else None))
 
         # Charges
         charge_ex  = 0.0
@@ -242,10 +243,10 @@ class POHistory(QWidget):
                 self.charges_table.setItem(r, 0, _item(c['description']))
                 self.charges_table.setItem(r, 1, _item(
                     f"{tax_r:.0f}%" if tax_r > 0 else "GST Free", _CENTER,
-                    colour='#4CAF50' if tax_r > 0 else '#555'))
+                    colour=styles.CLR_SUCCESS_ALT if tax_r > 0 else '#555'))
                 self.charges_table.setItem(r, 2, _item(f"${amt_ex:.2f}", _RIGHT))
                 self.charges_table.setItem(r, 3, _item(f"${amt_inc:.2f}", _RIGHT,
-                                                        colour='#4CAF50' if tax_r > 0 else None))
+                                                        colour=styles.CLR_SUCCESS_ALT if tax_r > 0 else None))
 
         grand_ex  = round(total_ex  + charge_ex,  2)
         grand_gst = round(total_gst + charge_gst, 2)
@@ -255,7 +256,7 @@ class POHistory(QWidget):
             f"Subtotal ex. GST: <b>${grand_ex:.2f}</b>"
             f"&nbsp;&nbsp;&nbsp;GST: <b>${grand_gst:.2f}</b>"
             f"&nbsp;&nbsp;&nbsp;Invoice Total inc. GST: "
-            f"<b style='color:#4CAF50; font-size:14px;'>${grand_inc:.2f}</b>"
+            f"<b style='color:{styles.CLR_SUCCESS_ALT}; font-size:14px;'>${grand_inc:.2f}</b>"
         )
 
     def _export_csv(self):

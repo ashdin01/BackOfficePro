@@ -3,6 +3,8 @@ Settings screen for BackOfficePro.
 Allows editing of store details, email addresses, Microsoft Graph API configuration,
 and user management (add / edit / reset PIN / deactivate).
 """
+import secrets as _secrets
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QPushButton, QLabel, QLineEdit, QMessageBox,
@@ -10,9 +12,11 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView,
     QDialog, QComboBox, QDialogButtonBox
 )
+from PyQt6.QtGui import QClipboard
+from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
-from database.connection import get_connection
+import controllers.settings_controller as settings_ctrl
 from utils.validators import validate_abn, validate_email, validate_phone
 from utils.error_dialog import show_error
 from utils.secret_store import get_secret, set_secret
@@ -52,21 +56,11 @@ ROLES = ["ADMIN", "MANAGER", "STAFF"]
 
 
 def _load_settings():
-    conn = get_connection()
-    rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    conn.close()
-    return {r[0]: (r[1] or "") for r in rows}
+    return settings_ctrl.get_all_settings()
 
 
 def _save_setting(key: str, value: str):
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (key, value)
-    )
-    conn.commit()
-    conn.close()
+    settings_ctrl.set_setting(key, value)
 
 
 # ── User dialog ────────────────────────────────────────────────────────────────
@@ -295,6 +289,51 @@ class SettingsScreen(QWidget):
         backup_form.addRow("", backup_note)
         scroll_layout.addWidget(backup_group)
 
+        # ── API Access ────────────────────────────────────────────────
+        api_group = QGroupBox("API Access  (Stocktake App / RetailPOSPro)")
+        api_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        api_layout = QVBoxLayout(api_group)
+        api_layout.setContentsMargins(16, 16, 16, 16)
+        api_layout.setSpacing(8)
+
+        api_note = QLabel(
+            "All API clients must include this key as the X-API-Key request header."
+        )
+        api_note.setStyleSheet("color: grey; font-size: 8pt;")
+        api_note.setWordWrap(True)
+        api_layout.addWidget(api_note)
+
+        key_row = QHBoxLayout()
+        self._api_key_edit = QLineEdit()
+        self._api_key_edit.setReadOnly(True)
+        self._api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._api_key_edit.setMinimumWidth(300)
+        key_row.addWidget(self._api_key_edit, stretch=1)
+
+        btn_show_key = QPushButton("Show")
+        btn_show_key.setFixedWidth(56)
+        btn_show_key.setCheckable(True)
+        btn_show_key.toggled.connect(
+            lambda checked: self._api_key_edit.setEchoMode(
+                QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+            )
+        )
+        key_row.addWidget(btn_show_key)
+
+        btn_copy_key = QPushButton("Copy")
+        btn_copy_key.setFixedWidth(56)
+        btn_copy_key.clicked.connect(
+            lambda: QApplication.clipboard().setText(self._api_key_edit.text())
+        )
+        key_row.addWidget(btn_copy_key)
+
+        btn_regen_key = QPushButton("Regenerate")
+        btn_regen_key.clicked.connect(self._regenerate_api_key)
+        key_row.addWidget(btn_regen_key)
+
+        api_layout.addLayout(key_row)
+        scroll_layout.addWidget(api_group)
+
         # ── Users ─────────────────────────────────────────────────────
         users_group = QGroupBox("Users")
         users_group.setStyleSheet("QGroupBox { font-weight: bold; }")
@@ -403,13 +442,32 @@ class SettingsScreen(QWidget):
         if db_secret and not keyring_secret:
             set_secret("graph_client_secret", db_secret)
             keyring_secret = db_secret
-            conn = get_connection()
-            conn.execute("UPDATE settings SET value='' WHERE key='graph_client_secret'")
-            conn.commit()
-            conn.close()
+            _save_setting("graph_client_secret", "")
 
         self._fields["graph_client_secret"].setText(keyring_secret)
+        self._load_api_key()
         self._load_users()
+
+    def _load_api_key(self):
+        key = settings_ctrl.get_setting("api_key", "")
+        if not key:
+            key = _secrets.token_hex(32)
+            _save_setting("api_key", key)
+        self._api_key_edit.setText(key)
+
+    def _regenerate_api_key(self):
+        reply = QMessageBox.question(
+            self, "Regenerate API Key",
+            "This will invalidate the current key.\n"
+            "All API clients (Stocktake App, RetailPOSPro) must be updated.\n\n"
+            "Continue?",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        key = _secrets.token_hex(32)
+        _save_setting("api_key", key)
+        self._api_key_edit.setText(key)
+        QMessageBox.information(self, "Done", "New API key saved. Update all clients.")
 
     def _save(self):
         errors = []

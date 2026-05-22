@@ -16,6 +16,7 @@ from PyQt6.QtGui import QColor
 from datetime import date, timedelta
 import csv
 import os
+import config.styles as styles
 import controllers.report_controller as report_ctrl
 from utils.error_dialog import show_error
 
@@ -98,22 +99,16 @@ class GSTReport(QWidget):
         period_row = QHBoxLayout()
         period_row.setSpacing(6)
 
-        btn_style = (
-            "QPushButton{background:#1e2a38;color:#e6edf3;border:1px solid #2a3a4a;"
-            "border-radius:3px;padding:0 10px;font-size:11px;height:30px;}"
-            "QPushButton:hover{background:#2a3a4a;}"
-        )
-
         # BAS quarter buttons
         for label, q_start, q_end in _bas_quarters():
             btn = QPushButton(label)
-            btn.setStyleSheet(btn_style)
+            btn.setStyleSheet(styles.STYLE_BTN_PERIOD)
             btn.clicked.connect(lambda _, s=q_start, e=q_end: self._set_dates(s, e))
             period_row.addWidget(btn)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
         period_row.addWidget(sep)
 
         for label, fn in [
@@ -123,7 +118,7 @@ class GSTReport(QWidget):
             ("Last FY",     self._set_last_fy),
         ]:
             btn = QPushButton(label)
-            btn.setStyleSheet(btn_style)
+            btn.setStyleSheet(styles.STYLE_BTN_PERIOD)
             btn.clicked.connect(fn)
             period_row.addWidget(btn)
 
@@ -149,9 +144,9 @@ class GSTReport(QWidget):
         apply_btn = QPushButton("Apply")
         apply_btn.setMinimumHeight(32)
         apply_btn.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;padding:0 16px;font-weight:bold;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
         apply_btn.clicked.connect(self._load)
         date_row.addWidget(apply_btn)
@@ -201,7 +196,7 @@ class GSTReport(QWidget):
         root.addWidget(self.tabs)
 
         self.footer = QLabel("")
-        self.footer.setStyleSheet("color: #8b949e; font-size: 11px;")
+        self.footer.setStyleSheet(styles.STYLE_LABEL_MUTED)
         root.addWidget(self.footer)
 
     def _make_summary_table(self):
@@ -304,16 +299,16 @@ class GSTReport(QWidget):
                 self.bas_table.setRowHeight(r, 10)
                 continue
             if kind == "header":
-                self.bas_table.setItem(r, 0, _text_item(label, bold=True, color="#8b949e"))
+                self.bas_table.setItem(r, 0, _text_item(label, bold=True, color=styles.CLR_MUTED))
                 self.bas_table.setItem(r, 1, _text_item(""))
                 continue
 
             bold      = kind in ("highlight", "paid", "net")
             color_val = (
-                "#4CAF50" if kind == "highlight" else
+                styles.CLR_SUCCESS_ALT if kind == "highlight" else
                 "#EF9F27" if kind == "paid" else
                 "#E24B4A" if kind == "net" and net_gst > 0 else
-                "#4CAF50" if kind == "net" else
+                styles.CLR_SUCCESS_ALT if kind == "net" else
                 None
             )
             self.bas_table.setItem(r, 0, _text_item(label, bold=bold))
@@ -329,7 +324,7 @@ class GSTReport(QWidget):
         ]
         self.collected_table.setRowCount(len(col_rows))
         for r, (label, value, bold) in enumerate(col_rows):
-            color = "#4CAF50" if bold else None
+            color = styles.CLR_SUCCESS_ALT if bold else None
             self.collected_table.setItem(r, 0, _text_item(label, bold=bold))
             self.collected_table.setItem(r, 1, _money_item(value, color=color, bold=bold))
 

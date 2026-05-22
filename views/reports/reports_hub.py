@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+import config.styles as styles
 
 
 _CARDS = [
@@ -24,23 +25,14 @@ _CARDS = [
 
 _COLS = 3
 
-_CARD_STYLE = """
-QPushButton {{
-    background: #1e2a38;
-    border: 1px solid #2a3a4a;
-    border-radius: 8px;
-    color: #e6edf3;
-    text-align: left;
-    padding: 16px;
-}}
-QPushButton:hover {{
-    background: #253244;
-    border-color: {accent};
-}}
-QPushButton:pressed {{
-    background: #1a2332;
-}}
-"""
+_CARD_STYLE = (
+    f"QPushButton {{{{background: {styles.CLR_BG_PANEL};"
+    f"border: 1px solid {styles.CLR_BORDER};"
+    f"border-radius: 8px; color: {styles.CLR_TEXT};"
+    "text-align: left; padding: 16px;}}"
+    "QPushButton:hover {{background: #253244; border-color: {accent};}}"
+    f"QPushButton:pressed {{{{background: {styles.CLR_BG};}}}}"
+)
 
 
 def _make_card(icon: str, title: str, desc: str, accent: str, on_click) -> QPushButton:
@@ -60,11 +52,11 @@ def _make_card(icon: str, title: str, desc: str, accent: str, on_click) -> QPush
     title_lbl = QLabel(f"{icon}  {title}")
     bold = QFont(); bold.setBold(True); bold.setPointSize(11)
     title_lbl.setFont(bold)
-    title_lbl.setStyleSheet("color: #e6edf3; background: transparent;")
+    title_lbl.setStyleSheet(f"color: {styles.CLR_TEXT}; background: transparent;")
     lay.addWidget(title_lbl)
 
     desc_lbl = QLabel(desc)
-    desc_lbl.setStyleSheet("color: #8b949e; font-size: 10px; background: transparent;")
+    desc_lbl.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 10px; background: transparent;")
     desc_lbl.setWordWrap(True)
     lay.addWidget(desc_lbl)
 
@@ -74,7 +66,7 @@ def _make_card(icon: str, title: str, desc: str, accent: str, on_click) -> QPush
 
 
 _ACCENTS = [
-    '#1565c0', '#2e7d32', '#6a1b9a', '#c62828',
+    styles.CLR_ACCENT, styles.CLR_SUCCESS_DARK, styles.CLR_PURPLE_DARK, '#c62828',
     '#e65100', '#00838f', '#4527a0', '#558b2f',
     '#ad1457', '#4e342e', '#37474f', '#f57f17',
 ]
@@ -121,11 +113,11 @@ class ReportsHub(QWidget):
         heading = QLabel("Reports")
         h_font = QFont(); h_font.setBold(True); h_font.setPointSize(16)
         heading.setFont(h_font)
-        heading.setStyleSheet("color: #e6edf3;")
+        heading.setStyleSheet(f"color: {styles.CLR_TEXT};")
         root.addWidget(heading)
 
         sub = QLabel("Select a report to open it in a new window.")
-        sub.setStyleSheet("color: #8b949e; font-size: 11px; margin-bottom: 8px;")
+        sub.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 11px; margin-bottom: 8px;")
         root.addWidget(sub)
 
         # scroll area so hub works at any window height

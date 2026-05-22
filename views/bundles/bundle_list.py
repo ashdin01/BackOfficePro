@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from utils.keyboard_mixin import KeyboardMixin
 import controllers.bundle_controller as bundle_ctrl
+import config.styles as styles
 
 
 class BundleList(KeyboardMixin, QWidget):
@@ -19,7 +20,7 @@ class BundleList(KeyboardMixin, QWidget):
 
         top = QHBoxLayout()
         title = QLabel("Bundles")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #e6edf3;")
+        title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {styles.CLR_TEXT};")
         top.addWidget(title)
         top.addStretch()
         btn_add = QPushButton("+ Add Bundle")
@@ -32,7 +33,7 @@ class BundleList(KeyboardMixin, QWidget):
             "Bundles allow mixed-case selling — e.g. 4 × any eligible 6-pack = 1 carton at bundle price. "
             "Define eligible items per bundle."
         )
-        note.setStyleSheet("color: #8b949e; font-size: 12px;")
+        note.setStyleSheet(styles.STYLE_LABEL_MUTED)
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -61,7 +62,7 @@ class BundleList(KeyboardMixin, QWidget):
         layout.addWidget(self.table)
 
         self.status = QLabel("")
-        self.status.setStyleSheet("color: #8b949e; font-size: 11px;")
+        self.status.setStyleSheet(styles.STYLE_LABEL_MUTED)
         layout.addWidget(self.status)
 
         self.setup_keyboard(table=self.table)

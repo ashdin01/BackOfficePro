@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.error_dialog import show_error
 import controllers.stocktake_controller as stocktake_ctrl
+import config.styles as styles
 import csv
 import os
 
@@ -72,7 +73,7 @@ class VarianceReport(QWidget):
 
         btn_apply = QPushButton("✓ Apply Stocktake && Close Session")
         btn_apply.setFixedHeight(34)
-        btn_apply.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold;")
+        btn_apply.setStyleSheet(f"background-color: {styles.CLR_SUCCESS_DARK}; color: white; font-weight: bold;")
         btn_apply.clicked.connect(self._apply_session)
 
         btn_close = QPushButton("Close  [Esc]")
@@ -150,7 +151,7 @@ class VarianceReport(QWidget):
                 cnt_item = QTableWidgetItem(f"{counted:.0f}")
             else:
                 cnt_item = QTableWidgetItem("—")
-                cnt_item.setForeground(QColor("#888888"))
+                cnt_item.setForeground(QColor(styles.CLR_MUTED))
             cnt_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(r, 4, cnt_item)
 
@@ -158,12 +159,12 @@ class VarianceReport(QWidget):
                 var_item = QTableWidgetItem(f"{variance:+.0f}")
                 var_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if variance > 0:
-                    var_item.setForeground(QColor("#4caf50"))
+                    var_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
                 elif variance < 0:
-                    var_item.setForeground(QColor("#f44336"))
+                    var_item.setForeground(QColor(styles.CLR_DANGER_ALT))
             else:
                 var_item = QTableWidgetItem("—")
-                var_item.setForeground(QColor("#888888"))
+                var_item.setForeground(QColor(styles.CLR_MUTED))
                 var_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(r, 5, var_item)
 
@@ -175,23 +176,23 @@ class VarianceReport(QWidget):
                 vv_item = QTableWidgetItem(f"${var_val:+.2f}")
                 vv_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if var_val < 0:
-                    vv_item.setForeground(QColor("#f44336"))
+                    vv_item.setForeground(QColor(styles.CLR_DANGER_ALT))
                 elif var_val > 0:
-                    vv_item.setForeground(QColor("#4caf50"))
+                    vv_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
             else:
                 vv_item = QTableWidgetItem("—")
                 vv_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                vv_item.setForeground(QColor("#888888"))
+                vv_item.setForeground(QColor(styles.CLR_MUTED))
             self.table.setItem(r, 7, vv_item)
 
             status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if status == "SHORTAGE":
-                status_item.setForeground(QColor("#f44336"))
+                status_item.setForeground(QColor(styles.CLR_DANGER_ALT))
             elif status == "SURPLUS":
-                status_item.setForeground(QColor("#4caf50"))
+                status_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
             elif status == "NOT COUNTED":
-                status_item.setForeground(QColor("#888888"))
+                status_item.setForeground(QColor(styles.CLR_MUTED))
             self.table.setItem(r, 8, status_item)
 
         self.table.setSortingEnabled(True)
@@ -203,7 +204,7 @@ class VarianceReport(QWidget):
             f"Not Counted: {not_counted}  |  "
             f"Variance Units: {variance_units:+.0f}  |  "
             f"Variance Value: {sign}${variance_cost:.2f}  |  "
-            f"<b style='color:#f44336'>Shrinkage: ${shrinkage_cost:.2f}</b>"
+            f"<b style='color:{styles.CLR_DANGER_ALT}'>Shrinkage: ${shrinkage_cost:.2f}</b>"
         )
         self.summary.setTextFormat(Qt.TextFormat.RichText)
 

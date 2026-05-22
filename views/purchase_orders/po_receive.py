@@ -10,6 +10,7 @@ import math
 import controllers.product_controller as product_ctrl
 import controllers.purchase_order_controller as po_ctrl
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
+import config.styles as styles
 
 
 
@@ -36,21 +37,21 @@ class _PriceChangeDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(14)
         layout.setContentsMargins(24, 20, 24, 20)
-        self.setStyleSheet("""
-            QDialog  { background: #1a2332; color: #e6edf3; }
-            QLabel   { color: #e6edf3; background: transparent; }
-            QPushButton {
+        self.setStyleSheet(f"""
+            QDialog  {{ background: {styles.CLR_BG}; color: {styles.CLR_TEXT}; }}
+            QLabel   {{ color: {styles.CLR_TEXT}; background: transparent; }}
+            QPushButton {{
                 border-radius: 4px; padding: 8px 20px;
                 font-size: 13px; font-weight: bold;
-            }
-            QFrame { color: #2a3a4a; }
+            }}
+            QFrame {{ color: {styles.CLR_BORDER}; }}
         """)
         title = QLabel("⚠  Price Change Detected")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFB300;")
+        title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {styles.CLR_AMBER};")
         layout.addWidget(title)
 
         info = QLabel(f"<b>{description}</b><br>"
-                      f"<span style='color:#8b949e;font-size:11px;'>{barcode}</span>")
+                      f"<span style='color:{styles.CLR_MUTED};font-size:11px;'>{barcode}</span>")
         info.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(info)
 
@@ -59,7 +60,7 @@ class _PriceChangeDialog(QDialog):
 
         unit_label = "per kg" if is_weight else "per unit"
         diff = new_cost - old_cost
-        diff_col = "#f85149" if diff > 0 else "#3fb950"
+        diff_col = styles.CLR_DANGER if diff > 0 else styles.CLR_SUCCESS
         diff_str = f"+${diff:.4f}" if diff > 0 else f"-${abs(diff):.4f}"
         price_lbl = QLabel(
             f"<table width='100%' cellpadding='3'>"
@@ -79,16 +80,16 @@ class _PriceChangeDialog(QDialog):
 
         btn_update = QPushButton("Update Cost Price  [U]")
         btn_update.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:1px solid #1976d2;}"
-            "QPushButton:hover{background:#1976d2;}")
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:1px solid {styles.CLR_ACCENT_HOVER};}}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
         btn_promo = QPushButton("Promo Price  [P]")
         btn_promo.setStyleSheet(
-            "QPushButton{background:#3a2e00;color:#FFB300;border:1px solid #FFB300;}"
+            f"QPushButton{{background:#3a2e00;color:{styles.CLR_AMBER};border:1px solid {styles.CLR_AMBER};}}"
             "QPushButton:hover{background:#4a3e00;}")
         btn_cancel = QPushButton("Cancel  [Esc]")
         btn_cancel.setStyleSheet(
-            "QPushButton{background:transparent;color:#8b949e;border:1px solid #2a3a4a;}"
-            "QPushButton:hover{background:#1e2a38;color:#e6edf3;}")
+            f"QPushButton{{background:transparent;color:{styles.CLR_MUTED};border:1px solid {styles.CLR_BORDER};}}"
+            f"QPushButton:hover{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};}}")
 
         btn_update.clicked.connect(self._choose_update)
         btn_promo.clicked.connect(self._choose_promo)
@@ -222,14 +223,14 @@ class POReceive(QWidget):
         self._load()
 
     # ── Theme colours ─────────────────────────────────────────────────
-    BG       = "#1a2332"
-    BG_ALT   = "#1e2a38"
-    FG       = "#e6edf3"
-    FG_DIM   = "#8b949e"
-    BORDER   = "#2a3a4a"
-    SEL_BG   = "#1565c0"
+    BG       = styles.CLR_BG
+    BG_ALT   = styles.CLR_BG_PANEL
+    FG       = styles.CLR_TEXT
+    FG_DIM   = styles.CLR_MUTED
+    BORDER   = styles.CLR_BORDER
+    SEL_BG   = styles.CLR_ACCENT
     AMBER_BG = "#3a2e00"
-    AMBER_FG = "#FFB300"
+    AMBER_FG = styles.CLR_AMBER
 
     def _cell(self, text, align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter):
         item = QTableWidgetItem(str(text))
@@ -262,7 +263,7 @@ class POReceive(QWidget):
             QPushButton      {{ background: {self.BG_ALT}; color: {self.FG};
                                border: 1px solid {self.BORDER}; border-radius: 4px;
                                padding: 4px 12px; }}
-            QPushButton:hover {{ background: #2a3a4a; }}
+            QPushButton:hover {{ background: {self.BORDER}; }}
         """)
 
         self.header = QLabel()
@@ -280,7 +281,7 @@ class POReceive(QWidget):
             f"QLineEdit {{ background: {self.BG_ALT}; color: {self.FG};"
             f" border: 1px solid {self.BORDER}; border-radius: 4px; padding: 4px 8px;"
             f" font-size: 13px; }}"
-            f"QLineEdit:focus {{ border-color: #1976d2; }}"
+            f"QLineEdit:focus {{ border-color: {styles.CLR_ACCENT_HOVER}; }}"
         )
         inv_row.addWidget(self.supplier_invoice_input)
         inv_row.addStretch()
@@ -299,7 +300,7 @@ class POReceive(QWidget):
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
         self.table.setStyleSheet(
-            "QTableWidget { alternate-background-color: #1e2a38; background: #1a2332; }"
+            f"QTableWidget {{ alternate-background-color: {styles.CLR_BG_PANEL}; background: {styles.CLR_BG}; }}"
         )
         # 10 columns — weight column (col 6) is hidden for non-weighed items
         self.table.setColumnCount(12)
@@ -335,7 +336,7 @@ class POReceive(QWidget):
         # ── Additional Charges ────────────────────────────────────
         charges_header = QHBoxLayout()
         charges_lbl = QLabel("Additional Charges  (freight, fuel levy, surcharges etc.)")
-        charges_lbl.setStyleSheet("color: #8b949e; font-size: 11px; font-weight: bold;")
+        charges_lbl.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 11px; font-weight: bold;")
         charges_header.addWidget(charges_lbl)
         charges_header.addStretch()
         btn_add_charge = QPushButton("+ Add Charge")
@@ -368,18 +369,18 @@ class POReceive(QWidget):
         btn_receive_all.setFixedHeight(35)
         btn_receive_all.setToolTip("Set all Receiving Now quantities to their full remaining amounts")
         btn_receive_all.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;font-weight:bold;"
-            "border:none;border-radius:4px;padding:0 16px;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;font-weight:bold;"
+            f"border:none;border-radius:4px;padding:0 16px;}}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
         btn_receive_all.clicked.connect(self._receive_all)
 
         btn_receive = QPushButton("Confirm Receipt")
         btn_receive.setFixedHeight(35)
         btn_receive.setStyleSheet(
-            "QPushButton{background:#2e7d32;color:white;font-weight:bold;"
-            "border:none;border-radius:4px;padding:0 16px;}"
-            "QPushButton:hover{background:#388e3c;}"
+            f"QPushButton{{background:{styles.CLR_SUCCESS_DARK};color:white;font-weight:bold;"
+            f"border:none;border-radius:4px;padding:0 16px;}}"
+            f"QPushButton:hover{{background:{styles.CLR_SUCCESS_HOVER};}}"
         )
         btn_receive.clicked.connect(self._confirm)
 
@@ -539,12 +540,12 @@ class POReceive(QWidget):
             self.table.setItem(r, 10, lt_item)
             # ── Col 11: Line Total inc. Tax — read only ──────────────────
             lt_inc_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            lt_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#4CAF50') if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
+            lt_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
             self.table.setItem(r, 11, lt_inc_item)
             # ── Col 10: Cost inc. GST — read only ────────────────────
             cost_inc = current_cost * (1 + tax_rate / 100)
             cost_inc_item = self._cell(f"${cost_inc:.4f}", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            cost_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#4CAF50') if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
+            cost_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
             self.table.setItem(r, 8, cost_inc_item)
 
             # ── Signal connections ────────────────────────────────────
@@ -626,12 +627,12 @@ class POReceive(QWidget):
         line_total_inc = line_total * (1 + tax_rate / 100)
         lt_inc_item.setText(f"${line_total_inc:.2f}")
         from PyQt6.QtGui import QColor
-        lt_inc_item.setForeground(QColor('#4CAF50') if tax_rate > 0 else QColor('#aaaaaa'))
+        lt_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
         cost_inc = cost * (1 + tax_rate / 100)
         cost_inc_item = self.table.item(row, 8)
         if cost_inc_item:
             cost_inc_item.setText(f"${cost_inc:.4f}")
-            cost_inc_item.setForeground(QColor('#4CAF50') if tax_rate > 0 else QColor('#aaaaaa'))
+            cost_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
         self._refresh_promo_colour(row)
         self._update_total()
 
@@ -672,11 +673,11 @@ class POReceive(QWidget):
         total_inc = round(total_inc, 2)
         promo_str = ""
         if promo_total > 0:
-            promo_str = f"&nbsp;&nbsp;&nbsp;<span style='color:#FFB300;font-size:11px;'>(includes <b>${promo_total:.2f}</b> promo — cost price NOT updated)</span>"
+            promo_str = f"&nbsp;&nbsp;&nbsp;<span style='color:{styles.CLR_AMBER};font-size:11px;'>(includes <b>${promo_total:.2f}</b> promo — cost price NOT updated)</span>"
         self.total_label.setText(
             f"Subtotal ex. GST: <b>${subtotal:.2f}</b>"
             f"&nbsp;&nbsp;&nbsp;GST: <b>${gst:.2f}</b>"
-            f"&nbsp;&nbsp;&nbsp;Invoice Total inc. GST: <b style='color:#4CAF50'>${total_inc:.2f}</b>"
+            f"&nbsp;&nbsp;&nbsp;Invoice Total inc. GST: <b style='color:{styles.CLR_SUCCESS_ALT}'>${total_inc:.2f}</b>"
             f"{promo_str}"
         )
 
@@ -692,7 +693,7 @@ class POReceive(QWidget):
         if not supplier_inv:
             self.supplier_invoice_input.setStyleSheet(
                 f"QLineEdit {{ background: {self.BG_ALT}; color: {self.FG};"
-                f" border: 2px solid #f85149; border-radius: 4px; padding: 4px 8px;"
+                f" border: 2px solid {styles.CLR_DANGER}; border-radius: 4px; padding: 4px 8px;"
                 f" font-size: 13px; }}"
             )
             self.supplier_invoice_input.setFocus()
@@ -707,7 +708,7 @@ class POReceive(QWidget):
             f"QLineEdit {{ background: {self.BG_ALT}; color: {self.FG};"
             f" border: 1px solid {self.BORDER}; border-radius: 4px; padding: 4px 8px;"
             f" font-size: 13px; }}"
-            f"QLineEdit:focus {{ border-color: #1976d2; }}"
+            f"QLineEdit:focus {{ border-color: {styles.CLR_ACCENT_HOVER}; }}"
         )
 
         po = po_ctrl.get_po_by_id(self.po_id)

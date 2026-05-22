@@ -10,16 +10,17 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor, QFont
 
+import config.styles as styles
 import controllers.report_controller as report_ctrl
 
 _HEADER_BG  = "#1e3a5f"
 _HEADER_FG  = "#90caf9"
 _TOTAL_BG   = "#162030"
-_TOTAL_FG   = "#e6edf3"
-_GREEN      = "#4CAF50"
-_ORANGE     = "#FF9800"
-_RED        = "#f44336"
-_DIM        = "#8b949e"
+_TOTAL_FG   = styles.CLR_TEXT
+_GREEN      = styles.CLR_SUCCESS_ALT
+_ORANGE     = styles.CLR_ORANGE
+_RED        = styles.CLR_DANGER_ALT
+_DIM        = styles.CLR_MUTED
 
 
 class LiquorReport(QWidget):
@@ -34,7 +35,7 @@ class LiquorReport(QWidget):
         layout.setSpacing(10)
 
         title = QLabel("Liquor Tracking Report")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #e6edf3;")
+        title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {styles.CLR_TEXT};")
         layout.addWidget(title)
 
         # ── Controls ──────────────────────────────────────────────────
@@ -75,9 +76,9 @@ class LiquorReport(QWidget):
         run_btn = QPushButton("▶  Run Report")
         run_btn.setFixedHeight(32)
         run_btn.setStyleSheet(
-            "QPushButton{background:#1565c0;color:white;border:none;border-radius:4px;"
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;border-radius:4px;"
             "padding:0 16px;font-weight:bold;}"
-            "QPushButton:hover{background:#1976d2;}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
         run_btn.clicked.connect(self._run)
         ctrl.addWidget(run_btn)
@@ -107,17 +108,17 @@ class LiquorReport(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setAlternatingRowColors(True)
-        self._table.setStyleSheet("""
-            QTableWidget {
-                background: #1e2a38; alternate-background-color: #1b2738;
-                gridline-color: #2a3a4a; font-size: 13px; border: none;
-            }
-            QHeaderView::section {
-                background: #152030; color: #8b949e;
+        self._table.setStyleSheet(f"""
+            QTableWidget {{
+                background: {styles.CLR_BG_PANEL}; alternate-background-color: #1b2738;
+                gridline-color: {styles.CLR_BORDER}; font-size: 13px; border: none;
+            }}
+            QHeaderView::section {{
+                background: #152030; color: {styles.CLR_MUTED};
                 font-size: 12px; font-weight: bold; padding: 6px;
-                border: none; border-bottom: 1px solid #2a3a4a;
-            }
-            QTableWidget::item:selected { background: #1e4080; color: #e6edf3; }
+                border: none; border-bottom: 1px solid {styles.CLR_BORDER};
+            }}
+            QTableWidget::item:selected {{ background: #1e4080; color: {styles.CLR_TEXT}; }}
         """)
         layout.addWidget(self._table, stretch=1)
 
@@ -227,13 +228,13 @@ class LiquorReport(QWidget):
             self._table.insertRow(r)
             self._table.setRowHeight(r, 30)
             self._table.setSpan(r, 0, 1, 2)
-            lbl = self._mk_item("  GRAND TOTAL", bold=True, bg="#0d1a24", fg="#e6edf3")
+            lbl = self._mk_item("  GRAND TOTAL", bold=True, bg=styles.CLR_BG_DEEP, fg=styles.CLR_TEXT)
             lbl.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self._table.setItem(r, 0, lbl)
-            self._table.setItem(r, 2, self._num_item(grand_start, bold=True, bg="#0d1a24"))
-            self._table.setItem(r, 3, self._num_item(grand_in,    bold=True, bg="#0d1a24", color=_GREEN  if grand_in  else None))
-            self._table.setItem(r, 4, self._num_item(grand_out,   bold=True, bg="#0d1a24", color=_ORANGE if grand_out else None))
-            self._table.setItem(r, 5, self._num_item(grand_end,   bold=True, bg="#0d1a24", color=_RED    if grand_end < 0 else None))
+            self._table.setItem(r, 2, self._num_item(grand_start, bold=True, bg=styles.CLR_BG_DEEP))
+            self._table.setItem(r, 3, self._num_item(grand_in,    bold=True, bg=styles.CLR_BG_DEEP, color=_GREEN  if grand_in  else None))
+            self._table.setItem(r, 4, self._num_item(grand_out,   bold=True, bg=styles.CLR_BG_DEEP, color=_ORANGE if grand_out else None))
+            self._table.setItem(r, 5, self._num_item(grand_end,   bold=True, bg=styles.CLR_BG_DEEP, color=_RED    if grand_end < 0 else None))
 
         self._export_btn.setEnabled(bool(self._data))
         self._status_lbl.setText(

@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
+import config.styles as styles
 import os, shutil
 import controllers.product_controller as product_controller
 from PyQt6.QtGui import QColor
@@ -102,7 +103,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             btn.clicked.connect(on_edit)
             key = QLabel(field_label)
             key.setMinimumWidth(130)
-            key.setStyleSheet('color: #8b949e;')
+            key.setStyleSheet(f'color: {styles.CLR_MUTED};')
             lbl = QLabel(str(value))
             lbl.setMinimumWidth(180)
             row.addWidget(btn)
@@ -119,7 +120,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             stub.setStyleSheet("background: transparent; border: none;")
             key = QLabel(field_label)
             key.setMinimumWidth(130)
-            key.setStyleSheet("color: #8b949e;")
+            key.setStyleSheet(f"color: {styles.CLR_MUTED};")
             row.addWidget(stub)
             row.addWidget(key)
             row.addWidget(widget)
@@ -171,7 +172,7 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         tax = self._tax_rate or 0.0
         inc = self._cost_price * (1 + tax / 100)
-        color = "#4CAF50" if tax > 0 else "grey"
+        color = styles.CLR_SUCCESS_ALT if tax > 0 else "grey"
         self.lbl_cost_inc = QLabel(f"<b style='color:{color}'>${inc:.2f}</b>")
         self.lbl_cost_inc.setTextFormat(Qt.TextFormat.RichText)
         right_col.addLayout(info_row("Cost Price (inc GST)", self.lbl_cost_inc))
@@ -207,13 +208,13 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         soh = product_controller.get_soh_by_barcode(self.barcode)
         soh_qty = int(soh["quantity"]) if soh else 0
-        soh_color = "#4CAF50" if soh_qty > 0 else "#FF9800" if soh_qty == 0 else "#f44336"
+        soh_color = styles.CLR_SUCCESS_ALT if soh_qty > 0 else styles.CLR_ORANGE if soh_qty == 0 else styles.CLR_DANGER_ALT
         self.lbl_soh = QLabel(f'<span style="color:{soh_color};font-weight:bold;">{soh_qty}</span>')
         self.lbl_soh.setTextFormat(Qt.TextFormat.RichText)
         right_col.addLayout(info_row("Stock on Hand", self.lbl_soh))
 
         on_order = product_controller.get_stock_on_order(self.barcode)
-        on_order_color = "#2196F3" if on_order > 0 else "#8b949e"
+        on_order_color = styles.CLR_BLUE if on_order > 0 else styles.CLR_MUTED
         self.lbl_on_order = QLabel(f'<span style="color:{on_order_color};font-weight:bold;">{on_order}</span>')
         self.lbl_on_order.setTextFormat(Qt.TextFormat.RichText)
         right_col.addLayout(info_row("Stock on Order", self.lbl_on_order))
@@ -223,7 +224,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
-        sep.setStyleSheet("color: #2a3a4a;")
+        sep.setStyleSheet(styles.STYLE_SEPARATOR)
 
         two_col.addLayout(left_col, 1)
         two_col.addWidget(sep)
@@ -242,14 +243,14 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._img_label.setFixedSize(80, 80)
         self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_label.setStyleSheet(
-            "background:#1a2332; border:1px solid #2a3a4a; border-radius:6px; color:#8b949e;"
+            f"background:{styles.CLR_BG}; border:1px solid {styles.CLR_BORDER}; border-radius:6px; color:{styles.CLR_MUTED};"
         )
         img_lay.addWidget(self._img_label)
 
         img_btn_col = QVBoxLayout()
         img_btn_col.setSpacing(4)
         self._img_path_lbl = QLabel("No image")
-        self._img_path_lbl.setStyleSheet("color:#8b949e; font-size:11px;")
+        self._img_path_lbl.setStyleSheet(styles.STYLE_LABEL_MUTED)
         self._img_path_lbl.setWordWrap(True)
         img_btn_col.addWidget(self._img_path_lbl)
         btn_upload = QPushButton("📷  Upload Image")
@@ -418,7 +419,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             "The Default supplier determines which purchase orders this product appears in. "
             "Set the Supplier SKU and carton pack size per supplier."
         )
-        note.setStyleSheet("color: #8b949e; font-size: 11px;")
+        note.setStyleSheet(styles.STYLE_LABEL_MUTED)
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -449,9 +450,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         btn_done = QPushButton("Done")
         btn_done.setFixedHeight(32)
         btn_done.setStyleSheet(
-            "QPushButton { background: #1565c0; color: white; border: none; "
+            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
             "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
-            "QPushButton:hover { background: #1976d2; }"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
         )
         btn_done.clicked.connect(dlg.accept)
         btn_row.addWidget(btn_done)
@@ -501,7 +502,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 btn_def.setEnabled(False)
                 btn_def.setFixedHeight(26)
                 btn_def.setStyleSheet(
-                    "QPushButton { background: #1565c0; color: white; border: none; "
+                    f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
                     "border-radius: 3px; font-weight: bold; }"
                 )
             else:
@@ -513,7 +514,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             # Col 5 — Remove
             btn_rem = QPushButton("✕")
             btn_rem.setFixedHeight(26)
-            btn_rem.setStyleSheet("color: #f44336; font-weight: bold;")
+            btn_rem.setStyleSheet(f"color: {styles.CLR_DANGER_ALT}; font-weight: bold;")
             btn_rem.clicked.connect(lambda _, i=r: self._remove_supplier(i))
             self._sup_table.setCellWidget(r, 5, btn_rem)
 
@@ -570,9 +571,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         ok_btn = QPushButton("Add  [Ctrl+S]")
         ok_btn.setFixedHeight(32)
         ok_btn.setStyleSheet(
-            "QPushButton { background: #1565c0; color: white; border: none; "
+            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
             "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
-            "QPushButton:hover { background: #1976d2; }"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
         )
         cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(32)
@@ -800,7 +801,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             "Define alternate pack sizes that draw from this product's base stock. "
             "Each unit sold deducts the configured quantity from stock on hand."
         )
-        note.setStyleSheet("color: #8b949e; font-size: 11px;")
+        note.setStyleSheet(styles.STYLE_LABEL_MUTED)
         note.setWordWrap(True)
         lay.addWidget(note)
 
@@ -862,13 +863,13 @@ class ProductEdit(KeyboardMixin, QWidget):
 
             btn_edit = QPushButton("✎")
             btn_edit.setFixedHeight(24)
-            btn_edit.setStyleSheet("color: #4fc3f7; font-weight: bold; border: none; background: transparent;")
+            btn_edit.setStyleSheet(styles.STYLE_BTN_INFO_LINK)
             btn_edit.clicked.connect(lambda _, sid=su['id']: self._edit_selling_unit_popup(sid))
             self._su_table.setCellWidget(r, 5, btn_edit)
 
             btn_rem = QPushButton("✕")
             btn_rem.setFixedHeight(24)
-            btn_rem.setStyleSheet("color: #f44336; font-weight: bold; border: none; background: transparent;")
+            btn_rem.setStyleSheet(styles.STYLE_BTN_DANGER_LINK)
             btn_rem.clicked.connect(lambda _, sid=su['id']: self._remove_selling_unit(sid))
             self._su_table.setCellWidget(r, 6, btn_rem)
 
@@ -919,9 +920,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         ok_btn = QPushButton("Add  [Ctrl+S]")
         ok_btn.setFixedHeight(32)
         ok_btn.setStyleSheet(
-            "QPushButton { background: #1565c0; color: white; border: none; "
+            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
             "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
-            "QPushButton:hover { background: #1976d2; }"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
         )
         cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(32)
@@ -1010,9 +1011,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         ok_btn = QPushButton("Save  [Ctrl+S]")
         ok_btn.setFixedHeight(32)
         ok_btn.setStyleSheet(
-            "QPushButton { background: #1565c0; color: white; border: none; "
+            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
             "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
-            "QPushButton:hover { background: #1976d2; }"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
         )
         cancel_btn = QPushButton("Cancel  [Esc]")
         cancel_btn.setFixedHeight(32)
@@ -1110,24 +1111,24 @@ class ProductEdit(KeyboardMixin, QWidget):
                 type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 qty = row["quantity"]
                 if row["movement_type"] in ("RECEIPT", "ADJUSTMENT_IN", "RETURN"):
-                    type_item.setForeground(QColor("#4CAF50"))
+                    type_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
                 elif row["movement_type"] in ("SALE", "WASTAGE", "ADJUSTMENT_OUT", "SHRINKAGE"):
-                    type_item.setForeground(QColor("#f85149"))
+                    type_item.setForeground(QColor(styles.CLR_DANGER))
                 else:
                     type_item.setForeground(QColor("steelblue"))
                 tbl.setItem(r, 1, type_item)
 
                 qty_item = QTableWidgetItem(f"{'+' if qty > 0 else ''}{qty:.0f}")
                 qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                qty_item.setForeground(QColor("#4CAF50") if qty > 0 else QColor("#f85149"))
+                qty_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if qty > 0 else QColor(styles.CLR_DANGER))
                 tbl.setItem(r, 2, qty_item)
 
                 bal_item = QTableWidgetItem(f"{bal:.0f}")
                 bal_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 bal_item.setForeground(
-                    QColor("#4CAF50") if bal > 0 else
-                    QColor("#FF9800") if bal == 0 else
-                    QColor("#f85149")
+                    QColor(styles.CLR_SUCCESS_ALT) if bal > 0 else
+                    QColor(styles.CLR_ORANGE) if bal == 0 else
+                    QColor(styles.CLR_DANGER)
                 )
                 tbl.setItem(r, 3, bal_item)
                 tbl.setItem(r, 4, QTableWidgetItem(row["reference"] or ""))

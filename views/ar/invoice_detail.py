@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 import controllers.ar_controller as ar_ctrl
 import controllers.product_controller as product_ctrl
+import config.styles as styles
 
 
 class InvoiceDetail(QWidget):
@@ -67,7 +68,7 @@ class InvoiceDetail(QWidget):
         self.lbl_due       = QLabel("")
         self.lbl_balance   = QLabel("")
         for lbl in (self.lbl_customer, self.lbl_dates, self.lbl_due, self.lbl_balance):
-            lbl.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+            lbl.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 11px;")
             info.addWidget(lbl)
         info.addStretch()
         root.addLayout(info)
@@ -236,7 +237,7 @@ class InvoiceDetail(QWidget):
         self.lbl_total.setText(f"TOTAL: ${total:.2f}")
         self.lbl_paid.setText(f"Paid: ${paid:.2f}")
         self.lbl_owing.setText(f"OWING: ${balance:.2f}")
-        colour = "#2e7d32" if balance <= 0 else "#e65100"
+        colour = styles.CLR_SUCCESS_DARK if balance <= 0 else "#e65100"
         self.lbl_owing.setStyleSheet(f"font-weight:bold; font-size:13px; color:{colour};")
         self.lbl_balance.setText(f"Balance: ${balance:.2f}")
 
