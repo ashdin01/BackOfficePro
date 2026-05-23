@@ -51,6 +51,9 @@ REASON_CODES = [
     ("OD", "Out of Date"),
     ("IE", "Invoice Error"),
     ("SE", "Stocktake Error"),
+    ("DG", "Damaged Goods"),
+    ("CI", "Consumed Instore (Staff feeding/meals)"),
+    ("SA", "Stock Adjust Error"),
 ]
 REASON_MAP = {code: desc for code, desc in REASON_CODES}
 
@@ -339,11 +342,11 @@ class StockAdjustView(QWidget):
         qty_col.addWidget(self.qty_spin)
         ctrl_row.addLayout(qty_col)
         type_col = QVBoxLayout()
-        type_col.addWidget(QLabel("Reason Code  (IS/NS/OD/IE/SE or F2)"))
+        type_col.addWidget(QLabel("Reason Code  (F2 to browse)"))
         type_row = QHBoxLayout()
         type_row.setSpacing(4)
         self.adj_type = QLineEdit()
-        self.adj_type.setPlaceholderText("IS, NS, OD, IE, SE …")
+        self.adj_type.setPlaceholderText("IS, NS, OD, IE, SE, DG, CI, SA …")
         self.adj_type.setMinimumHeight(36)
         self.adj_type.setMaximumWidth(120)
         self.adj_type.textChanged.connect(self._on_reason_changed)
