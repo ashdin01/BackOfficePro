@@ -286,6 +286,12 @@ def add_count(session_id):
     return jsonify({"ok": True, "barcode": resolved}), 200
 
 
+@app.route("/api/v1/sessions/<int:session_id>/counts/barcode/<barcode>", methods=["GET"])
+def get_count_for_barcode(session_id, barcode):
+    qty = stocktake.get_count_for_barcode(session_id, resolve_alias(barcode))
+    return jsonify({"counted_qty": qty}), 200
+
+
 @app.route("/api/v1/sessions/<int:session_id>/counts/<int:count_id>", methods=["DELETE"])
 def delete_count(session_id, count_id):
     stocktake.delete_count(count_id)

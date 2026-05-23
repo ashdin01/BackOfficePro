@@ -82,7 +82,7 @@ def get_counts(session_id):
 
 
 def upsert_count(session_id, barcode, qty):
-    """Add or update a count line for this session."""
+    """Accumulate qty onto an existing count line, or insert a new one."""
     conn = get_connection()
     try:
         existing = conn.execute(
@@ -91,7 +91,7 @@ def upsert_count(session_id, barcode, qty):
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
+                "UPDATE stocktake_counts SET counted_qty=counted_qty+?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
                 (qty, existing['id'])
             )
         else:
@@ -100,6 +100,19 @@ def upsert_count(session_id, barcode, qty):
                 (session_id, barcode, qty)
             )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_count_for_barcode(session_id, barcode):
+    """Return the current counted_qty for a barcode in this session, or 0.0."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
+            (session_id, barcode)
+        ).fetchone()
+        return float(row['counted_qty']) if row else 0.0
     finally:
         conn.close()
 
