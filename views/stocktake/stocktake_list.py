@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
     QMessageBox, QDialog, QFormLayout, QLineEdit, QComboBox, QTextEdit
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
 import controllers.stocktake_controller as stocktake_ctrl
@@ -46,6 +46,11 @@ class StocktakeList(QWidget):
 
         QShortcut(QKeySequence("N"), self, self._new_session)
         QShortcut(QKeySequence("Return"), self, self._open_session)
+
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(10000)
+        self._refresh_timer.timeout.connect(self._load)
+        self._refresh_timer.start()
 
     def _load(self):
         rows = stocktake_ctrl.get_all_sessions()

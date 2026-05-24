@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
     QLineEdit, QDoubleSpinBox, QDialog, QFormLayout, QFileDialog
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
 import controllers.stocktake_controller as stocktake_ctrl
@@ -135,7 +135,23 @@ class StocktakeSession(QWidget):
 
         QShortcut(QKeySequence("Escape"), self, self.close)
 
-    def _load(self):
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(5000)
+        self._refresh_timer.timeout.connect(self._auto_refresh)
+        self._refresh_timer.start()
+
+    def _auto_refresh(self):
+        if self._session and self._session['status'] == 'OPEN':
+            self._load(keep_focus=True)
+
+    def closeEvent(self, event):
+        self._refresh_timer.stop()
+        super().closeEvent(event)
+
+    def _load(self, keep_focus=False):
+        focused = self.focusWidget() if keep_focus else None
+        scroll  = self.table.verticalScrollBar().value() if keep_focus else 0
+
         session = stocktake_ctrl.get_session(self.session_id)
         self._session = session
         status = session['status']
@@ -192,7 +208,11 @@ class StocktakeSession(QWidget):
             f"<b>Lines: {total_lines}  |  Total Variance: {sign}{total_variance:.0f} units</b>"
         )
 
-        if is_open:
+        if keep_focus:
+            self.table.verticalScrollBar().setValue(scroll)
+            if focused:
+                focused.setFocus()
+        elif is_open:
             self.scan_input.setFocus()
 
     # ── Import ────────────────────────────────────────────────────────────────
