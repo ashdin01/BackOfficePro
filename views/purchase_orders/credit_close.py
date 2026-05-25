@@ -124,11 +124,14 @@ class CreditClose(QWidget):
         self._inputs    = []
         self.table.setRowCount(0)
 
+        # RO and IO store ordered_qty in units already; PO/CN store in cartons
+        unit_mode = (po.get('po_type') or 'PO') in ('RO', 'IO')
+
         for line in lines:
-            ordered_cartons = int(line['ordered_qty'] or 0)
-            pack_qty        = int(line['pack_qty'] or 1)
-            ordered_units   = ordered_cartons * pack_qty
-            unit_cost       = float(line['unit_cost'] or 0)
+            ordered_qty   = int(line['ordered_qty'] or 0)
+            pack_qty      = int(line['pack_qty'] or 1)
+            ordered_units = ordered_qty if unit_mode else ordered_qty * pack_qty
+            unit_cost     = float(line['unit_cost'] or 0)
 
             r = self.table.rowCount()
             self.table.insertRow(r)
