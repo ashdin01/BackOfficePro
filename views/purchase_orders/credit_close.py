@@ -50,7 +50,7 @@ class CreditClose(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels([
-            "Description", "Pack", "Return Qty (cartons)", "Unit Cost", "Credit Value"
+            "Description", "Pack", "Return Qty (units)", "Unit Cost", "Credit Value"
         ])
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -125,10 +125,10 @@ class CreditClose(QWidget):
         self.table.setRowCount(0)
 
         for line in lines:
-            ordered = int(line['ordered_qty'] or 0)
-            pack_qty  = int(line['pack_qty'] or 1)
-            pack_unit = 'EA'
-            unit_cost = float(line['unit_cost'] or 0)
+            ordered_cartons = int(line['ordered_qty'] or 0)
+            pack_qty        = int(line['pack_qty'] or 1)
+            ordered_units   = ordered_cartons * pack_qty
+            unit_cost       = float(line['unit_cost'] or 0)
 
             r = self.table.rowCount()
             self.table.insertRow(r)
@@ -142,8 +142,8 @@ class CreditClose(QWidget):
 
             qty_spin = QSpinBox()
             qty_spin.setMinimum(0)
-            qty_spin.setMaximum(ordered)
-            qty_spin.setValue(ordered)
+            qty_spin.setMaximum(ordered_units)
+            qty_spin.setValue(ordered_units)
             qty_spin.setFixedHeight(28)
             qty_spin.valueChanged.connect(self._update_total)
             self.table.setCellWidget(r, 2, qty_spin)
@@ -171,8 +171,7 @@ class CreditClose(QWidget):
     def _update_total(self):
         grand = 0.0
         for entry in self._inputs:
-            cartons   = entry['qty_spin'].value()
-            units     = cartons * entry['pack_qty']
+            units     = entry['qty_spin'].value()
             line_val  = units * entry['unit_cost']
             grand    += line_val
             item = self.table.item(entry['row'], entry['total_col'])
@@ -214,15 +213,14 @@ class CreditClose(QWidget):
 
         line_receipts = []
         for entry in self._inputs:
-            cartons = entry['qty_spin'].value()
-            if cartons <= 0:
+            qty_units = entry['qty_spin'].value()
+            if qty_units <= 0:
                 continue
-            qty_units = cartons * entry['pack_qty']
             line_receipts.append({
-                'line_id':       entry['line']['id'],
-                'barcode':       entry['line']['barcode'],
-                'return_cartons': cartons,
-                'qty_units':     qty_units,
+                'line_id':        entry['line']['id'],
+                'barcode':        entry['line']['barcode'],
+                'return_cartons': qty_units,
+                'qty_units':      qty_units,
             })
 
         try:
