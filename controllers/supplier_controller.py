@@ -14,8 +14,12 @@ def add(code, name, **kwargs):
     supplier_model.add(code, name, **kwargs)
 
 
-def update(supplier_id, code, name, **kwargs):
-    supplier_model.update(supplier_id, code, name, **kwargs)
+def update(supplier_id, code, name, contact_name='', phone='', account_number='',
+           payment_terms='', address='', notes='', active=1, **kwargs):
+    supplier_model.update(
+        supplier_id, code, name, contact_name, phone, account_number,
+        payment_terms, address, notes, active, **kwargs
+    )
 
 
 def deactivate(supplier_id):
