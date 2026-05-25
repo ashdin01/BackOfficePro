@@ -141,9 +141,9 @@ class CreditClose(QWidget):
             self.table.setItem(r, 1, QTableWidgetItem(pack_str))
 
             qty_spin = QSpinBox()
-            qty_spin.setMinimum(0)
-            qty_spin.setMaximum(ordered_units)
-            qty_spin.setValue(ordered_units)
+            qty_spin.setMinimum(-ordered_units)
+            qty_spin.setMaximum(0)
+            qty_spin.setValue(-ordered_units)
             qty_spin.setFixedHeight(28)
             qty_spin.valueChanged.connect(self._update_total)
             self.table.setCellWidget(r, 2, qty_spin)
@@ -171,19 +171,19 @@ class CreditClose(QWidget):
     def _update_total(self):
         grand = 0.0
         for entry in self._inputs:
-            units     = entry['qty_spin'].value()
+            units     = abs(entry['qty_spin'].value())
             line_val  = units * entry['unit_cost']
             grand    += line_val
             item = self.table.item(entry['row'], entry['total_col'])
             if item:
-                item.setText(f"${line_val:.2f}")
+                item.setText(f"-${line_val:.2f}" if units > 0 else "$0.00")
         self.total_label.setText(
-            f"Credit Value (ex. GST):  <b>${grand:.2f}</b>"
+            f"Credit Value (ex. GST):  <b>-${grand:.2f}</b>"
         )
 
     def _fill_all(self):
         for entry in self._inputs:
-            entry['qty_spin'].setValue(entry['qty_spin'].maximum())
+            entry['qty_spin'].setValue(entry['qty_spin'].minimum())
 
     def _confirm(self):
         po = po_ctrl.get_po_by_id(self.po_id)
@@ -194,7 +194,7 @@ class CreditClose(QWidget):
             )
             return
 
-        total_qty = sum(e['qty_spin'].value() for e in self._inputs)
+        total_qty = sum(abs(e['qty_spin'].value()) for e in self._inputs)
         if total_qty == 0:
             QMessageBox.warning(
                 self, "No Quantities",
@@ -213,7 +213,7 @@ class CreditClose(QWidget):
 
         line_receipts = []
         for entry in self._inputs:
-            qty_units = entry['qty_spin'].value()
+            qty_units = abs(entry['qty_spin'].value())
             if qty_units <= 0:
                 continue
             line_receipts.append({
