@@ -1,353 +1,110 @@
 import math
 from datetime import date, timedelta
-from database.connection import get_connection
 import models.purchase_order as po_model
 import models.po_lines as lines_model
 import models.po_charges as charges_model
 import models.settings as settings_model
+import models.sales_daily as sales_daily_model
+import models.plu_barcode_map as plu_map_model
+import models.product as product_model
+import models.product_queries as product_queries_model
+import models.supplier as supplier_model
 
 
-def _on_order_units(conn, barcodes):
-    """
-    Units already committed on open (DRAFT/SENT) POs, keyed by barcode.
-    For standard POs ordered_qty is cartons → multiply by pack_qty.
-    For IO/RO POs ordered_qty is already units.
-    """
-    if not barcodes:
-        return {}
-    ph = ','.join('?' * len(barcodes))
-    rows = conn.execute(f"""
-        SELECT pl.barcode,
-               COALESCE(SUM(
-                   CASE WHEN po.po_type IN ('IO', 'RO')
-                        THEN MAX(0.0, pl.ordered_qty - pl.received_qty)
-                        ELSE MAX(0.0, pl.ordered_qty - pl.received_qty)
-                             * COALESCE(p.pack_qty, 1)
-                   END
-               ), 0.0) AS on_order_units
-        FROM po_lines pl
-        JOIN purchase_orders po ON pl.po_id = po.id
-        JOIN products p ON pl.barcode = p.barcode
-        WHERE po.status IN ('DRAFT', 'SENT')
-          AND pl.barcode IN ({ph})
-        GROUP BY pl.barcode
-    """, barcodes).fetchall()
-    result = {b: 0.0 for b in barcodes}
-    for r in rows:
-        result[r['barcode']] = float(r['on_order_units'])
-    return result
-
-
-def get_reorder_recommendations(supplier_id):
+def get_reorder_recommendations(supplier_id) -> list[dict]:
     """
     Products linked to supplier_id whose effective stock (SOH + on open POs)
     is at or below their reorder point.
     Returns dicts with barcode, description, reorder_point, reorder_max,
     cost_price, on_hand, on_order, effective_stock, pack_qty, pack_unit, supplier_sku.
     """
-    conn = get_connection()
-    try:
-        rows = conn.execute("""
-            SELECT p.barcode, p.description, p.reorder_point,
-                   COALESCE(p.reorder_max, 0) AS reorder_max,
-                   p.cost_price, COALESCE(s.quantity, 0) AS on_hand,
-                   COALESCE(p.pack_qty, 1) AS pack_qty,
-                   COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                   p.supplier_sku
-            FROM products p
-            LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
-            WHERE p.supplier_id = ?
-              AND p.active = 1
-              AND COALESCE(s.quantity, 0) <= p.reorder_point
-              AND p.reorder_point > 0
-            ORDER BY p.description
-        """, (supplier_id,)).fetchall()
-
-        if not rows:
-            return []
-
-        barcodes   = [r['barcode'] for r in rows]
-        on_order   = _on_order_units(conn, barcodes)
-        result     = []
-        for r in rows:
-            on_order_qty    = on_order.get(r['barcode'], 0.0)
-            effective_stock = float(r['on_hand']) + on_order_qty
-            if effective_stock <= float(r['reorder_point']):
-                d = dict(r)
-                d['on_order']       = on_order_qty
-                d['effective_stock'] = effective_stock
-                result.append(d)
-        return result
-    finally:
-        conn.close()
+    candidates = product_queries_model.get_reorder_candidates(supplier_id)
+    if not candidates:
+        return []
+    on_order = lines_model.get_on_order_units([r['barcode'] for r in candidates])
+    result = []
+    for r in candidates:
+        on_order_qty    = on_order.get(r['barcode'], 0.0)
+        effective_stock = float(r['on_hand']) + on_order_qty
+        if effective_stock <= float(r['reorder_point']):
+            d = dict(r)
+            d['on_order']        = on_order_qty
+            d['effective_stock'] = effective_stock
+            result.append(d)
+    return result
 
 
-def get_auto_reorder_items(supplier_id):
+def get_auto_reorder_items(supplier_id) -> list[dict]:
     """Products flagged auto_reorder = 1 for this supplier."""
-    conn = get_connection()
-    try:
-        return conn.execute("""
-            SELECT p.barcode, p.description, p.reorder_point,
-                   COALESCE(p.reorder_max, 0) AS reorder_max,
-                   p.cost_price, COALESCE(s.quantity, 0) AS on_hand,
-                   COALESCE(p.pack_qty, 1) AS pack_qty,
-                   COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                   p.supplier_sku
-            FROM products p
-            LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
-            WHERE p.supplier_id = ? AND p.auto_reorder = 1 AND p.active = 1
-            ORDER BY p.description
-        """, (supplier_id,)).fetchall()
-    finally:
-        conn.close()
+    return product_queries_model.get_auto_reorder_items(supplier_id)
 
 
-def get_items_for_supplier(supplier_id=None):
+def get_items_for_supplier(supplier_id=None) -> list[dict]:
     """
     Return active products for the item lookup dialog.
     If supplier_id is given, return all products linked to that supplier via
     product_suppliers (not just those whose default supplier matches).
     Rows include: supplier_name, barcode, description, pack_qty, pack_unit, cost_price.
     """
-    conn = get_connection()
-    try:
-        if supplier_id:
-            return conn.execute("""
-                SELECT COALESCE(s.name, '') AS supplier_name,
-                       p.barcode, p.description,
-                       COALESCE(ps.pack_qty, p.pack_qty, 1) AS pack_qty,
-                       COALESCE(ps.pack_unit, p.pack_unit, 'EA') AS pack_unit,
-                       COALESCE(p.cost_price, 0.0) AS cost_price
-                FROM products p
-                JOIN product_suppliers ps ON p.barcode = ps.barcode AND ps.supplier_id = ?
-                JOIN suppliers s ON s.id = ?
-                WHERE p.active = 1
-                ORDER BY p.description ASC
-            """, (supplier_id, supplier_id)).fetchall()
-        else:
-            return conn.execute("""
-                SELECT COALESCE(s.name, '') AS supplier_name,
-                       p.barcode, p.description,
-                       COALESCE(p.pack_qty, 1) AS pack_qty,
-                       COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                       COALESCE(p.cost_price, 0.0) AS cost_price
-                FROM products p
-                LEFT JOIN suppliers s ON p.supplier_id = s.id
-                WHERE p.active = 1
-                ORDER BY supplier_name ASC, p.description ASC
-            """).fetchall()
-    finally:
-        conn.close()
+    return product_queries_model.get_items_for_supplier(supplier_id)
 
 
-def get_sales_for_barcode(barcode):
+def get_sales_for_barcode(barcode) -> dict | None:
     """
     Return a dict of sales totals (last_week, two_weeks, this_month, ytd)
     by looking up the product's PLU in the plu_barcode_map and aggregating sales_daily.
     Returns None if no PLU mapping exists.
     """
-    today = date.today()
-    days_since_monday = today.weekday()
-    this_week_start = today - timedelta(days=days_since_monday)
-    last_week_start = this_week_start - timedelta(days=7)
-    last_week_end   = this_week_start - timedelta(days=1)
-    two_weeks_start = last_week_start - timedelta(days=7)
-    two_weeks_end   = last_week_start - timedelta(days=1)
-    month_start = today.replace(day=1)
-    year_start  = today.replace(month=1, day=1)
-
-    conn = get_connection()
-    try:
-        plu_row = conn.execute(
-            "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
-        ).fetchone()
-        if not plu_row:
-            return None
-
-        plu = str(plu_row[0])
-
-        def _qty(d_from, d_to):
-            row = conn.execute("""
-                SELECT COALESCE(SUM(quantity), 0)
-                FROM sales_daily
-                WHERE plu = ? AND sale_date BETWEEN ? AND ?
-            """, (plu, str(d_from), str(d_to))).fetchone()
-            return int(row[0]) if row else 0
-
-        return {
-            "last_week":   _qty(last_week_start, last_week_end),
-            "two_weeks":   _qty(two_weeks_start, two_weeks_end),
-            "this_month":  _qty(month_start, today),
-            "ytd":         _qty(year_start, today),
-        }
-    except Exception:
-        return None
-    finally:
-        conn.close()
+    return sales_daily_model.get_sales_for_barcode(barcode)
 
 
-def get_sales_for_barcode_range(barcode, date_from, date_to):
+def get_sales_for_barcode_range(barcode, date_from, date_to) -> int | None:
     """
     Return total sales quantity for barcode between date_from and date_to (inclusive).
     Returns None if no PLU mapping exists, otherwise an int.
     """
-    conn = get_connection()
-    try:
-        plu_row = conn.execute(
-            "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
-        ).fetchone()
-        if not plu_row:
-            return None
-        plu = str(plu_row[0])
-        row = conn.execute("""
-            SELECT COALESCE(SUM(quantity), 0)
-            FROM sales_daily
-            WHERE plu = ? AND sale_date BETWEEN ? AND ?
-        """, (plu, str(date_from), str(date_to))).fetchone()
-        return int(row[0]) if row else 0
-    except Exception:
-        return None
-    finally:
-        conn.close()
+    return sales_daily_model.get_sales_for_barcode_range(barcode, date_from, date_to)
 
 
-def get_sales_for_barcodes_range(barcodes, date_from, date_to):
+def get_sales_for_barcodes_range(barcodes, date_from, date_to) -> dict:
     """
     Bulk version of get_sales_for_barcode_range.
     Returns {barcode: int|None} — None means no PLU mapping exists.
     """
-    if not barcodes:
-        return {}
-    try:
-        conn = get_connection()
-        ph = ','.join('?' * len(barcodes))
-        plu_rows = conn.execute(
-            f"SELECT barcode, plu FROM plu_barcode_map WHERE barcode IN ({ph})",
-            barcodes
-        ).fetchall()
-        barcode_to_plu = {r['barcode']: str(r['plu']) for r in plu_rows}
-
-        result = {b: None for b in barcodes}
-        if barcode_to_plu:
-            all_plus = list(barcode_to_plu.values())
-            ph2 = ','.join('?' * len(all_plus))
-            sales_rows = conn.execute(f"""
-                SELECT plu, COALESCE(SUM(quantity), 0) AS total
-                FROM sales_daily
-                WHERE plu IN ({ph2}) AND sale_date BETWEEN ? AND ?
-                GROUP BY plu
-            """, all_plus + [str(date_from), str(date_to)]).fetchall()
-            plu_to_qty = {r['plu']: int(r['total']) for r in sales_rows}
-            for barcode, plu in barcode_to_plu.items():
-                result[barcode] = plu_to_qty.get(plu, 0)
-
-        conn.close()
-        return result
-    except Exception:
-        return {b: None for b in barcodes}
+    return sales_daily_model.get_sales_for_barcodes_range(barcodes, date_from, date_to)
 
 
-def get_received_line_count(po_id):
+def get_received_line_count(po_id) -> int:
     """Number of po_lines with at least one unit received."""
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_qty > 0",
-            (po_id,)
-        ).fetchone()
-        return int(row[0]) if row else 0
-    finally:
-        conn.close()
+    return lines_model.get_received_count(po_id)
 
 
-def get_po_with_supplier(po_id):
+def get_po_with_supplier(po_id) -> dict | None:
     """Return the PO row joined with supplier name as a dict, or None."""
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT po.*, s.name AS supplier_name "
-            "FROM purchase_orders po "
-            "JOIN suppliers s ON s.id = po.supplier_id "
-            "WHERE po.id=?",
-            (po_id,)
-        ).fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
+    return po_model.get_with_supplier(po_id)
 
 
-def get_unreceived_lines(po_id):
+def get_unreceived_lines(po_id) -> list[dict]:
     """Lines where received_qty < ordered_qty. Returns list of dicts."""
-    conn = get_connection()
-    try:
-        return [dict(r) for r in conn.execute(
-            "SELECT id, description, ordered_qty, received_qty "
-            "FROM po_lines WHERE po_id=? AND received_qty < ordered_qty",
-            (po_id,)
-        ).fetchall()]
-    finally:
-        conn.close()
+    return lines_model.get_unreceived(po_id)
 
 
-def close_po_force(po_id, unreceived_line_ids, reason):
+def close_po_force(po_id, unreceived_line_ids, reason) -> None:
     """Mark listed lines NOT SUPPLIED and set PO status to RECEIVED atomically."""
-    conn = get_connection()
-    try:
-        note = f"NOT SUPPLIED: {reason}"
-        for line_id in unreceived_line_ids:
-            conn.execute("UPDATE po_lines SET notes=? WHERE id=?", (note, line_id))
-        conn.execute(
-            "UPDATE purchase_orders SET status='RECEIVED', "
-            "received_at=CURRENT_TIMESTAMP WHERE id=?",
-            (po_id,)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    po_model.close_force(po_id, unreceived_line_ids, reason)
 
 
-def close_credit_atomic(po_id, po_number, line_receipts):
+def close_credit_atomic(po_id, po_number, line_receipts) -> None:
     """
     Close a Credit/Return PO atomically.
     line_receipts: list of dicts with line_id, barcode, return_cartons, qty_units.
     SOH is reduced by qty_units for each line; movements are RETURN type.
     """
-    conn = get_connection()
-    try:
-        for r in line_receipts:
-            conn.execute(
-                "UPDATE po_lines SET received_qty=? WHERE id=?",
-                (r['return_cartons'], r['line_id'])
-            )
-            conn.execute("""
-                INSERT INTO stock_on_hand (barcode, quantity)
-                VALUES (?, ?)
-                ON CONFLICT(barcode) DO UPDATE SET
-                    quantity = quantity + excluded.quantity,
-                    last_updated = CURRENT_TIMESTAMP
-            """, (r['barcode'], -r['qty_units']))
-            conn.execute("""
-                INSERT INTO stock_movements
-                    (barcode, movement_type, quantity, reference, notes, created_by)
-                VALUES (?, 'RETURN', ?, ?, '', '')
-            """, (r['barcode'], -r['qty_units'], po_number))
-        conn.execute(
-            "UPDATE purchase_orders SET status='CLOSED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (po_id,)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    po_model.close_credit_atomic(po_id, po_number, line_receipts)
 
 
 def receive_po_atomic(po_id, po_number, line_receipts, final_status,
-                      supplier_invoice_number='', charges=None):
+                      supplier_invoice_number='', charges=None) -> None:
     """
     Apply a full PO receipt in one atomic transaction.
 
@@ -358,67 +115,12 @@ def receive_po_atomic(po_id, po_number, line_receipts, final_status,
 
     Raises on any error; the caller must not catch silently.
     """
-    MOVE_RECEIPT = 'RECEIPT'
-    conn = get_connection()
-    try:
-        for r in line_receipts:
-            fields = ["received_qty=?"]
-            params = [r['new_received_qty']]
-            if r['actual_cost'] is not None:
-                fields.append("actual_cost=?")
-                params.append(r['actual_cost'])
-            if r['unit_cost'] is not None:
-                fields.append("unit_cost=?")
-                params.append(r['unit_cost'])
-            fields.append("is_promo=?")
-            params.append(1 if r['is_promo'] else 0)
-            params.append(r['line_id'])
-            conn.execute(
-                f"UPDATE po_lines SET {', '.join(fields)} WHERE id=?", params
-            )
-
-            conn.execute("""
-                INSERT INTO stock_on_hand (barcode, quantity)
-                VALUES (?, ?)
-                ON CONFLICT(barcode) DO UPDATE SET
-                    quantity = quantity + excluded.quantity,
-                    last_updated = CURRENT_TIMESTAMP
-            """, (r['barcode'], r['qty_units']))
-            conn.execute("""
-                INSERT INTO stock_movements
-                    (barcode, movement_type, quantity, reference, notes, created_by)
-                VALUES (?, ?, ?, ?, '', '')
-            """, (r['barcode'], MOVE_RECEIPT, r['qty_units'], po_number))
-
-            if r['unit_cost'] and r['unit_cost'] > 0 and not r['is_promo']:
-                conn.execute(
-                    "UPDATE products SET cost_price=?, updated_at=CURRENT_TIMESTAMP"
-                    " WHERE barcode=?",
-                    (r['unit_cost'], r['barcode'])
-                )
-
-        conn.execute(
-            "UPDATE purchase_orders SET status=?, supplier_invoice_number=?,"
-            " updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (final_status, supplier_invoice_number, po_id)
-        )
-        if charges:
-            conn.execute("DELETE FROM po_charges WHERE po_id=?", (po_id,))
-            for c in charges:
-                conn.execute(
-                    "INSERT INTO po_charges (po_id, description, tax_rate, amount_inc_tax)"
-                    " VALUES (?,?,?,?)",
-                    (po_id, c['description'], c['tax_rate'], c['amount_inc_tax'])
-                )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    po_model.receive_atomic(po_id, po_number, line_receipts, final_status,
+                            supplier_invoice_number=supplier_invoice_number,
+                            charges=charges)
 
 
-def _days_to_next_delivery(delivery_days_str, from_date=None):
+def _days_to_next_delivery(delivery_days_str, from_date=None) -> tuple[int, date]:
     """
     Given a comma-separated delivery day string ('MON,THU'), return
     (days_ahead, next_delivery_date) for the next upcoming delivery.
@@ -437,7 +139,7 @@ def _days_to_next_delivery(delivery_days_str, from_date=None):
     return min_days, from_date + timedelta(days=min_days)
 
 
-def get_milk_order_recommendations(supplier_id):
+def get_milk_order_recommendations(supplier_id) -> list[dict]:
     """
     Return demand-forecast order quantities for Dairy/Milk products linked to
     supplier_id.  Requires delivery_days to be set on the supplier; returns []
@@ -453,109 +155,81 @@ def get_milk_order_recommendations(supplier_id):
     SAFETY_DAYS  = 2
     SALES_WINDOW = 14
 
-    conn = get_connection()
-    try:
-        sup = conn.execute(
-            "SELECT delivery_days FROM suppliers WHERE id=?", (supplier_id,)
-        ).fetchone()
-        if not sup or not (sup['delivery_days'] or '').strip():
-            return []
+    delivery_days = supplier_model.get_delivery_days(supplier_id)
+    if not delivery_days:
+        return []
 
-        days_ahead, next_delivery = _days_to_next_delivery(sup['delivery_days'])
-        cover_days   = days_ahead + SAFETY_DAYS
-        today        = date.today()
-        window_start = today - timedelta(days=SALES_WINDOW)
+    days_ahead, next_delivery = _days_to_next_delivery(delivery_days)
+    cover_days   = days_ahead + SAFETY_DAYS
+    today        = date.today()
+    window_start = today - timedelta(days=SALES_WINDOW)
 
-        products = conn.execute("""
-            SELECT p.barcode, p.description,
-                   COALESCE(p.cost_price, 0)   AS cost_price,
-                   COALESCE(p.pack_qty, 1)     AS pack_qty,
-                   COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                   COALESCE(soh.quantity, 0)   AS on_hand,
-                   p.supplier_sku
-            FROM products p
-            JOIN product_groups  pg  ON p.group_id       = pg.id
-            JOIN departments     d   ON pg.department_id = d.id
-            LEFT JOIN stock_on_hand soh ON p.barcode     = soh.barcode
-            WHERE p.supplier_id = ?
-              AND p.active = 1
-              AND UPPER(d.name)  = 'DAIRY'
-              AND UPPER(pg.name) = 'MILK'
-            ORDER BY p.description
-        """, (supplier_id,)).fetchall()
+    products = product_queries_model.get_milk_products(supplier_id)
+    if not products:
+        return []
 
-        if not products:
-            return []
+    milk_on_order = lines_model.get_on_order_units([p['barcode'] for p in products])
 
-        milk_on_order = _on_order_units(conn, [p['barcode'] for p in products])
+    barcodes       = [p['barcode'] for p in products]
+    barcode_to_plu = plu_map_model.get_plu_for_barcodes(barcodes)
 
-        barcodes = [p['barcode'] for p in products]
-        ph       = ','.join('?' * len(barcodes))
-        plu_rows = conn.execute(
-            f"SELECT barcode, plu FROM plu_barcode_map WHERE barcode IN ({ph})", barcodes
-        ).fetchall()
-        barcode_to_plu = {r['barcode']: str(r['plu']) for r in plu_rows}
+    # Fallback: use products.sku for any unmapped barcodes
+    for p in products:
+        if p['barcode'] not in barcode_to_plu:
+            sku = product_queries_model.get_sku(p['barcode'])
+            if sku:
+                barcode_to_plu[p['barcode']] = str(sku)
 
-        # Fallback: use products.sku for any unmapped barcodes
-        for p in products:
-            if p['barcode'] not in barcode_to_plu:
-                row = conn.execute(
-                    "SELECT sku FROM products WHERE barcode=?", (p['barcode'],)
-                ).fetchone()
-                if row and row['sku']:
-                    barcode_to_plu[p['barcode']] = str(row['sku'])
+    plu_sales: dict[str, float] = {}
+    all_plus  = list(barcode_to_plu.values())
+    if all_plus:
+        sales_map = sales_daily_model.get_sales_for_barcodes_range(barcodes, window_start, today)
+        # Build plu→total from sales for the window using the sales_daily model directly
+        # We need plu-level aggregation; use get_sales_for_barcodes_range indirectly via
+        # a direct PLU sales query through the model
+        # Rebuild: map each barcode result back to plu
+        for barcode, plu in barcode_to_plu.items():
+            qty = sales_map.get(barcode)
+            if qty is not None:
+                plu_sales[plu] = plu_sales.get(plu, 0.0) + float(qty)
 
-        plu_sales = {}
-        all_plus  = list(barcode_to_plu.values())
-        if all_plus:
-            ph2 = ','.join('?' * len(all_plus))
-            for row in conn.execute(f"""
-                SELECT plu, COALESCE(SUM(quantity), 0) AS total
-                FROM sales_daily
-                WHERE plu IN ({ph2}) AND sale_date BETWEEN ? AND ?
-                GROUP BY plu
-            """, all_plus + [str(window_start), str(today)]).fetchall():
-                plu_sales[row['plu']] = float(row['total'])
-
-        recs = []
-        for p in products:
-            plu              = barcode_to_plu.get(p['barcode'])
-            total_14day      = plu_sales.get(plu, 0.0) if plu else 0.0
-            avg_daily        = total_14day / SALES_WINDOW
-            on_hand          = float(p['on_hand'])
-            on_order         = milk_on_order.get(p['barcode'], 0.0)
-            effective_stock  = on_hand + on_order
-            needed_units     = max(0.0, avg_daily * cover_days - effective_stock)
-            pack_qty         = max(1, int(p['pack_qty']))
-            cartons          = max(1, math.ceil(needed_units / pack_qty))
-            recs.append({
-                'barcode':          p['barcode'],
-                'description':      p['description'],
-                'cost_price':       p['cost_price'],
-                'pack_qty':         pack_qty,
-                'pack_unit':        p['pack_unit'],
-                'on_hand':          on_hand,
-                'on_order':         on_order,
-                'effective_stock':  effective_stock,
-                'supplier_sku':     p['supplier_sku'],
-                'cartons':          cartons,
-                'avg_daily':        round(avg_daily, 1),
-                'cover_days':       cover_days,
-                'days_to_delivery': days_ahead,
-                'next_delivery':    next_delivery,
-                'has_sales_data':   plu is not None and total_14day > 0,
-            })
-        return recs
-    finally:
-        conn.close()
+    recs = []
+    for p in products:
+        plu              = barcode_to_plu.get(p['barcode'])
+        total_14day      = plu_sales.get(plu, 0.0) if plu else 0.0
+        avg_daily        = total_14day / SALES_WINDOW
+        on_hand          = float(p['on_hand'])
+        on_order         = milk_on_order.get(p['barcode'], 0.0)
+        effective_stock  = on_hand + on_order
+        needed_units     = max(0.0, avg_daily * cover_days - effective_stock)
+        pack_qty         = max(1, int(p['pack_qty']))
+        cartons          = max(1, math.ceil(needed_units / pack_qty))
+        recs.append({
+            'barcode':          p['barcode'],
+            'description':      p['description'],
+            'cost_price':       p['cost_price'],
+            'pack_qty':         pack_qty,
+            'pack_unit':        p['pack_unit'],
+            'on_hand':          on_hand,
+            'on_order':         on_order,
+            'effective_stock':  effective_stock,
+            'supplier_sku':     p['supplier_sku'],
+            'cartons':          cartons,
+            'avg_daily':        round(avg_daily, 1),
+            'cover_days':       cover_days,
+            'days_to_delivery': days_ahead,
+            'next_delivery':    next_delivery,
+            'has_sales_data':   plu is not None and total_14day > 0,
+        })
+    return recs
 
 
-def cartons_needed(reorder_qty, pack_qty):
+def cartons_needed(reorder_qty, pack_qty) -> int:
     pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
     return max(1, math.ceil(reorder_qty / pack_qty))
 
 
-def calc_order_units(reorder_max, reorder_qty, on_hand):
+def calc_order_units(reorder_max, reorder_qty, on_hand) -> int:
     reorder_max = reorder_max or 0
     on_hand = on_hand or 0
     if reorder_max > 0:
@@ -564,14 +238,14 @@ def calc_order_units(reorder_max, reorder_qty, on_hand):
     return max(1, int(reorder_qty or 1))
 
 
-def carton_note(pack_qty, pack_unit, barcode):
+def carton_note(pack_qty, pack_unit, barcode) -> str:
     pack_qty = pack_qty if pack_qty and pack_qty > 0 else 1
     return f"{pack_qty} × {pack_unit}  |  barcode: {barcode}"
 
 
 # ── PDF / Email / CSV export ──────────────────────────────────────────────────
 
-def _po_pdf_path(po):
+def _po_pdf_path(po) -> str:
     """Return the full output path for a PO PDF, creating the directory if needed."""
     import os
     import models.settings as settings_model
@@ -583,7 +257,7 @@ def _po_pdf_path(po):
     return os.path.join(folder, filename)
 
 
-def generate_po_pdf_to_disk(po_id):
+def generate_po_pdf_to_disk(po_id) -> str:
     """Generate the PO PDF to the configured folder. Return the full path."""
     import models.purchase_order as po_model
     from utils.po_pdf import generate_po_pdf
@@ -593,7 +267,7 @@ def generate_po_pdf_to_disk(po_id):
     return path
 
 
-def send_po_email(po_id, supplier_email):
+def send_po_email(po_id, supplier_email) -> str:
     """Generate PDF, email to supplier, and mark PO as SENT. Return the PDF path."""
     import logging
     import models.purchase_order as po_model
@@ -606,7 +280,7 @@ def send_po_email(po_id, supplier_email):
     return path
 
 
-def write_po_csv(po_id, output_path):
+def write_po_csv(po_id, output_path) -> None:
     """Write a CSV of PO lines to output_path."""
     import csv
     import models.purchase_order as po_model
@@ -646,7 +320,7 @@ def write_po_csv(po_id, output_path):
 
 # ── Recommendation helpers ────────────────────────────────────────────────────
 
-def auto_populate_po_lines(po_id, supplier_id):
+def auto_populate_po_lines(po_id, supplier_id) -> str:
     """
     Populate a new PO with milk-forecast, reorder-point, and auto-reorder lines.
     Returns a banner text string summarising what was added.
@@ -718,7 +392,7 @@ def auto_populate_po_lines(po_id, supplier_id):
     return "  |  ".join(banner_parts)
 
 
-def reload_reorder_recommendations(po_id, supplier_id):
+def reload_reorder_recommendations(po_id, supplier_id) -> int | None:
     """
     Add new reorder recommendations to an existing PO.
     Returns None if no products are at reorder point, 0 if all are already on the PO,
@@ -746,7 +420,7 @@ def reload_reorder_recommendations(po_id, supplier_id):
 
 # ── AddLine product lookup ────────────────────────────────────────────────────
 
-def lookup_product_for_po(barcode, po_id, supplier_id, unit_mode):
+def lookup_product_for_po(barcode, po_id, supplier_id, unit_mode) -> dict | None:
     """
     Validate a barcode for addition to a PO line and calculate a suggested quantity.
 
@@ -803,73 +477,85 @@ def lookup_product_for_po(barcode, po_id, supplier_id, unit_mode):
 
 # ── Purchase order model wrappers ─────────────────────────────────────────────
 
-def get_all_pos(status=None, archived=False):
+def get_all_pos(status=None, archived=False) -> list[dict]:
     return po_model.get_all(status=status, archived=archived)
 
 
-def get_po_by_id(po_id):
+def get_po_by_id(po_id) -> dict | None:
     return po_model.get_by_id(po_id)
 
 
-def create_po(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO'):
+def create_po(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO') -> int:
     return po_model.create(supplier_id, delivery_date=delivery_date,
                            notes=notes, created_by=created_by, po_type=po_type)
 
 
-def update_po_status(po_id, status):
+def update_po_status(po_id, status) -> None:
     po_model.update_status(po_id, status)
 
 
-def delete_draft_po(po_id):
+def delete_draft_po(po_id) -> None:
     po_model.cancel(po_id)
 
 
-def cancel_po(po_id):
+def cancel_po(po_id) -> None:
     po_model.cancel(po_id)
 
 
-def cleanup_old_pos():
+def cleanup_old_pos() -> int:
     return po_model.cleanup_old_pos()
 
 
-def reverse_po(po_id, reversed_by=''):
+def reverse_po(po_id, reversed_by='') -> None:
     po_model.reverse(po_id, reversed_by=reversed_by)
 
 
 # ── PO lines model wrappers ───────────────────────────────────────────────────
 
-def get_po_lines(po_id):
+def get_po_lines(po_id) -> list[dict]:
     return lines_model.get_by_po(po_id)
 
 
-def add_po_line(po_id, barcode, description, ordered_qty, unit_cost=0, notes='', pack_qty=1):
+def _validate_po_line_qty_cost(ordered_qty, unit_cost):
+    from utils.validators import positive_number
+    try:
+        if float(ordered_qty) <= 0:
+            raise ValueError("Ordered quantity must be greater than zero")
+    except (TypeError, ValueError) as e:
+        raise ValueError("Ordered quantity must be greater than zero") from e
+    positive_number(unit_cost, "Unit cost")
+
+
+def add_po_line(po_id, barcode, description, ordered_qty, unit_cost=0, notes='', pack_qty=1) -> None:
+    _validate_po_line_qty_cost(ordered_qty, unit_cost)
     lines_model.add(po_id, barcode, description, ordered_qty,
                     unit_cost=unit_cost, notes=notes, pack_qty=pack_qty)
 
 
-def update_po_line(line_id, ordered_qty, unit_cost, notes):
+def update_po_line(line_id, ordered_qty, unit_cost, notes) -> None:
+    _validate_po_line_qty_cost(ordered_qty, unit_cost)
     lines_model.update(line_id, ordered_qty, unit_cost, notes)
 
 
-def delete_po_line(line_id):
+def delete_po_line(line_id) -> None:
     lines_model.delete(line_id)
 
 
-def add_po_note_line(po_id, text):
-    return lines_model.add_note(po_id, text)
+def add_po_note_line(po_id, text) -> None:
+    lines_model.add_note(po_id, text)
 
 
-def renumber_po_lines(po_id, ordered_ids):
+def renumber_po_lines(po_id, ordered_ids) -> None:
     lines_model.renumber_sort_order(po_id, ordered_ids)
 
 
 # ── PO charges model wrappers ─────────────────────────────────────────────────
 
-def get_po_charges(po_id):
+def get_po_charges(po_id) -> list[dict]:
     return charges_model.get_by_po(po_id)
 
 
 # ── Settings model wrapper ────────────────────────────────────────────────────
 
-def get_setting(key, default=''):
+def get_setting(key, default='') -> str:
     return settings_model.get_setting(key, default=default)

@@ -6,13 +6,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.error_dialog import show_error
+from views.base_view import BaseView
 import controllers.stocktake_controller as stocktake_ctrl
 import config.styles as styles
 import csv
 import os
 
 
-class VarianceReport(QWidget):
+class VarianceReport(BaseView):
     def __init__(self, session_id, session_label, on_apply=None):
         super().__init__()
         self.session_id = session_id
@@ -21,7 +22,7 @@ class VarianceReport(QWidget):
         self.setWindowTitle(f"Variance Report — {session_label}")
         self.setMinimumSize(1100, 700)
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)

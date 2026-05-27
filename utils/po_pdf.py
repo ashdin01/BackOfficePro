@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from utils.calculations import gst_on_ex
+from utils.po_type_helpers import po_unit_mode, po_is_return, po_display_qty, fmt_money
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
@@ -25,7 +26,7 @@ def _get_settings():
     from database.connection import get_connection
     conn = get_connection()
     rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    conn.close()
+    conn.release()
     return {r[0]: (r[1] or "") for r in rows}
 
 
@@ -83,14 +84,17 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         JOIN suppliers s ON po.supplier_id = s.id
         WHERE po.id = ?
     """, (po_id,)).fetchone()
-    conn.close()
+    conn.release()
 
     if not po:
         raise ValueError(f"PO {po_id} not found")
 
-    settings = _get_settings()
-    st = _styles()
-    lines = lines_model.get_by_po(po_id)
+    settings  = _get_settings()
+    st        = _styles()
+    lines     = lines_model.get_by_po(po_id)
+    _po_type  = po["po_type"] or "PO"
+    unit_mode = po_unit_mode(_po_type)
+    is_return = po_is_return(_po_type)
 
     doc = SimpleDocTemplate(
         output_path,
@@ -172,11 +176,12 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     # ── Line items table ──────────────────────────────────────────────────────
     col_widths = [W*0.36, W*0.14, W*0.10, W*0.16, W*0.12, W*0.12]
 
+    qty_col_hdr = "Return Qty" if is_return else "Order Qty"
     tbl_data = [[
         Paragraph("Description",  st["hdr"]),
         Paragraph("Supplier SKU", st["hdr"]),
         Paragraph("Pack",         st["hdr"]),
-        Paragraph("Order Qty",    st["hdr_ctr"]),
+        Paragraph(qty_col_hdr,    st["hdr_ctr"]),
         Paragraph("Unit Cost",    st["hdr_right"]),
         Paragraph("Line Total",   st["hdr_right"]),
     ]]
@@ -191,7 +196,7 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
                 f'<i><font color="#888888">📝  {line["description"]}</font></i>',
                 st["body"]
             )
-            tbl_data.append([note_para, "", "", "", "", "", ""])
+            tbl_data.append([note_para, "", "", "", "", ""])
             continue
 
         product   = product_model.get_by_barcode(line["barcode"])
@@ -200,17 +205,17 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         sup_sku   = (product["supplier_sku"] or "") if product else ""
         tax_rate  = float(product["tax_rate"])      if product and product["tax_rate"]  else 0.0
 
+        total_units = po_display_qty(_po_type, int(line["ordered_qty"]), pack_qty)
         cartons     = int(line["ordered_qty"])
-        total_units = cartons * pack_qty
 
         raw_cost = line["unit_cost"]
         try:
             unit_cost      = float(raw_cost)
             line_total     = total_units * unit_cost
             fixed_total   += line_total
-            gst_total     += gst_on_ex(line_total, tax_rate)
+            gst_total     += gst_on_ex(abs(line_total), tax_rate) * (-1 if is_return else 1)
             cost_str       = f"${unit_cost:.2f}"
-            total_str      = f"${line_total:.2f}"
+            total_str      = fmt_money(line_total)
         except (TypeError, ValueError):
             cost_str  = str(raw_cost) if raw_cost else "—"
             total_str = "—"
@@ -221,7 +226,9 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
             st["body"]
         )
         pack_str = f"{pack_qty} × {pack_unit}" if pack_qty > 1 else pack_unit
-        if pack_qty > 1:
+        if unit_mode:
+            qty_str = f"{total_units} units"
+        elif pack_qty > 1:
             qty_str = f"{cartons} {'ctn' if cartons == 1 else 'ctns'}\n({total_units} units)"
         else:
             qty_str = f"{total_units} units"
@@ -260,13 +267,14 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     gst         = round(gst_total, 2)
     grand_total = round(fixed_total + gst_total, 2)
 
+    grand_label = "CREDIT TOTAL:" if is_return else "ORDER TOTAL:"
     totals_tbl = Table([
         [Paragraph("Subtotal (ex GST):", st["total_label"]),
-         Paragraph(f"${subtotal:.2f}",   st["total_value"])],
+         Paragraph(fmt_money(subtotal),       st["total_value"])],
         [Paragraph("GST (10%):",         st["total_label"]),
-         Paragraph(f"${gst:.2f}",        st["total_value"])],
-        [Paragraph("ORDER TOTAL:",       st["grand_label"]),
-         Paragraph(f"${grand_total:.2f}", st["grand_value"])],
+         Paragraph(fmt_money(gst),            st["total_value"])],
+        [Paragraph(grand_label,          st["grand_label"]),
+         Paragraph(fmt_money(grand_total),    st["grand_value"])],
     ], colWidths=[W * 0.82, W * 0.18])
     totals_tbl.setStyle(TableStyle([
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),

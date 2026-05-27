@@ -8,6 +8,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 
 import controllers.ar_controller as ar_ctrl
+from utils.error_dialog import show_error
+from views.base_view import BaseView
 
 _GREEN  = QColor('#c8e6c9')
 _YELLOW = QColor('#fff9c4')
@@ -15,7 +17,7 @@ _GREY   = QColor('#eeeeee')
 _RED    = QColor('#ffcdd2')
 
 
-class ReconSession(QWidget):
+class ReconSession(BaseView):
     def __init__(self, batch: str, on_done=None):
         super().__init__()
         self._batch   = batch
@@ -25,7 +27,7 @@ class ReconSession(QWidget):
         self.setWindowTitle(f"Reconcile — {batch}")
         self.resize(1200, 680)
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -246,24 +248,24 @@ class ReconSession(QWidget):
             )
             ar_ctrl.set_recon_matched(t['id'], inv_id, payment_id)
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not record payment.", e)
             return
 
-        self._load()
+        self.load()
 
     def _ignore(self):
         t = self._selected_txn()
         if not t or t['status'] != 'UNMATCHED':
             return
         ar_ctrl.set_recon_ignored(t['id'])
-        self._load()
+        self.load()
 
     def _unmatch(self):
         t = self._selected_txn()
         if not t or t['status'] not in ('MATCHED', 'IGNORED'):
             return
         ar_ctrl.unmatch_recon_transaction(t['id'])
-        self._load()
+        self.load()
 
     def _finish(self):
         unmatched = sum(1 for t in self._txns if t['status'] == 'UNMATCHED')

@@ -1,4 +1,6 @@
 """CRUD operations for ar_payments."""
+import uuid
+
 from database.connection import get_connection
 
 
@@ -10,7 +12,7 @@ def get_by_invoice(invoice_id):
             (invoice_id,)
         ).fetchall()]
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_customer(customer_id):
@@ -24,24 +26,29 @@ def get_by_customer(customer_id):
             ORDER BY p.payment_date DESC
         """, (customer_id,)).fetchall()]
     finally:
-        conn.close()
+        conn.release()
 
 
-def add(invoice_id, customer_id, payment_date, amount,
-        method='EFT', reference='', notes=''):
+def create(invoice_id, customer_id, payment_date, amount,
+        method='EFT', reference='', notes='', payment_ref=None):
+    if payment_ref is None:
+        payment_ref = str(uuid.uuid4())
     conn = get_connection()
     try:
         cur = conn.execute("""
             INSERT INTO ar_payments
                 (invoice_id, customer_id, payment_date, amount,
-                 method, reference, notes)
-            VALUES (?,?,?,?,?,?,?)
+                 method, reference, notes, payment_ref)
+            VALUES (?,?,?,?,?,?,?,?)
         """, (invoice_id, customer_id, payment_date, amount,
-              method, reference, notes))
+              method, reference, notes, payment_ref))
         conn.commit()
         return cur.lastrowid
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def total_paid(invoice_id):
@@ -53,4 +60,4 @@ def total_paid(invoice_id):
         ).fetchone()
         return float(row['total']) if row else 0.0
     finally:
-        conn.close()
+        conn.release()

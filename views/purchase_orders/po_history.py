@@ -7,6 +7,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QShortcut, QKeySequence
 import csv, os
 from utils.error_dialog import show_error
+from utils.po_type_helpers import fmt_money
+from views.purchase_orders.po_history_data import compute_po_history_data
 import config.styles as styles
 import controllers.purchase_order_controller as po_ctrl
 import controllers.product_controller as product_ctrl
@@ -181,82 +183,44 @@ class POHistory(QWidget):
         layout.addLayout(btns)
 
     def _load_lines(self, po=None):
-        if po is None:
-            po = po_ctrl.get_po_by_id(self.po_id)
+        data = compute_po_history_data(self.po_id, po=po)
 
-        lines   = po_ctrl.get_po_lines(self.po_id)
-        charges = po_ctrl.get_po_charges(self.po_id)
+        self.table.setRowCount(len(data.lines))
+        for r, ld in enumerate(data.lines):
+            recv_colour  = styles.CLR_SUCCESS_ALT if ld.recv_units != 0 else None
+            promo_colour = styles.CLR_AMBER if ld.is_promo else None
+            desc = ld.description + ("  ★ promo" if ld.is_promo else "")
 
-        self.table.setRowCount(len(lines))
-        total_ex  = 0.0
-        total_gst = 0.0
-
-        for r, line in enumerate(lines):
-            product   = product_ctrl.get_product_by_barcode(line['barcode'])
-            pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
-            pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-            tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
-            pack_str  = f"{pack_qty} × {pack_unit}" if pack_qty > 1 else pack_unit
-
-            cost          = float(line['actual_cost'] or line['unit_cost'] or 0)
-            recv_cartons  = int(line['received_qty'] or 0)
-            recv_units    = recv_cartons * pack_qty
-            line_ex       = round(recv_units * cost, 2)
-            line_gst      = round(line_ex * tax_rate / 100, 2)
-            line_inc      = round(line_ex + line_gst, 2)
-            total_ex     += line_ex
-            total_gst    += line_gst
-
-            recv_colour = styles.CLR_SUCCESS_ALT if recv_cartons > 0 else None
-            promo_colour = styles.CLR_AMBER if line['is_promo'] else None
-
-            self.table.setItem(r, 0, _item(line['barcode'], _CENTER))
-            desc = line['description']
-            if line['is_promo']:
-                desc += "  ★ promo"
+            self.table.setItem(r, 0, _item(ld.barcode, _CENTER))
             self.table.setItem(r, 1, _item(desc, colour=promo_colour))
-            self.table.setItem(r, 2, _item(pack_str, _CENTER))
-            self.table.setItem(r, 3, _item(str(int(line['ordered_qty'])), _CENTER))
-            self.table.setItem(r, 4, _item(str(recv_cartons), _CENTER,
-                                           colour=recv_colour))
-            self.table.setItem(r, 5, _item(f"${cost:.4f}", _RIGHT))
+            self.table.setItem(r, 2, _item(ld.pack_str, _CENTER))
+            self.table.setItem(r, 3, _item(str(ld.ordered_disp), _CENTER))
+            self.table.setItem(r, 4, _item(str(ld.recv_units), _CENTER, colour=recv_colour))
+            self.table.setItem(r, 5, _item(f"${ld.cost:.4f}", _RIGHT))
             self.table.setItem(r, 6, _item(
-                f"{tax_rate:.0f}%" if tax_rate > 0 else "Free", _CENTER,
-                colour=styles.CLR_SUCCESS_ALT if tax_rate > 0 else '#555'))
-            self.table.setItem(r, 7, _item(f"${line_ex:.2f}", _RIGHT))
-            self.table.setItem(r, 8, _item(f"${line_inc:.2f}", _RIGHT,
-                                           colour=styles.CLR_SUCCESS_ALT if tax_rate > 0 else None))
+                f"{ld.tax_rate:.0f}%" if ld.tax_rate > 0 else "Free", _CENTER,
+                colour=styles.CLR_SUCCESS_ALT if ld.tax_rate > 0 else '#555'))
+            self.table.setItem(r, 7, _item(fmt_money(ld.line_ex), _RIGHT))
+            self.table.setItem(r, 8, _item(fmt_money(ld.line_inc), _RIGHT,
+                                           colour=styles.CLR_SUCCESS_ALT if ld.tax_rate > 0 else None))
 
-        # Charges
-        charge_ex  = 0.0
-        charge_gst = 0.0
         if self.charges_table is not None:
-            self.charges_table.setRowCount(len(charges))
-            for r, c in enumerate(charges):
-                amt_inc = float(c['amount_inc_tax'])
-                tax_r   = float(c['tax_rate'])
-                amt_ex  = round(amt_inc / (1 + tax_r / 100), 2) if tax_r > 0 else amt_inc
-                gst     = round(amt_inc - amt_ex, 2)
-                charge_ex  += amt_ex
-                charge_gst += gst
-
-                self.charges_table.setItem(r, 0, _item(c['description']))
+            self.charges_table.setRowCount(len(data.charges))
+            for r, cd in enumerate(data.charges):
+                self.charges_table.setItem(r, 0, _item(cd.description))
                 self.charges_table.setItem(r, 1, _item(
-                    f"{tax_r:.0f}%" if tax_r > 0 else "GST Free", _CENTER,
-                    colour=styles.CLR_SUCCESS_ALT if tax_r > 0 else '#555'))
-                self.charges_table.setItem(r, 2, _item(f"${amt_ex:.2f}", _RIGHT))
-                self.charges_table.setItem(r, 3, _item(f"${amt_inc:.2f}", _RIGHT,
-                                                        colour=styles.CLR_SUCCESS_ALT if tax_r > 0 else None))
+                    f"{cd.tax_r:.0f}%" if cd.tax_r > 0 else "GST Free", _CENTER,
+                    colour=styles.CLR_SUCCESS_ALT if cd.tax_r > 0 else '#555'))
+                self.charges_table.setItem(r, 2, _item(f"${cd.amt_ex:.2f}", _RIGHT))
+                self.charges_table.setItem(r, 3, _item(f"${cd.amt_inc:.2f}", _RIGHT,
+                                                        colour=styles.CLR_SUCCESS_ALT if cd.tax_r > 0 else None))
 
-        grand_ex  = round(total_ex  + charge_ex,  2)
-        grand_gst = round(total_gst + charge_gst, 2)
-        grand_inc = round(grand_ex  + grand_gst,  2)
-
+        total_label = "Credit Total" if data.is_return else "Invoice Total"
         self.totals_lbl.setText(
-            f"Subtotal ex. GST: <b>${grand_ex:.2f}</b>"
-            f"&nbsp;&nbsp;&nbsp;GST: <b>${grand_gst:.2f}</b>"
-            f"&nbsp;&nbsp;&nbsp;Invoice Total inc. GST: "
-            f"<b style='color:{styles.CLR_SUCCESS_ALT}; font-size:14px;'>${grand_inc:.2f}</b>"
+            f"Subtotal ex. GST: <b>{fmt_money(data.grand_ex)}</b>"
+            f"&nbsp;&nbsp;&nbsp;GST: <b>{fmt_money(data.grand_gst)}</b>"
+            f"&nbsp;&nbsp;&nbsp;{total_label} inc. GST: "
+            f"<b style='color:{styles.CLR_SUCCESS_ALT}; font-size:14px;'>{fmt_money(data.grand_inc)}</b>"
         )
 
     def _export_csv(self):
@@ -270,16 +234,11 @@ class POHistory(QWidget):
         if not path:
             return
 
-        lines   = po_ctrl.get_po_lines(self.po_id)
-        charges = po_ctrl.get_po_charges(self.po_id)
-
-        total_ex  = 0.0
-        total_gst = 0.0
+        data = compute_po_history_data(self.po_id, po=po)
 
         with open(path, 'w', newline='', encoding='utf-8') as f:
             w = csv.writer(f)
 
-            # Header block
             w.writerow(["PO Number",        po['po_number']])
             w.writerow(["Supplier",         po['supplier_name']])
             w.writerow(["Status",           po['status']])
@@ -296,74 +255,53 @@ class POHistory(QWidget):
                     w.writerow(["Account Number",    bk_acct])
             w.writerow([])
 
-            # Lines
             w.writerow([
+                "Barcode", "Description", "Pack Size",
+                "Ordered (units)", "Received (units)",
+                "Cost ex. GST", "Tax %", "Promo",
+                "Line Total ex. GST", "Line Total inc. GST",
+            ] if data.unit_mode else [
                 "Barcode", "Description", "Pack Size",
                 "Ordered (cartons)", "Received (cartons)", "Received (units)",
                 "Cost ex. GST", "Tax %", "Promo",
                 "Line Total ex. GST", "Line Total inc. GST",
             ])
 
-            for line in lines:
-                product   = product_ctrl.get_product_by_barcode(line['barcode'])
-                pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
-                pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-                tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
-                pack_str  = f"{pack_qty} x {pack_unit}" if pack_qty > 1 else pack_unit
+            for ld in data.lines:
+                if data.unit_mode:
+                    w.writerow([
+                        ld.barcode, ld.description, ld.pack_str,
+                        ld.ordered_disp, ld.recv_units,
+                        f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
+                        "Yes" if ld.is_promo else "No",
+                        f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
+                    ])
+                else:
+                    w.writerow([
+                        ld.barcode, ld.description, ld.pack_str,
+                        ld.ordered_qty_raw, ld.recv_raw, ld.recv_units,
+                        f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
+                        "Yes" if ld.is_promo else "No",
+                        f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
+                    ])
 
-                cost         = float(line['actual_cost'] or line['unit_cost'] or 0)
-                recv_cartons = int(line['received_qty'] or 0)
-                recv_units   = recv_cartons * pack_qty
-                line_ex      = round(recv_units * cost, 2)
-                line_gst     = round(line_ex * tax_rate / 100, 2)
-                line_inc     = round(line_ex + line_gst, 2)
-                total_ex    += line_ex
-                total_gst   += line_gst
-
-                w.writerow([
-                    line['barcode'],
-                    line['description'],
-                    pack_str,
-                    int(line['ordered_qty']),
-                    recv_cartons,
-                    recv_units,
-                    f"{cost:.4f}",
-                    f"{tax_rate:.0f}",
-                    "Yes" if line['is_promo'] else "No",
-                    f"{line_ex:.2f}",
-                    f"{line_inc:.2f}",
-                ])
-
-            # Charges
-            charge_ex  = 0.0
-            charge_gst = 0.0
-            if charges:
+            if data.charges:
                 w.writerow([])
                 w.writerow(["Additional Charges"])
                 w.writerow(["Description", "Tax %", "Amount ex. GST", "Amount inc. GST"])
-                for c in charges:
-                    amt_inc = float(c['amount_inc_tax'])
-                    tax_r   = float(c['tax_rate'])
-                    amt_ex  = round(amt_inc / (1 + tax_r / 100), 2) if tax_r > 0 else amt_inc
-                    gst     = round(amt_inc - amt_ex, 2)
-                    charge_ex  += amt_ex
-                    charge_gst += gst
+                for cd in data.charges:
                     w.writerow([
-                        c['description'],
-                        f"{tax_r:.0f}",
-                        f"{amt_ex:.2f}",
-                        f"{amt_inc:.2f}",
+                        cd.description,
+                        f"{cd.tax_r:.0f}",
+                        f"{cd.amt_ex:.2f}",
+                        f"{cd.amt_inc:.2f}",
                     ])
 
-            # Totals
-            grand_ex  = round(total_ex  + charge_ex,  2)
-            grand_gst = round(total_gst + charge_gst, 2)
-            grand_inc = round(grand_ex  + grand_gst,  2)
-
+            total_label = "Credit Total inc. GST" if data.is_return else "Total inc. GST"
             w.writerow([])
-            w.writerow(["Subtotal ex. GST", f"{grand_ex:.2f}"])
-            w.writerow(["GST",              f"{grand_gst:.2f}"])
-            w.writerow(["Total inc. GST",   f"{grand_inc:.2f}"])
+            w.writerow(["Subtotal ex. GST", f"{data.grand_ex:.2f}"])
+            w.writerow(["GST",              f"{data.grand_gst:.2f}"])
+            w.writerow([total_label,        f"{data.grand_inc:.2f}"])
 
         import subprocess, sys
         if sys.platform == 'win32':
@@ -383,9 +321,8 @@ class POHistory(QWidget):
             SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
         )
 
-        po      = po_ctrl.get_po_by_id(self.po_id)
-        lines   = po_ctrl.get_po_lines(self.po_id)
-        charges = po_ctrl.get_po_charges(self.po_id)
+        po   = po_ctrl.get_po_by_id(self.po_id)
+        data = compute_po_history_data(self.po_id, po=po)
 
         default_name = f"{po['po_number'].replace('/', '-')}_receipt.pdf"
         path, _ = QFileDialog.getSaveFileName(
@@ -396,7 +333,6 @@ class POHistory(QWidget):
         if not path:
             return
 
-        # ── Styles ───────────────────────────────────────────────────────────
         C_BLACK  = colors.HexColor("#111111")
         C_GREY   = colors.HexColor("#555555")
         C_LGREY  = colors.HexColor("#f2f2f2")
@@ -415,47 +351,26 @@ class POHistory(QWidget):
         )
         story = []
 
-        # ── Header ───────────────────────────────────────────────────────────
-        story.append(Paragraph(f"Purchase Order Receipt", _s(16, bold=True)))
+        from config.constants import PO_DOC_TITLES
+        _doc_title = PO_DOC_TITLES.get(data.po_type, 'PURCHASE ORDER').title()
+        story.append(Paragraph(f"{_doc_title} Receipt", _s(16, bold=True)))
         story.append(Spacer(1, 4*mm))
 
         sup_pdf = supplier_ctrl.get_by_id(po['supplier_id'])
         bk_name_pdf = (sup_pdf['bank_account_name']   or '') if sup_pdf else ''
         bk_bsb_pdf  = (sup_pdf['bank_bsb']            or '') if sup_pdf else ''
         bk_acct_pdf = (sup_pdf['bank_account_number'] or '') if sup_pdf else ''
+        inv_pdf     = po['supplier_invoice_number'] or "—"
 
-        inv_pdf = po['supplier_invoice_number'] or "—"
-
-        # Pre-calculate totals so they can appear in the header block
-        _t_ex = _t_gst = 0.0
-        for _ln in lines:
-            _prod  = product_ctrl.get_product_by_barcode(_ln['barcode'])
-            _pack  = int(_prod['pack_qty']) if _prod and _prod['pack_qty'] else 1
-            _tax   = float(_prod['tax_rate']) if _prod and _prod['tax_rate'] else 0.0
-            _cost  = float(_ln['actual_cost'] or _ln['unit_cost'] or 0)
-            _units = int(_ln['received_qty'] or 0) * _pack
-            _t_ex  += round(_units * _cost, 2)
-            _t_gst += round(_units * _cost * _tax / 100, 2)
-        for _c in charges:
-            _inc   = float(_c['amount_inc_tax'])
-            _tr    = float(_c['tax_rate'])
-            _ex    = round(_inc / (1 + _tr / 100), 2) if _tr > 0 else _inc
-            _t_ex  += _ex
-            _t_gst += round(_inc - _ex, 2)
-        grand_ex  = round(_t_ex, 2)
-        grand_gst = round(_t_gst, 2)
-        grand_inc = round(grand_ex + grand_gst, 2)
-
-        # Right column: Supplier → Received Date → Supplier Invoice → totals
+        total_label = "Credit Total inc. GST:" if data.is_return else "Total inc. GST:"
         right_col = [
             ("Supplier:",         po['supplier_name']),
             ("Received Date:",    po['delivery_date'] or "—"),
             ("Supplier Invoice:", inv_pdf),
-            ("Subtotal ex. GST:", f"${grand_ex:.2f}"),
-            ("GST:",              f"${grand_gst:.2f}"),
-            ("Total inc. GST:",   f"${grand_inc:.2f}"),
+            ("Subtotal ex. GST:", fmt_money(data.grand_ex)),
+            ("GST:",              fmt_money(data.grand_gst)),
+            (total_label,         fmt_money(data.grand_inc)),
         ]
-        # Left column: PO Number, Status, then bank details if present
         left_col = [
             ("PO Number:", po['po_number']),
             ("Status:",    po['status']),
@@ -470,7 +385,6 @@ class POHistory(QWidget):
             left_col.append(("", ""))
 
         meta = [[l[0], l[1], r[0], r[1]] for l, r in zip(left_col, right_col)]
-
         meta_tbl = Table(meta, colWidths=[35*mm, 70*mm, 35*mm, 70*mm])
         meta_tbl.setStyle(TableStyle([
             ("FONTNAME",      (0,0),(-1,-1), "Helvetica"),
@@ -489,7 +403,6 @@ class POHistory(QWidget):
         story.append(HRFlowable(width="100%", thickness=0.5, color=C_BORDER))
         story.append(Spacer(1, 3*mm))
 
-        # ── Lines table ──────────────────────────────────────────────────────
         story.append(Paragraph("Order Lines", _s(10, bold=True)))
         story.append(Spacer(1, 2*mm))
 
@@ -501,76 +414,55 @@ class POHistory(QWidget):
         ]
         tbl_data = [[Paragraph(h, _s(8, bold=True, align=TA_CENTER)) for h in hdrs]]
 
-        for i, line in enumerate(lines):
-            product   = product_ctrl.get_product_by_barcode(line['barcode'])
-            pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
-            pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-            tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
-            pack_str  = f"{pack_qty}×{pack_unit}" if pack_qty > 1 else pack_unit
-
-            cost         = float(line['actual_cost'] or line['unit_cost'] or 0)
-            recv_cartons = int(line['received_qty'] or 0)
-            recv_units   = recv_cartons * pack_qty
-            line_ex      = round(recv_units * cost, 2)
-            line_gst     = round(line_ex * tax_rate / 100, 2)
-            line_inc     = round(line_ex + line_gst, 2)
-
-            bg = C_LGREY if i % 2 == 1 else colors.white
+        for ld in data.lines:
             tbl_data.append([
-                Paragraph(line['barcode'],              _s(8, align=TA_CENTER)),
-                Paragraph(line['description'],          _s(8)),
-                Paragraph(pack_str,                     _s(8, align=TA_CENTER)),
-                Paragraph(str(int(line['ordered_qty'])),_s(8, align=TA_CENTER)),
-                Paragraph(str(recv_cartons),            _s(8, align=TA_CENTER)),
-                Paragraph(str(recv_units),              _s(8, align=TA_CENTER)),
-                Paragraph(f"${cost:.4f}",               _s(8, align=TA_RIGHT)),
-                Paragraph(f"{tax_rate:.0f}%",           _s(8, align=TA_CENTER)),
-                Paragraph("Yes" if line['is_promo'] else "No", _s(8, align=TA_CENTER)),
-                Paragraph(f"${line_ex:.2f}",            _s(8, align=TA_RIGHT)),
-                Paragraph(f"${line_inc:.2f}",           _s(8, align=TA_RIGHT)),
+                Paragraph(ld.barcode,                          _s(8, align=TA_CENTER)),
+                Paragraph(ld.description,                      _s(8)),
+                Paragraph(ld.pack_str,                         _s(8, align=TA_CENTER)),
+                Paragraph(str(ld.ordered_disp),                _s(8, align=TA_CENTER)),
+                Paragraph(str(ld.recv_raw),                    _s(8, align=TA_CENTER)),
+                Paragraph(str(ld.recv_units),                  _s(8, align=TA_CENTER)),
+                Paragraph(f"${ld.cost:.4f}",                   _s(8, align=TA_RIGHT)),
+                Paragraph(f"{ld.tax_rate:.0f}%",               _s(8, align=TA_CENTER)),
+                Paragraph("Yes" if ld.is_promo else "No",      _s(8, align=TA_CENTER)),
+                Paragraph(fmt_money(ld.line_ex),               _s(8, align=TA_RIGHT)),
+                Paragraph(fmt_money(ld.line_inc),              _s(8, align=TA_RIGHT)),
             ])
 
-        lines_style = TableStyle([
-            ("BACKGROUND",   (0,0), (-1,0),  C_LGREY),
-            ("GRID",         (0,0), (-1,-1), 0.3, C_BORDER),
-            ("FONTNAME",     (0,0), (-1,0),  "Helvetica-Bold"),
-            ("FONTSIZE",     (0,0), (-1,-1), 8),
-            ("ROWBACKGROUNDS", (0,1),(-1,-1), [colors.white, C_LGREY]),
-            ("TOPPADDING",   (0,0), (-1,-1), 2),
-            ("BOTTOMPADDING",(0,0), (-1,-1), 2),
-        ])
-        story.append(Table(tbl_data, colWidths=col_w, style=lines_style, repeatRows=1))
+        story.append(Table(tbl_data, colWidths=col_w, repeatRows=1, style=TableStyle([
+            ("BACKGROUND",     (0,0), (-1,0),  C_LGREY),
+            ("GRID",           (0,0), (-1,-1), 0.3, C_BORDER),
+            ("FONTNAME",       (0,0), (-1,0),  "Helvetica-Bold"),
+            ("FONTSIZE",       (0,0), (-1,-1), 8),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, C_LGREY]),
+            ("TOPPADDING",     (0,0), (-1,-1), 2),
+            ("BOTTOMPADDING",  (0,0), (-1,-1), 2),
+        ])))
 
-        # ── Charges ──────────────────────────────────────────────────────────
-        if charges:
+        if data.charges:
             story.append(Spacer(1, 4*mm))
             story.append(Paragraph("Additional Charges", _s(10, bold=True)))
             story.append(Spacer(1, 2*mm))
-
             chg_data = [[
                 Paragraph(h, _s(8, bold=True))
                 for h in ["Description", "Tax %", "Amount ex. GST", "Amount inc. GST"]
             ]]
-            for i, c in enumerate(charges):
-                amt_inc = float(c['amount_inc_tax'])
-                tax_r   = float(c['tax_rate'])
-                amt_ex  = round(amt_inc / (1 + tax_r / 100), 2) if tax_r > 0 else amt_inc
-                gst     = round(amt_inc - amt_ex, 2)
+            for cd in data.charges:
                 chg_data.append([
-                    Paragraph(c['description'],          _s(8)),
-                    Paragraph(f"{tax_r:.0f}%",           _s(8, align=TA_CENTER)),
-                    Paragraph(f"${amt_ex:.2f}",          _s(8, align=TA_RIGHT)),
-                    Paragraph(f"${amt_inc:.2f}",         _s(8, align=TA_RIGHT)),
+                    Paragraph(cd.description,      _s(8)),
+                    Paragraph(f"{cd.tax_r:.0f}%",  _s(8, align=TA_CENTER)),
+                    Paragraph(f"${cd.amt_ex:.2f}", _s(8, align=TA_RIGHT)),
+                    Paragraph(f"${cd.amt_inc:.2f}", _s(8, align=TA_RIGHT)),
                 ])
             story.append(Table(
                 chg_data,
                 colWidths=[100*mm, 25*mm, 40*mm, 40*mm],
                 style=TableStyle([
-                    ("BACKGROUND",   (0,0),(-1,0),  C_LGREY),
-                    ("GRID",         (0,0),(-1,-1), 0.3, C_BORDER),
-                    ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white, C_LGREY]),
-                    ("TOPPADDING",   (0,0),(-1,-1), 2),
-                    ("BOTTOMPADDING",(0,0),(-1,-1), 2),
+                    ("BACKGROUND",    (0,0),(-1,0),  C_LGREY),
+                    ("GRID",          (0,0),(-1,-1), 0.3, C_BORDER),
+                    ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, C_LGREY]),
+                    ("TOPPADDING",    (0,0),(-1,-1), 2),
+                    ("BOTTOMPADDING", (0,0),(-1,-1), 2),
                 ]),
             ))
 

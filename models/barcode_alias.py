@@ -11,7 +11,7 @@ def resolve(barcode):
         ).fetchone()
         return row['master_barcode'] if row else barcode
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_aliases(master_barcode):
@@ -22,7 +22,7 @@ def get_aliases(master_barcode):
             (master_barcode,)
         ).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def add(alias_barcode, master_barcode, description=""):
@@ -33,8 +33,11 @@ def add(alias_barcode, master_barcode, description=""):
             (alias_barcode, master_barcode, description)
         )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def delete(alias_id):
@@ -42,5 +45,8 @@ def delete(alias_id):
     try:
         conn.execute("DELETE FROM barcode_aliases WHERE id = ?", (alias_id,))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()

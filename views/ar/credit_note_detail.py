@@ -6,10 +6,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 import controllers.ar_controller as ar_ctrl
-from database.connection import get_connection
+from utils.error_dialog import show_error
+from views.base_view import BaseView
 
 
-class CreditNoteDetail(QWidget):
+class CreditNoteDetail(BaseView):
     def __init__(self, customer_id, linked_invoice_id=None, cn_id=None):
         super().__init__()
         self._customer_id       = customer_id
@@ -20,7 +21,7 @@ class CreditNoteDetail(QWidget):
         self.setWindowTitle("Credit Note")
         self._build_ui()
         if cn_id:
-            self._load()
+            self.load()
         elif linked_invoice_id:
             self._prefill_from_invoice()
 
@@ -98,16 +99,10 @@ class CreditNoteDetail(QWidget):
             self.btn_issue.setEnabled(False)
             QMessageBox.information(self, "Credit Note", f"Issued: {cn_num}")
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Credit note could not be issued.", e)
 
     def _load(self):
-        conn = get_connection()
-        try:
-            row = conn.execute(
-                "SELECT * FROM ar_credit_notes WHERE id=?", (self._cn_id,)
-            ).fetchone()
-        finally:
-            conn.close()
+        row = ar_ctrl.get_credit_note_by_id(self._cn_id)
         if not row:
             return
         self.lbl_cn.setText(f"Credit Note {row['credit_note_number']}")

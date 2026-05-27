@@ -7,10 +7,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QObject, QEvent
 from PyQt6.QtGui import QColor
 import math
+from utils.calculations import round_half_up
 import controllers.product_controller as product_ctrl
 import controllers.purchase_order_controller as po_ctrl
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
 import config.styles as styles
+from utils.error_dialog import show_error
+from views.base_view import BaseView
 
 
 
@@ -210,7 +213,7 @@ class _CostEnterFilter(QObject):
             next_qty.selectAll()
 
 
-class POReceive(QWidget):
+class POReceive(BaseView):
     def __init__(self, po_id, on_save=None):
         super().__init__()
         self.po_id = po_id
@@ -220,7 +223,7 @@ class POReceive(QWidget):
         self.resize(1750, 750)
         self.charges_table = None
         self._build_ui()
-        self._load()
+        self.load()
 
     # ── Theme colours ─────────────────────────────────────────────────
     BG       = styles.CLR_BG
@@ -426,7 +429,7 @@ class POReceive(QWidget):
         if not barcode:
             return
         from views.products.product_edit import ProductEdit
-        self._product_win = ProductEdit(barcode=barcode, on_save=self._load)
+        self._product_win = ProductEdit(barcode=barcode, on_save=self.load)
         self._product_win.show()
         self._product_win.raise_()
 
@@ -623,9 +626,9 @@ class POReceive(QWidget):
             qty        = qty_input.value()
             line_total = qty * cost
 
-        lt_item.setText(f"${line_total:.2f}")
+        lt_item.setText(f"${round_half_up(line_total):.2f}")
         line_total_inc = line_total * (1 + tax_rate / 100)
-        lt_inc_item.setText(f"${line_total_inc:.2f}")
+        lt_inc_item.setText(f"${round_half_up(line_total_inc):.2f}")
         from PyQt6.QtGui import QColor
         lt_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
         cost_inc = cost * (1 + tax_rate / 100)
@@ -668,9 +671,9 @@ class POReceive(QWidget):
                         gst_total += amt - (amt / (1 + charge_tax / 100))
                 except (ValueError, AttributeError):
                     pass
-        subtotal = round(total_inc - gst_total, 2)
-        gst = round(gst_total, 2)
-        total_inc = round(total_inc, 2)
+        subtotal = round_half_up(total_inc - gst_total)
+        gst = round_half_up(gst_total)
+        total_inc = round_half_up(total_inc)
         promo_str = ""
         if promo_total > 0:
             promo_str = f"&nbsp;&nbsp;&nbsp;<span style='color:{styles.CLR_AMBER};font-size:11px;'>(includes <b>${promo_total:.2f}</b> promo — cost price NOT updated)</span>"
@@ -788,10 +791,7 @@ class POReceive(QWidget):
                                       supplier_invoice_number=supplier_inv,
                                       charges=charges)
         except Exception as exc:
-            QMessageBox.critical(
-                self, "Receipt Failed",
-                f"An error occurred — no changes were saved.\n\n{exc}"
-            )
+            show_error(self, "Receipt failed — no changes were saved.", exc, title="Receipt Failed")
             return
 
         if self.on_save:

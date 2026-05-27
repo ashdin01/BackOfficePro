@@ -5,9 +5,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 import controllers.ar_controller as ar_ctrl
+from views.base_view import BaseView
 
 
-class AgedDebtorsReport(QWidget):
+class AgedDebtorsReport(BaseView):
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.WindowType.Window)
@@ -15,7 +16,7 @@ class AgedDebtorsReport(QWidget):
         self.setWindowTitle("Aged Debtors")
         self._open_wins = []
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -27,7 +28,7 @@ class AgedDebtorsReport(QWidget):
         btn_stmt.clicked.connect(self._statement)
         top.addWidget(btn_stmt)
         btn_refresh = QPushButton("Refresh")
-        btn_refresh.clicked.connect(self._load)
+        btn_refresh.clicked.connect(self.load)
         top.addWidget(btn_refresh)
         root.addLayout(top)
 

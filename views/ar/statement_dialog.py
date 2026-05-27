@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QDate
 import controllers.ar_controller as ar_ctrl
+from utils.error_dialog import show_error
 
 
 class StatementDialog(QDialog):
@@ -59,4 +60,4 @@ class StatementDialog(QDialog):
             os.startfile(path) if os.name == 'nt' else os.system(f'xdg-open "{path}"')
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not generate statement PDF.", e)

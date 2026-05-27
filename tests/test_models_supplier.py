@@ -8,7 +8,7 @@ import models.supplier as supplier_model
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _add(db_conn, code='SUP1', name='Supplier One', **kwargs):
-    supplier_model.add(code, name, **kwargs)
+    supplier_model.create(code, name, **kwargs)
     row = db_conn.execute("SELECT id FROM suppliers WHERE code=?", (code.upper(),)).fetchone()
     return row['id']
 
@@ -26,7 +26,7 @@ def _make_po(db_conn, supplier_id, status='DRAFT', days_ago=0):
 # ── add / get_by_id ───────────────────────────────────────────────────────────
 
 def test_add_code_uppercased(test_db):
-    supplier_model.add('abc', 'Lower Code Supplier')
+    supplier_model.create('abc', 'Lower Code Supplier')
     conn = get_connection()
     row = conn.execute("SELECT code FROM suppliers WHERE name='Lower Code Supplier'").fetchone()
     conn.close()
@@ -34,7 +34,7 @@ def test_add_code_uppercased(test_db):
 
 
 def test_add_and_get_by_id(test_db):
-    supplier_model.add('S1', 'Test Supplier', phone='0300000000', abn='12 345 678 901')
+    supplier_model.create('S1', 'Test Supplier', phone='0300000000', abn='12 345 678 901')
     conn = get_connection()
     sid = conn.execute("SELECT id FROM suppliers WHERE code='S1'").fetchone()['id']
     conn.close()
@@ -49,7 +49,7 @@ def test_get_by_id_missing_returns_none(test_db):
 
 
 def test_add_all_schedule_fields(test_db):
-    supplier_model.add(
+    supplier_model.create(
         'SCH', 'Schedule Supplier',
         order_days='MON,FRI',
         order_first_monday=1,
@@ -200,7 +200,7 @@ def test_inactive_supplier_never_due(test_db, db_conn):
 
 class TestSupplierBankFields:
     def test_add_stores_bank_fields(self, test_db):
-        supplier_model.add(
+        supplier_model.create(
             'BNK', 'Bank Supplier',
             bank_account_name='Harcourt Apples Pty Ltd',
             bank_bsb='063-000',

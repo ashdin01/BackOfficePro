@@ -1,3 +1,4 @@
+import csv
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -7,26 +8,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
-
-class NumItem(QTableWidgetItem):
-    """Sorts numerically, stripping $, %, commas and +/-."""
-    def __lt__(self, other):
-        def _val(t):
-            try:
-                return float(t.replace('$','').replace('%','').replace(',','').replace('+','').strip())
-            except ValueError:
-                return t
-        return _val(self.text()) < _val(other.text())
+from views.base_view import BaseView
+from views.widgets.table_items import center_item, right_item
 
 
-import csv
-
-
-class GPReport(QWidget):
+class GPReport(BaseView):
     def __init__(self):
         super().__init__()
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -105,7 +95,7 @@ class GPReport(QWidget):
         if not barcode:
             return
         from views.products.product_edit import ProductEdit
-        self._product_win = ProductEdit(barcode=barcode, on_save=self._load)
+        self._product_win = ProductEdit(barcode=barcode, on_save=self.load)
         self._product_win.show()
         self._product_win.raise_()
 
@@ -175,14 +165,10 @@ class GPReport(QWidget):
             )
 
     def _center(self, table, row, col, text):
-        item = NumItem(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        table.setItem(row, col, item)
+        table.setItem(row, col, center_item(text))
 
     def _right(self, table, row, col, text):
-        item = NumItem(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        table.setItem(row, col, item)
+        table.setItem(row, col, right_item(text))
 
     def _export(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "gp_report.csv"), "CSV (*.csv)")

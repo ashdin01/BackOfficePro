@@ -1,29 +1,27 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit
+    QTableWidget, QTableWidgetItem, QLabel, QHeaderView
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 import controllers.ar_controller as ar_ctrl
 from views.ar.customer_edit import CustomerEdit
+from views.base_view import BaseView
+from views.widgets.search_bar import SearchBar
 
 
-class CustomerList(QWidget):
+class CustomerList(BaseView):
     def __init__(self):
         super().__init__()
         self._open_wins = []
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
 
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search customers…")
-        self._timer = QTimer(); self._timer.setSingleShot(True); self._timer.setInterval(350)
-        self._timer.timeout.connect(self._filter)
-        self.search.textChanged.connect(lambda _: self._timer.start())
-        self.search.returnPressed.connect(lambda: self.table.setFocus())
+        self.search = SearchBar("Search customers…", interval=350)
+        self.search.search_changed.connect(self._filter)
         top.addWidget(self.search)
 
         self.chk_inactive = QPushButton("Show Inactive")
@@ -46,6 +44,7 @@ class CustomerList(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(self._edit)
+        self.search.returnPressed.connect(self.table.setFocus)
         layout.addWidget(self.table)
 
         self.status = QLabel("")
@@ -97,4 +96,4 @@ class CustomerList(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._load()
+        self.load()

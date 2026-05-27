@@ -4,54 +4,27 @@ import math
 from datetime import date, timedelta
 from calendar import monthrange
 
-from database.connection import get_connection
 import models.customer as customer_model
 import models.ar_invoice as invoice_model
 import models.ar_payment as payment_model
 import models.settings as settings_model
 import models.bank_recon as recon_model
+import models.ar_credit_note as ar_credit_note_model
 
 
 # ── Invoice / credit note numbering ──────────────────────────────────────────
 
-def _next_invoice_number():
-    conn = get_connection()
-    try:
-        prefix = 'INV'
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key='ar_next_invoice_number'"
-        ).fetchone()
-        seq = int(row['value']) if row else 1
-        conn.execute(
-            "UPDATE settings SET value=? WHERE key='ar_next_invoice_number'",
-            (str(seq + 1),)
-        )
-        conn.commit()
-        return f"{prefix}-{seq:05d}"
-    finally:
-        conn.close()
+def _next_invoice_number() -> str:
+    return settings_model.next_sequence('ar_next_invoice_number', 'INV')
 
 
-def _next_credit_number():
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key='ar_next_credit_number'"
-        ).fetchone()
-        seq = int(row['value']) if row else 1
-        conn.execute(
-            "UPDATE settings SET value=? WHERE key='ar_next_credit_number'",
-            (str(seq + 1),)
-        )
-        conn.commit()
-        return f"CN-{seq:05d}"
-    finally:
-        conn.close()
+def _next_credit_number() -> str:
+    return settings_model.next_sequence('ar_next_credit_number', 'CN')
 
 
 # ── Due date (EOM + N days) ───────────────────────────────────────────────────
 
-def calc_due_date(invoice_date, payment_terms_days=37):
+def calc_due_date(invoice_date, payment_terms_days=37) -> date:
     """
     Calculate due date as: end of invoice month + payment_terms_days.
     Default 37 = EOM + 7 days.
@@ -66,7 +39,7 @@ def calc_due_date(invoice_date, payment_terms_days=37):
 
 # ── Create invoice ────────────────────────────────────────────────────────────
 
-def create_invoice(customer_id, invoice_date=None, notes='', created_by=''):
+def create_invoice(customer_id, invoice_date=None, notes='', created_by='') -> tuple[int, str]:
     if invoice_date is None:
         invoice_date = date.today()
     if isinstance(invoice_date, str):
@@ -94,17 +67,24 @@ def create_invoice(customer_id, invoice_date=None, notes='', created_by=''):
 # ── Record payment ────────────────────────────────────────────────────────────
 
 def record_payment(invoice_id, amount, payment_date=None,
-                   method='EFT', reference='', notes=''):
+                   method='EFT', reference='', notes='') -> int:
+    from utils.validators import positive_number
     if payment_date is None:
         payment_date = date.today().isoformat()
     if isinstance(payment_date, date):
         payment_date = payment_date.isoformat()
 
+    try:
+        if float(amount) <= 0:
+            raise ValueError("Payment amount must be greater than zero")
+    except (TypeError, ValueError) as e:
+        raise ValueError("Payment amount must be greater than zero") from e
+
     inv = invoice_model.get_by_id(invoice_id)
     if not inv:
         raise ValueError(f"Invoice {invoice_id} not found")
 
-    payment_id = payment_model.add(
+    payment_id, _total_paid, _new_status = invoice_model.apply_payment(
         invoice_id=invoice_id,
         customer_id=inv['customer_id'],
         payment_date=payment_date,
@@ -113,47 +93,24 @@ def record_payment(invoice_id, amount, payment_date=None,
         reference=reference,
         notes=notes,
     )
-
-    total_paid = payment_model.total_paid(invoice_id)
-    invoice_model.update_amount_paid(invoice_id, total_paid)
-
-    inv_total = float(inv['total'])
-    if total_paid >= inv_total:
-        invoice_model.update_status(invoice_id, 'PAID')
-    elif total_paid > 0:
-        invoice_model.update_status(invoice_id, 'PARTIAL')
-
     return payment_id
 
 
 # ── Create credit note ────────────────────────────────────────────────────────
 
-def create_credit_note(customer_id, reason='', invoice_id=None, cn_date=None):
+def create_credit_note(customer_id, reason='', invoice_id=None, cn_date=None) -> int:
     if cn_date is None:
         cn_date = date.today().isoformat()
     if isinstance(cn_date, date):
         cn_date = cn_date.isoformat()
 
     cn_num = _next_credit_number()
-    conn = get_connection()
-    try:
-        conn.execute("""
-            INSERT INTO ar_credit_notes
-                (credit_note_number, customer_id, invoice_id, date, reason)
-            VALUES (?,?,?,?,?)
-        """, (cn_num, customer_id, invoice_id, cn_date, reason))
-        conn.commit()
-        row = conn.execute(
-            "SELECT id FROM ar_credit_notes WHERE credit_note_number=?", (cn_num,)
-        ).fetchone()
-        return row['id'], cn_num
-    finally:
-        conn.close()
+    return ar_credit_note_model.create(cn_num, customer_id, invoice_id, cn_date, reason)
 
 
 # ── Aged debtors ──────────────────────────────────────────────────────────────
 
-def get_aged_debtors(as_of_date=None):
+def get_aged_debtors(as_of_date=None) -> list[dict]:
     """
     Returns list of dicts per customer with outstanding balance split into
     current, 30, 60, 90+ day buckets.
@@ -163,19 +120,7 @@ def get_aged_debtors(as_of_date=None):
     if isinstance(as_of_date, str):
         as_of_date = date.fromisoformat(as_of_date)
 
-    conn = get_connection()
-    try:
-        rows = conn.execute("""
-            SELECT i.id, i.invoice_number, i.invoice_date, i.due_date,
-                   i.total, i.amount_paid, i.status,
-                   c.id AS customer_id, c.name AS customer_name, c.code
-            FROM ar_invoices i
-            JOIN customers c ON c.id = i.customer_id
-            WHERE i.status NOT IN ('PAID', 'VOID')
-            ORDER BY c.name, i.due_date
-        """).fetchall()
-    finally:
-        conn.close()
+    rows = invoice_model.get_unpaid_for_aged_debtors()
 
     by_customer = {}
     for r in rows:
@@ -218,98 +163,49 @@ def get_aged_debtors(as_of_date=None):
     return sorted(by_customer.values(), key=lambda x: x['customer_name'])
 
 
-def refresh_overdue_statuses():
+def refresh_overdue_statuses() -> None:
     """Mark SENT/PARTIAL invoices past due date as OVERDUE."""
-    today = date.today().isoformat()
-    conn = get_connection()
-    try:
-        conn.execute("""
-            UPDATE ar_invoices
-            SET status='OVERDUE', updated_at=datetime('now','localtime')
-            WHERE status IN ('SENT', 'PARTIAL')
-              AND due_date < ?
-        """, (today,))
-        conn.commit()
-    finally:
-        conn.close()
+    invoice_model.refresh_overdue(date.today().isoformat())
 
 
 # ── Statement data ────────────────────────────────────────────────────────────
 
-def get_statement_data(customer_id, date_from, date_to):
+def get_statement_data(customer_id, date_from, date_to) -> dict:
     """
     Returns invoices and payments for a customer within a date range,
     plus opening balance (outstanding before date_from).
     """
-    conn = get_connection()
-    try:
-        opening_rows = conn.execute("""
-            SELECT COALESCE(SUM(total - amount_paid), 0) AS balance
-            FROM ar_invoices
-            WHERE customer_id=? AND invoice_date < ? AND status NOT IN ('PAID','VOID')
-        """, (customer_id, date_from)).fetchone()
-        opening_balance = float(opening_rows['balance']) if opening_rows else 0.0
-
-        invoices = [dict(r) for r in conn.execute("""
-            SELECT invoice_number, invoice_date, due_date, total, amount_paid, status
-            FROM ar_invoices
-            WHERE customer_id=? AND invoice_date BETWEEN ? AND ?
-              AND status != 'VOID'
-            ORDER BY invoice_date
-        """, (customer_id, date_from, date_to)).fetchall()]
-
-        payments = [dict(r) for r in conn.execute("""
-            SELECT p.payment_date, p.amount, p.method, p.reference,
-                   i.invoice_number
-            FROM ar_payments p
-            JOIN ar_invoices i ON i.id = p.invoice_id
-            WHERE p.customer_id=? AND p.payment_date BETWEEN ? AND ?
-            ORDER BY p.payment_date
-        """, (customer_id, date_from, date_to)).fetchall()]
-
-        return {
-            'opening_balance': opening_balance,
-            'invoices':        invoices,
-            'payments':        payments,
-        }
-    finally:
-        conn.close()
+    return invoice_model.get_statement_rows(customer_id, date_from, date_to)
 
 
 # ── MYOB provision ────────────────────────────────────────────────────────────
 
-def push_invoice_to_myob(invoice_id):
+def push_invoice_to_myob(invoice_id) -> None:
     raise NotImplementedError("MYOB AR export not yet implemented")
 
 
 # ── PDF generation ────────────────────────────────────────────────────────────
 
-def generate_invoice_pdf(invoice_id, output_path=None):
+def generate_invoice_pdf(invoice_id, output_path=None) -> str:
     """
     Generate a two-page PDF:
       Page 1 — ATO-compliant tax invoice (with pricing)
       Page 2 — Delivery docket (no pricing, signature block)
     Returns the file path written.
     """
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import mm
-    from reportlab.lib import colors
-    from reportlab.platypus import (
-        SimpleDocTemplate, Table, TableStyle, Paragraph,
-        Spacer, HRFlowable, PageBreak,
-    )
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+    from utils.ar_pdf import render_invoice_pdf
 
     inv   = invoice_model.get_by_id(invoice_id)
     lines = invoice_model.get_lines(invoice_id)
     if not inv:
         raise ValueError(f"Invoice {invoice_id} not found")
 
-    store_name    = settings_model.get_setting('store_name',    'My Store')
-    store_address = settings_model.get_setting('store_address', '')
-    store_phone   = settings_model.get_setting('store_phone',   '')
-    store_abn     = settings_model.get_setting('store_abn',     '')
+    store_info = {
+        'store_name':    settings_model.get_setting('store_name',    'My Store'),
+        'store_address': settings_model.get_setting('store_address', ''),
+        'store_phone':   settings_model.get_setting('store_phone',   ''),
+        'store_abn':     settings_model.get_setting('store_abn',     ''),
+    }
 
     if output_path is None:
         pdf_dir = settings_model.get_setting('ar_invoice_pdf_path', '')
@@ -317,184 +213,25 @@ def generate_invoice_pdf(invoice_id, output_path=None):
             pdf_dir = os.path.expanduser('~')
         output_path = os.path.join(pdf_dir, f"{inv['invoice_number']}.pdf")
 
-    styles = getSampleStyleSheet()
-    h1     = styles['Heading1']
-    normal = styles['Normal']
-    small  = ParagraphStyle('small',  parent=normal, fontSize=8)
-    right  = ParagraphStyle('right',  parent=normal, alignment=TA_RIGHT)
-    bold   = ParagraphStyle('bold',   parent=normal, fontName='Helvetica-Bold')
-    centre = ParagraphStyle('centre', parent=normal, alignment=TA_CENTER)
-
-    W, H = A4
-
-    def _header_block(title):
-        data = [[
-            Paragraph(f"<b>{store_name}</b><br/>{store_address}<br/>Ph: {store_phone}<br/>ABN: {store_abn}", normal),
-            Paragraph(f"<b>{title}</b>", ParagraphStyle('title', parent=normal, fontSize=18, fontName='Helvetica-Bold', alignment=TA_RIGHT)),
-        ]]
-        t = Table(data, colWidths=[110*mm, 70*mm])
-        t.setStyle(TableStyle([
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ]))
-        return t
-
-    def _customer_invoice_info():
-        due  = inv['due_date']
-        data = [[
-            Paragraph(
-                f"<b>Bill To:</b><br/>{inv['customer_name']}<br/>"
-                f"{inv.get('address_line1','')}<br/>"
-                f"{inv.get('suburb','')} {inv.get('state','')} {inv.get('postcode','')}<br/>"
-                f"ABN: {inv.get('customer_abn','')}",
-                normal
-            ),
-            Table([
-                ['Invoice No:', inv['invoice_number']],
-                ['Invoice Date:', inv['invoice_date']],
-                ['Due Date:', due],
-            ], colWidths=[35*mm, 45*mm], style=TableStyle([
-                ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,-1), 9),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ])),
-        ]]
-        t = Table(data, colWidths=[110*mm, 80*mm])
-        t.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
-        return t
-
-    def _lines_table(show_prices):
-        if show_prices:
-            headers = ['Description', 'Qty', 'Unit Price', 'Disc %', 'GST', 'Total']
-            col_w   = [80*mm, 15*mm, 25*mm, 15*mm, 20*mm, 25*mm]
-        else:
-            headers = ['Description', 'Qty', 'Unit']
-            col_w   = [120*mm, 20*mm, 40*mm]
-
-        rows = [headers]
-        for ln in lines:
-            if show_prices:
-                rows.append([
-                    ln['description'],
-                    f"{ln['quantity']:g}",
-                    f"${ln['unit_price']:.2f}",
-                    f"{ln['discount_pct']:g}%" if ln['discount_pct'] else '',
-                    f"${ln['line_gst']:.2f}",
-                    f"${ln['line_total']:.2f}",
-                ])
-            else:
-                rows.append([
-                    ln['description'],
-                    f"{ln['quantity']:g}",
-                    '',
-                ])
-
-        style = TableStyle([
-            ('BACKGROUND',    (0,0), (-1,0), colors.HexColor('#2d5a27')),
-            ('TEXTCOLOR',     (0,0), (-1,0), colors.white),
-            ('FONTNAME',      (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE',      (0,0), (-1,-1), 9),
-            ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#f5f5f5')]),
-            ('GRID',          (0,0), (-1,-1), 0.25, colors.HexColor('#cccccc')),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-            ('TOPPADDING',    (0,0), (-1,-1), 4),
-            ('ALIGN',         (1,1), (-1,-1), 'RIGHT'),
-            ('ALIGN',         (1,0), (-1,0), 'CENTER'),
-        ])
-        return Table(rows, colWidths=col_w, style=style, repeatRows=1)
-
-    def _totals_table():
-        data = [
-            ['Subtotal', f"${inv['subtotal']:.2f}"],
-            ['GST (10%)',  f"${inv['gst_amount']:.2f}"],
-            ['TOTAL DUE', f"${inv['total']:.2f}"],
-        ]
-        t = Table(data, colWidths=[130*mm, 30*mm], hAlign='RIGHT')
-        t.setStyle(TableStyle([
-            ('FONTNAME',      (0,2), (-1,2), 'Helvetica-Bold'),
-            ('FONTSIZE',      (0,0), (-1,-1), 10),
-            ('ALIGN',         (1,0), (1,-1), 'RIGHT'),
-            ('LINEABOVE',     (0,2), (-1,2), 1, colors.black),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-        ]))
-        return t
-
-    def _signature_block():
-        data = [[
-            Paragraph("Received in good order by: ______________________________", normal),
-            Paragraph("Date: _______________", normal),
-        ]]
-        t = Table(data, colWidths=[120*mm, 60*mm])
-        t.setStyle(TableStyle([('BOTTOMPADDING', (0,0), (-1,-1), 20)]))
-        return t
-
-    story = []
-
-    # ── Page 1: Tax Invoice ───────────────────────────────────────────────────
-    story.append(_header_block("TAX INVOICE"))
-    story.append(Spacer(1, 6*mm))
-    story.append(_customer_invoice_info())
-    story.append(Spacer(1, 6*mm))
-    story.append(_lines_table(show_prices=True))
-    story.append(Spacer(1, 4*mm))
-    story.append(_totals_table())
-    if inv.get('notes'):
-        story.append(Spacer(1, 4*mm))
-        story.append(Paragraph(f"<b>Notes:</b> {inv['notes']}", small))
-    story.append(Spacer(1, 6*mm))
-    story.append(Paragraph(
-        f"Payment due: {inv['due_date']}  |  EFT / Cheque payable to {store_name}",
-        ParagraphStyle('payment', parent=small, alignment=TA_CENTER)
-    ))
-
-    story.append(PageBreak())
-
-    # ── Page 2: Delivery Docket ───────────────────────────────────────────────
-    story.append(_header_block("DELIVERY DOCKET"))
-    story.append(Spacer(1, 4*mm))
-    story.append(Paragraph(
-        f"<b>Deliver To:</b> {inv['customer_name']}  |  "
-        f"<b>Date:</b> {inv['invoice_date']}  |  "
-        f"<b>Ref:</b> {inv['invoice_number']}",
-        normal
-    ))
-    story.append(Spacer(1, 6*mm))
-    story.append(_lines_table(show_prices=False))
-    story.append(Spacer(1, 12*mm))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
-    story.append(Spacer(1, 6*mm))
-    story.append(_signature_block())
-    story.append(Spacer(1, 4*mm))
-    story.append(Paragraph(
-        "Please sign and return this docket as confirmation of delivery.",
-        ParagraphStyle('docket_footer', parent=small, alignment=TA_CENTER)
-    ))
-
-    doc = SimpleDocTemplate(
-        output_path, pagesize=A4,
-        rightMargin=15*mm, leftMargin=15*mm,
-        topMargin=15*mm, bottomMargin=15*mm,
-    )
-    doc.build(story)
-    return output_path
+    return render_invoice_pdf(inv, lines, store_info, output_path)
 
 
-def generate_statement_pdf(customer_id, date_from, date_to, output_path=None):
+def generate_statement_pdf(customer_id, date_from, date_to, output_path=None) -> str:
     """Generate a customer statement PDF for the given date range."""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import mm
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_RIGHT
+    from utils.ar_pdf import render_statement_pdf
 
     customer = customer_model.get_by_id(customer_id)
     if not customer:
         raise ValueError(f"Customer {customer_id} not found")
 
-    data     = get_statement_data(customer_id, date_from, date_to)
-    store_name = settings_model.get_setting('store_name', 'My Store')
-    store_abn  = settings_model.get_setting('store_abn', '')
+    stmt_data = get_statement_data(customer_id, date_from, date_to)
+    stmt_data['date_from'] = date_from
+    stmt_data['date_to']   = date_to
+
+    store_info = {
+        'store_name': settings_model.get_setting('store_name', 'My Store'),
+        'store_abn':  settings_model.get_setting('store_abn',  ''),
+    }
 
     if output_path is None:
         pdf_dir = settings_model.get_setting('ar_invoice_pdf_path', '')
@@ -504,124 +241,88 @@ def generate_statement_pdf(customer_id, date_from, date_to, output_path=None):
             pdf_dir, f"STMT-{customer['code']}-{date_to}.pdf"
         )
 
-    styles = getSampleStyleSheet()
-    normal = styles['Normal']
-    small  = ParagraphStyle('small', parent=normal, fontSize=8)
-    right  = ParagraphStyle('right', parent=normal, alignment=TA_RIGHT)
-
-    rows = [['Date', 'Reference', 'Description', 'Amount', 'Balance']]
-    balance = data['opening_balance']
-    if balance != 0:
-        rows.append([date_from, '', 'Opening Balance', '', f"${balance:.2f}"])
-
-    events = []
-    for inv in data['invoices']:
-        events.append((inv['invoice_date'], 'inv', inv))
-    for pmt in data['payments']:
-        events.append((pmt['payment_date'], 'pmt', pmt))
-    events.sort(key=lambda x: x[0])
-
-    for ev_date, ev_type, ev in events:
-        if ev_type == 'inv':
-            balance = round(balance + float(ev['total']), 2)
-            rows.append([ev['invoice_date'], ev['invoice_number'], 'Invoice', f"${ev['total']:.2f}", f"${balance:.2f}"])
-        else:
-            balance = round(balance - float(ev['amount']), 2)
-            rows.append([ev['payment_date'], ev['invoice_number'], f"Payment ({ev['method']})", f"-${ev['amount']:.2f}", f"${balance:.2f}"])
-
-    tbl = Table(rows, colWidths=[25*mm, 30*mm, 70*mm, 25*mm, 25*mm])
-    tbl.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0), (-1,0), colors.HexColor('#2d5a27')),
-        ('TEXTCOLOR',     (0,0), (-1,0), colors.white),
-        ('FONTNAME',      (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE',      (0,0), (-1,-1), 9),
-        ('ROWBACKGROUNDS',(0,1), (-1,-1), [colors.white, colors.HexColor('#f5f5f5')]),
-        ('GRID',          (0,0), (-1,-1), 0.25, colors.HexColor('#cccccc')),
-        ('ALIGN',         (3,1), (-1,-1), 'RIGHT'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-        ('TOPPADDING',    (0,0), (-1,-1), 3),
-        ('FONTNAME',      (0,-1), (-1,-1), 'Helvetica-Bold'),
-    ]))
-
-    story = [
-        Paragraph(f"<b>{store_name}</b>  |  ABN: {store_abn}", normal),
-        Spacer(1, 4*mm),
-        Paragraph(f"<b>ACCOUNT STATEMENT</b>", ParagraphStyle('stmtTitle', parent=normal, fontSize=14, fontName='Helvetica-Bold')),
-        Spacer(1, 2*mm),
-        Paragraph(
-            f"Customer: <b>{customer['name']}</b>  |  "
-            f"Period: {date_from} to {date_to}",
-            normal
-        ),
-        Spacer(1, 6*mm),
-        tbl,
-        Spacer(1, 4*mm),
-        Paragraph(f"<b>Closing Balance: ${balance:.2f}</b>",
-                  ParagraphStyle('closing', parent=normal, fontSize=11, fontName='Helvetica-Bold', alignment=TA_RIGHT)),
-    ]
-
-    doc = SimpleDocTemplate(
-        output_path, pagesize=A4,
-        rightMargin=15*mm, leftMargin=15*mm,
-        topMargin=15*mm, bottomMargin=15*mm,
-    )
-    doc.build(story)
-    return output_path
+    return render_statement_pdf(customer, stmt_data, store_info, output_path)
 
 
 # ── Invoice model wrappers ────────────────────────────────────────────────────
 
-def get_invoice_by_id(invoice_id):
+def get_invoice_by_id(invoice_id) -> dict | None:
     return invoice_model.get_by_id(invoice_id)
 
 
-def get_all_invoices(customer_id=None, status=None):
-    return invoice_model.get_all(customer_id=customer_id, status=status)
+def get_all_invoices(customer_id=None, status=None,
+                     limit=None, offset=0) -> list[dict]:
+    return invoice_model.get_all(customer_id=customer_id, status=status,
+                                 limit=limit, offset=offset)
 
 
-def get_invoice_lines(invoice_id):
+def count_invoices(customer_id=None, status=None) -> int:
+    return invoice_model.count(customer_id=customer_id, status=status)
+
+
+def get_invoice_lines(invoice_id) -> list[dict]:
     return invoice_model.get_lines(invoice_id)
 
 
+def _validate_invoice_line(description, quantity, unit_price, discount_pct, gst_rate):
+    from utils.validators import positive_number, percentage
+    if not str(description).strip():
+        raise ValueError("Line description is required.")
+    try:
+        if float(quantity) <= 0:
+            raise ValueError("Quantity must be greater than zero")
+    except (TypeError, ValueError) as e:
+        raise ValueError("Quantity must be greater than zero") from e
+    positive_number(unit_price,  "Unit price")
+    percentage(discount_pct,     "Discount %")
+    percentage(gst_rate,         "GST rate")
+
+
 def add_invoice_line(invoice_id, description, quantity, unit_price,
-                     discount_pct=0.0, gst_rate=10.0, barcode=''):
+                     discount_pct=0.0, gst_rate=10.0, barcode='') -> None:
+    _validate_invoice_line(description, quantity, unit_price, discount_pct, gst_rate)
     invoice_model.add_line(invoice_id, description, quantity, unit_price,
                            discount_pct=discount_pct, gst_rate=gst_rate, barcode=barcode)
 
 
 def update_invoice_line(line_id, description, quantity, unit_price,
-                        discount_pct=0.0, gst_rate=10.0, barcode=''):
+                        discount_pct=0.0, gst_rate=10.0, barcode='') -> None:
+    _validate_invoice_line(description, quantity, unit_price, discount_pct, gst_rate)
     invoice_model.update_line(line_id, description, quantity, unit_price,
                               discount_pct=discount_pct, gst_rate=gst_rate, barcode=barcode)
 
 
-def delete_invoice_line(line_id):
+def delete_invoice_line(line_id) -> None:
     invoice_model.delete_line(line_id)
 
 
-def update_invoice_status(invoice_id, status):
+def update_invoice_status(invoice_id, status) -> None:
     invoice_model.update_status(invoice_id, status)
 
 
-def update_invoice_notes(invoice_id, notes):
+def update_invoice_notes(invoice_id, notes) -> None:
     invoice_model.update_notes(invoice_id, notes)
 
 
 # ── Customer model wrappers ───────────────────────────────────────────────────
 
-def get_all_customers(active_only=True):
-    return customer_model.get_all(active_only=active_only)
+def get_all_customers(active_only=True, limit=None, offset=0) -> list[dict]:
+    return customer_model.get_all(active_only=active_only, limit=limit, offset=offset)
 
 
-def get_customer_by_id(customer_id):
+def count_customers(active_only=True) -> int:
+    return customer_model.count(active_only=active_only)
+
+
+def get_customer_by_id(customer_id) -> dict | None:
     return customer_model.get_by_id(customer_id)
 
 
-def add_customer(code, name, abn='', address_line1='', address_line2='',
-                 suburb='', state='', postcode='', email='', phone='',
-                 contact_name='', payment_terms_days=37, credit_limit=0.0,
-                 active=1, notes=''):
-    return customer_model.add(code, name, abn=abn, address_line1=address_line1,
+def create_customer(code, name, abn='', address_line1='', address_line2='',
+                    suburb='', state='', postcode='', email='', phone='',
+                    contact_name='', payment_terms_days=37, credit_limit=0.0,
+                    active=1, notes='') -> int:
+    return customer_model.create(code, name, abn=abn, address_line1=address_line1,
                                address_line2=address_line2, suburb=suburb, state=state,
                                postcode=postcode, email=email, phone=phone,
                                contact_name=contact_name,
@@ -632,7 +333,7 @@ def add_customer(code, name, abn='', address_line1='', address_line2='',
 def update_customer(customer_id, code, name, abn='', address_line1='',
                     address_line2='', suburb='', state='', postcode='',
                     email='', phone='', contact_name='',
-                    payment_terms_days=37, credit_limit=0.0, active=1, notes=''):
+                    payment_terms_days=37, credit_limit=0.0, active=1, notes='') -> None:
     customer_model.update(customer_id, code, name, abn=abn,
                           address_line1=address_line1, address_line2=address_line2,
                           suburb=suburb, state=state, postcode=postcode,
@@ -643,28 +344,28 @@ def update_customer(customer_id, code, name, abn='', address_line1='',
 
 # ── Payment model wrappers ────────────────────────────────────────────────────
 
-def get_payments_by_invoice(invoice_id):
+def get_payments_by_invoice(invoice_id) -> list[dict]:
     return payment_model.get_by_invoice(invoice_id)
 
 
 # ── Bank recon model wrappers ─────────────────────────────────────────────────
 
-def get_all_recon_profiles():
+def get_all_recon_profiles() -> list[dict]:
     return recon_model.get_all_profiles()
 
 
-def get_recon_profile(profile_id):
+def get_recon_profile(profile_id) -> dict | None:
     return recon_model.get_profile(profile_id)
 
 
-def delete_recon_profile(profile_id):
+def delete_recon_profile(profile_id) -> None:
     recon_model.delete_profile(profile_id)
 
 
 def save_recon_profile(name, delimiter, has_header, skip_rows, date_format,
                        amount_type, col_date=None, col_amount=None,
                        col_debit=None, col_credit=None, col_description=None,
-                       col_reference=None, col_balance=None):
+                       col_reference=None, col_balance=None) -> int:
     return recon_model.save_profile(name, delimiter, has_header, skip_rows,
                                     date_format, amount_type,
                                     col_date=col_date, col_amount=col_amount,
@@ -674,21 +375,25 @@ def save_recon_profile(name, delimiter, has_header, skip_rows, date_format,
                                     col_balance=col_balance)
 
 
-def get_recon_transactions(batch):
+def get_recon_transactions(batch) -> list[dict]:
     return recon_model.get_transactions(batch)
 
 
-def insert_recon_transactions(profile_id, batch, rows):
+def insert_recon_transactions(profile_id, batch, rows) -> None:
     recon_model.insert_transactions(profile_id, batch, rows)
 
 
-def set_recon_matched(txn_id, invoice_id, payment_id):
+def set_recon_matched(txn_id, invoice_id, payment_id) -> None:
     recon_model.set_matched(txn_id, invoice_id, payment_id)
 
 
-def set_recon_ignored(txn_id):
+def set_recon_ignored(txn_id) -> None:
     recon_model.set_ignored(txn_id)
 
 
-def unmatch_recon_transaction(txn_id):
+def unmatch_recon_transaction(txn_id) -> None:
     recon_model.unmatch_transaction(txn_id)
+
+
+def get_credit_note_by_id(cn_id) -> dict | None:
+    return ar_credit_note_model.get_by_id(cn_id)

@@ -17,33 +17,9 @@ from datetime import date, timedelta
 import csv
 import os
 import math
-
-
-def _week_bounds(offset=0):
-    """offset=0 → last completed week; offset=1 → two weeks ago."""
-    today = date.today()
-    mon   = today - timedelta(days=today.weekday())
-    start = mon - timedelta(weeks=(1 + offset))
-    return start, start + timedelta(days=6)
-
-
-def _fy_bounds(year=None):
-    today = date.today()
-    if year is None:
-        year = today.year if today.month >= 7 else today.year - 1
-    return date(year, 7, 1), date(year + 1, 6, 30)
-
-
-def _cartons_needed(reorder_qty, pack_qty):
-    return po_controller.cartons_needed(reorder_qty, pack_qty)
-
-
-def _calc_order_units(reorder_max, reorder_qty, on_hand):
-    return po_controller.calc_order_units(reorder_max, reorder_qty, on_hand)
-
-
-def _carton_note(pack_qty, pack_unit, barcode):
-    return po_controller.carton_note(pack_qty, pack_unit, barcode)
+from utils.po_type_helpers import po_unit_mode, po_is_return, fmt_money
+from utils.calculations import week_bounds, fy_bounds
+from views.base_view import BaseView
 
 
 class ItemLookupDialog(QDialog):
@@ -136,7 +112,7 @@ class ItemLookupDialog(QDialog):
 
 
 
-class PODetail(QWidget):
+class PODetail(BaseView):
     def __init__(self, po_id, on_save=None, blank=False):
         super().__init__()
         self.po_id = po_id
@@ -148,7 +124,7 @@ class PODetail(QWidget):
         self._line_tax_rates = []
         self.setMinimumSize(1400, 800)
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -351,7 +327,7 @@ class PODetail(QWidget):
         from views.products.product_edit import ProductEdit
         self._product_edit_win = ProductEdit(
             barcode=barcode,
-            on_save=lambda: self._load()
+            on_save=lambda: self.load()
         )
         self._product_edit_win.show()
         self._product_edit_win.raise_()
@@ -425,7 +401,7 @@ class PODetail(QWidget):
 
         try:
             po_controller.send_po_email(self.po_id, supplier_email)
-            self._load()
+            self.load()
             if self.on_save:
                 self.on_save()
             QMessageBox.information(self, "Email Sent", f"✓ {_doc_title} {po['po_number']} sent to:\n{supplier_email}")
@@ -456,7 +432,8 @@ class PODetail(QWidget):
         from config.constants import PO_DOC_TITLES, PO_TYPES
         _po_type   = po['po_type'] or 'PO'
         _doc_title = PO_DOC_TITLES.get(_po_type, 'PURCHASE ORDER')
-        self._unit_mode = _po_type in ('IO', 'RO')
+        self._unit_mode  = po_unit_mode(_po_type)
+        self._is_return  = po_is_return(_po_type)
         # Column 6 label reflects whether we're ordering in cartons or individual units
         self.table.setHorizontalHeaderItem(6, QTableWidgetItem(
             "Qty (Units)" if self._unit_mode else "Order Qty"
@@ -589,7 +566,8 @@ class PODetail(QWidget):
                 self.table.setItem(r, 5, rp_item)
 
                 if self._unit_mode:
-                    total_units = int(line['ordered_qty'])
+                    stored_units  = int(line['ordered_qty'])
+                    total_units   = -stored_units if self._is_return else stored_units
                     qty_item = QTableWidgetItem(str(total_units))
                     qty_item.setToolTip(f"{total_units} unit(s)")
                 else:
@@ -605,11 +583,13 @@ class PODetail(QWidget):
                 cost_item.setFlags(cost_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, 7, cost_item)
 
+                line_val = total_units * line['unit_cost']
                 if product and product['variable_weight']:
                     total_item = QTableWidgetItem("— variable weight")
                     total_item.setForeground(QColor("#FFA500"))
                 else:
-                    total_item = QTableWidgetItem(f"${total_units * line['unit_cost']:.2f}")
+                    line_str = fmt_money(line_val)
+                    total_item = QTableWidgetItem(line_str)
                     total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, 8, total_item)
@@ -654,11 +634,11 @@ class PODetail(QWidget):
         self._set_period("This Week", t - timedelta(days=t.weekday()), t)
 
     def _set_last_week(self):
-        s, e = _week_bounds(0)
+        s, e = week_bounds(0)
         self._set_period("Last Week", s, e)
 
     def _set_two_weeks_ago(self):
-        s, e = _week_bounds(1)
+        s, e = week_bounds(1)
         self._set_period("2 Wks Ago", s, e)
 
     def _set_this_month(self):
@@ -671,13 +651,13 @@ class PODetail(QWidget):
         self._set_period("Last Month", last_day.replace(day=1), last_day)
 
     def _set_this_fy(self):
-        s, e = _fy_bounds()
+        s, e = fy_bounds()
         self._set_period("This FY", s, min(e, date.today()))
 
     def _set_last_fy(self):
         t = date.today()
         y = t.year if t.month >= 7 else t.year - 1
-        s, e = _fy_bounds(y - 1)
+        s, e = fy_bounds(y - 1)
         self._set_period("Last FY", s, e)
 
     def _set_all_time(self):
@@ -733,14 +713,20 @@ class PODetail(QWidget):
             if col == 6:
                 if self._unit_mode:
                     # IO/RO: store exact unit quantity — no carton snapping
-                    total_units = max(1, int(float(item.text())))
+                    raw = int(float(item.text()))
+                    stored_units = max(1, abs(raw))
+                    display_units = -stored_units if self._is_return else stored_units
                     po_controller.update_po_line(
                         line_id,
-                        ordered_qty=total_units,
+                        ordered_qty=stored_units,
                         unit_cost=float(self.table.item(row, 7).text().replace("$", "").strip()),
                         notes='',
                     )
-                    item.setToolTip(f"{total_units} unit(s)")
+                    if display_units != raw:
+                        self.table.blockSignals(True)
+                        item.setText(str(display_units))
+                        self.table.blockSignals(False)
+                    item.setToolTip(f"{display_units} unit(s)")
                 else:
                     total_units = max(1, int(float(item.text())))
                     cartons = max(1, math.ceil(total_units / pack_qty))
@@ -752,28 +738,29 @@ class PODetail(QWidget):
                         line_id,
                         ordered_qty=cartons,
                         unit_cost=float(self.table.item(row, 7).text().replace("$", "").strip()),
-                        notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text()),
+                        notes=po_controller.carton_note(pack_qty, pack_unit, self.table.item(row, 0).text()),
                     )
                     item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {snapped_units} units total")
                 self.rec_banner.setText("")
 
             elif col == 7:
                 cost = max(0.0, float(item.text().replace("$", "").strip()))
-                total_units_col = int(float(self.table.item(row, 6).text()))
+                display_qty = int(float(self.table.item(row, 6).text()))
                 if self._unit_mode:
+                    stored_qty = abs(display_qty) if self._is_return else display_qty
                     po_controller.update_po_line(
                         line_id,
-                        ordered_qty=total_units_col,
+                        ordered_qty=stored_qty,
                         unit_cost=cost,
                         notes=''
                     )
                 else:
-                    cartons = max(1, math.ceil(total_units_col / pack_qty))
+                    cartons = max(1, math.ceil(display_qty / pack_qty))
                     po_controller.update_po_line(
                         line_id,
                         ordered_qty=cartons,
                         unit_cost=cost,
-                        notes=_carton_note(pack_qty, pack_unit, self.table.item(row, 0).text())
+                        notes=po_controller.carton_note(pack_qty, pack_unit, self.table.item(row, 0).text())
                     )
 
             try:
@@ -782,9 +769,10 @@ class PODetail(QWidget):
                 line_total = total_units_now * cost_now
                 lt_item = self.table.item(row, 8)
                 if lt_item and not lt_item.text().startswith("—"):
+                    lt_str = fmt_money(line_total)
                     lt_item.setFlags(lt_item.flags() | Qt.ItemFlag.ItemIsEditable)
                     self.table.blockSignals(True)
-                    lt_item.setText(f"${line_total:.2f}")
+                    lt_item.setText(lt_str)
                     self.table.blockSignals(False)
                     lt_item.setFlags(lt_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             except (ValueError, AttributeError):
@@ -928,7 +916,7 @@ class PODetail(QWidget):
         reply = QMessageBox.question(self, "Confirm", "Mark this PO as Sent?")
         if reply == QMessageBox.StandardButton.Yes:
             po_controller.update_po_status(self.po_id, PO_STATUS_SENT)
-            self._load()
+            self.load()
             if self.on_save:
                 self.on_save()
 
@@ -948,7 +936,7 @@ class AddLineDialog(QDialog):
         super().__init__(parent)
         self.po_id = po_id
         self.supplier_id = supplier_id
-        self._unit_mode = po_type in ('IO', 'RO')
+        self._unit_mode = po_unit_mode(po_type)
         self.setWindowTitle("Add Line")
         self.setMinimumWidth(440)
         self._reorder_max = 0
@@ -1134,7 +1122,7 @@ class AddLineDialog(QDialog):
                 pack_qty=self._pack_qty,
             )
         else:
-            note = _carton_note(self._pack_qty, self._pack_unit, barcode)
+            note = po_controller.carton_note(self._pack_qty, self._pack_unit, barcode)
             po_controller.add_po_line(
                 po_id=self.po_id,
                 barcode=barcode,

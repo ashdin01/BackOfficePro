@@ -13,6 +13,16 @@ def positive_number(value, field_name):
         raise ValueError(f"{field_name} must be a positive number")
 
 
+def percentage(value, field_name):
+    """Raise ValueError unless 0 ≤ value ≤ 100."""
+    try:
+        v = float(value)
+        if not (0 <= v <= 100):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValueError(f"{field_name} must be between 0 and 100")
+
+
 def validate_abn(abn: str) -> str:
     """Validate and format an Australian Business Number.
 

@@ -70,3 +70,7 @@ MOVE_TYPES = [
 
 # Units
 UNITS = ['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML']
+
+# Gross profit thresholds (percentage)
+GP_WARN_THRESHOLD = 30.0   # at or above → good (green)
+GP_BAD_THRESHOLD  = 15.0   # below this  → bad  (red); between → warning (orange)

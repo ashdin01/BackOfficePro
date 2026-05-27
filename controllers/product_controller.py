@@ -1,124 +1,71 @@
 import logging
 import os
-from database.connection import get_connection
 import models.product as product_model
+import models.product_plu as product_plu_model
+import models.product_queries as product_queries_model
 import models.product_suppliers as ps_model
 import models.stock_on_hand as soh_model
 import models.barcode_alias as alias_model
+import models.plu_barcode_map as plu_map_model
+import models.product_selling_units as selling_units_model
+import models.stock_movements as movements_model
+import models.po_lines as po_lines_model
 
 
-def update_cost_price(barcode, cost):
+def update_cost_price(barcode, cost) -> None:
     """Update the cost_price on the product master record."""
-    conn = get_connection()
-    try:
-        conn.execute(
-            "UPDATE products SET cost_price=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
-            (cost, barcode)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    product_model.update_cost_price(barcode, cost)
 
 
-def get_selling_unit_master(barcode):
+def get_selling_unit_master(barcode) -> dict | None:
     """
     If barcode is an active selling unit, return a dict with master_barcode,
     master_desc, label, unit_qty. Returns None if it is not a selling unit.
     """
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            """
-            SELECT su.master_barcode, su.label, su.unit_qty,
-                   p.description AS master_desc
-            FROM product_selling_units su
-            JOIN products p ON su.master_barcode = p.barcode
-            WHERE su.barcode = ? AND su.active = 1
-            """,
-            (barcode,)
-        ).fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
+    return selling_units_model.get_master(barcode)
 
 
-def check_barcode_available(barcode):
+def check_barcode_available(barcode) -> str | None:
     """Returns the description of the product using this barcode, or None if free."""
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT description FROM products WHERE barcode=?", (barcode,)
-        ).fetchone()
-        return row['description'] if row else None
-    finally:
-        conn.close()
+    return product_model.check_barcode_available(barcode)
 
 
-def rename_barcode(old_bc, new_bc):
+def rename_barcode(old_bc, new_bc) -> None:
     """
     Rename a barcode across all referencing tables atomically.
     Raises ValueError if new_bc is already in use.
     Raises on DB error after rolling back.
     """
-    owner = check_barcode_available(new_bc)
-    if owner is not None:
-        raise ValueError(f"Barcode {new_bc!r} already belongs to: {owner}")
-
-    conn = get_connection()
-    try:
-        conn.execute("PRAGMA defer_foreign_keys = ON")
-        conn.execute("UPDATE products SET barcode=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
-                     (new_bc, old_bc))
-        conn.execute("UPDATE stock_movements SET barcode=? WHERE barcode=?", (new_bc, old_bc))
-        conn.execute("UPDATE stock_on_hand SET barcode=? WHERE barcode=?", (new_bc, old_bc))
-        conn.execute("UPDATE po_lines SET barcode=? WHERE barcode=?", (new_bc, old_bc))
-        conn.execute("UPDATE product_suppliers SET barcode=? WHERE barcode=?", (new_bc, old_bc))
-        conn.execute("UPDATE barcode_aliases SET master_barcode=? WHERE master_barcode=?", (new_bc, old_bc))
-        conn.execute("UPDATE barcode_aliases SET alias_barcode=? WHERE alias_barcode=?", (new_bc, old_bc))
-        conn.execute("UPDATE plu_barcode_map SET barcode=? WHERE barcode=?", (new_bc, old_bc))
-        conn.execute("UPDATE stocktake_counts SET barcode=? WHERE barcode=?", (new_bc, old_bc))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        logging.error(f"Barcode rename failed {old_bc!r} → {new_bc!r}: {e}", exc_info=True)
-        raise
-    finally:
-        conn.close()
+    product_model.rename_barcode(old_bc, new_bc)
 
 
-def get_stock_on_order(barcode):
+def get_stock_on_order(barcode) -> float:
     """Returns total outstanding units across open POs for a barcode."""
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT COALESCE(SUM((pl.ordered_qty - pl.received_qty) * "
-            "COALESCE(p.pack_qty, 1)), 0) "
-            "FROM po_lines pl "
-            "JOIN purchase_orders po ON po.id = pl.po_id "
-            "JOIN products p ON p.barcode = pl.barcode "
-            "WHERE pl.barcode=? AND po.status IN ('DRAFT','SENT','PARTIAL') "
-            "AND (pl.ordered_qty - pl.received_qty) > 0",
-            (barcode,)
-        ).fetchone()
-        return int(row[0]) if row else 0
-    finally:
-        conn.close()
+    return po_lines_model.get_on_order_total(barcode)
+
+
+def get_stock_on_order_detail(barcode) -> list[dict]:
+    """Returns per-PO breakdown of outstanding units for a barcode."""
+    return po_lines_model.get_on_order_detail(barcode)
 
 
 def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
                  group_id, department_id, supplier_id, unit, sell_price, cost_price,
                  tax_rate, reorder_point, reorder_max, variable_weight, expected,
-                 active, auto_reorder, product_suppliers):
+                 active, auto_reorder, product_suppliers) -> None:
     """
     Save product fields and supplier associations.
     Raises ValueError on validation failure.
     Raises on DB error.
     """
+    from utils.validators import positive_number, percentage
     if not description.strip():
         raise ValueError("Description is required.")
+    positive_number(sell_price,   "Sell price")
+    positive_number(cost_price,   "Cost price")
+    percentage(tax_rate,          "Tax rate")
+    positive_number(reorder_point, "Reorder point")
+    positive_number(reorder_max,   "Reorder max")
 
     product_model.update(
         barcode=barcode,
@@ -146,7 +93,7 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
 
 
 def get_product_suppliers(barcode, fallback_supplier_id=None,
-                          fallback_sku='', fallback_pack_qty=1, fallback_pack_unit='EA'):
+                          fallback_sku='', fallback_pack_qty=1, fallback_pack_unit='EA') -> list[dict]:
     """
     Return supplier entries for a product as a list of dicts:
     {supplier_id, supplier_name, is_default, supplier_sku, pack_qty, pack_unit}
@@ -174,269 +121,101 @@ def get_product_suppliers(barcode, fallback_supplier_id=None,
     return []
 
 
-def get_movement_history(barcode, move_type=None):
+def get_movement_history(barcode, move_type=None) -> list[dict]:
     """
     Return stock movement rows for a product, newest first.
     Each row: (movement_type, quantity, reference, notes, created_at)
     Optionally filter by a specific movement_type string.
     """
-    conn = get_connection()
-    try:
-        sql = """
-            SELECT movement_type, quantity, reference, notes, created_at
-            FROM stock_movements
-            WHERE barcode = ?
-        """
-        params = [barcode]
-        if move_type and move_type != "ALL":
-            sql += " AND movement_type = ?"
-            params.append(move_type)
-        sql += " ORDER BY created_at DESC"
-        return conn.execute(sql, params).fetchall()
-    finally:
-        conn.close()
+    return movements_model.get_by_barcode(barcode, move_type)
 
 
-def get_all_plu_products():
+def get_all_plu_products() -> list[dict]:
     """All products that have a PLU assigned, ordered by PLU numerically then barcode."""
-    conn = get_connection()
-    try:
-        return [dict(r) for r in conn.execute("""
-            SELECT p.barcode, p.plu, p.description, p.active,
-                   d.name AS dept_name, s.name AS supplier_name
-            FROM products p
-            LEFT JOIN departments d ON d.id = p.department_id
-            LEFT JOIN suppliers   s ON s.id = p.supplier_id
-            WHERE p.plu IS NOT NULL AND p.plu != ''
-            ORDER BY CAST(p.plu AS INTEGER), p.barcode
-        """).fetchall()]
-    finally:
-        conn.close()
+    return product_plu_model.get_all_plu()
 
 
-def get_duplicate_plu_groups():
+def get_duplicate_plu_groups() -> list[dict]:
     """
     Returns a list of dicts for every product sharing a PLU with at least one other product.
     Rows are grouped by PLU; within a group products are sorted by active desc then barcode.
     """
-    conn = get_connection()
-    try:
-        return [dict(r) for r in conn.execute("""
-            SELECT p.plu, p.barcode, p.description, p.active,
-                   d.name AS dept_name, s.name AS supplier_name
-            FROM products p
-            LEFT JOIN departments d ON d.id = p.department_id
-            LEFT JOIN suppliers   s ON s.id = p.supplier_id
-            WHERE p.plu IN (
-                SELECT plu FROM products
-                WHERE plu IS NOT NULL AND plu != ''
-                GROUP BY plu HAVING COUNT(*) > 1
-            )
-            ORDER BY CAST(p.plu AS INTEGER), p.active DESC, p.barcode
-        """).fetchall()]
-    finally:
-        conn.close()
+    return product_plu_model.get_duplicate_plu_groups()
 
 
-def get_plu_map_conflicts():
+def get_plu_map_conflicts() -> list[dict]:
     """
     Barcodes where plu_barcode_map.plu differs from products.plu.
     Returns list of dicts with keys: map_plu, barcode, prod_plu, description.
     """
-    conn = get_connection()
-    try:
-        return [dict(r) for r in conn.execute("""
-            SELECT m.plu AS map_plu, m.barcode, p.plu AS prod_plu, p.description
-            FROM plu_barcode_map m
-            JOIN products p ON p.barcode = m.barcode
-            WHERE p.plu IS NOT NULL AND p.plu != ''
-              AND CAST(p.plu AS INTEGER) != m.plu
-            ORDER BY m.plu
-        """).fetchall()]
-    finally:
-        conn.close()
+    return product_plu_model.get_plu_map_conflicts()
 
 
-def set_product_plu(barcode, new_plu):
+def set_product_plu(barcode, new_plu) -> None:
     """
     Assign a PLU to a product. new_plu may be a string or int; pass '' or None to clear.
     Raises ValueError if new_plu is already used by a different product.
     """
-    new_plu = str(new_plu).strip() if new_plu is not None else ''
-    conn = get_connection()
-    try:
-        if new_plu:
-            conflict = conn.execute(
-                "SELECT barcode FROM products WHERE plu=? AND barcode!=?",
-                (new_plu, barcode)
-            ).fetchone()
-            if conflict:
-                desc = conn.execute(
-                    "SELECT description FROM products WHERE barcode=?",
-                    (conflict['barcode'],)
-                ).fetchone()
-                raise ValueError(
-                    f"PLU {new_plu} is already assigned to "
-                    f"{desc['description'] if desc else conflict['barcode']}"
-                )
-        conn.execute(
-            "UPDATE products SET plu=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
-            (new_plu or None, barcode)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    product_plu_model.set_plu(barcode, new_plu)
 
 
-def delete_plu_map_entry(plu):
+def delete_plu_map_entry(plu) -> None:
     """Delete a single plu_barcode_map row by PLU number (leaves the product record untouched)."""
-    conn = get_connection()
-    try:
-        conn.execute("DELETE FROM plu_barcode_map WHERE plu=?", (int(plu),))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    plu_map_model.delete(plu)
 
 
-def sync_plu_map(barcode, plu):
+def sync_plu_map(barcode, plu) -> None:
     """
     Upsert plu_barcode_map so the map entry matches the products.plu value.
     Pass plu=None or '' to remove the map entry.
     """
-    conn = get_connection()
-    try:
-        if plu:
-            conn.execute(
-                "INSERT INTO plu_barcode_map(plu, barcode) VALUES(?,?) "
-                "ON CONFLICT(plu) DO UPDATE SET barcode=excluded.barcode",
-                (int(plu), barcode)
-            )
-        else:
-            conn.execute("DELETE FROM plu_barcode_map WHERE barcode=?", (barcode,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    plu_map_model.sync(barcode, plu)
 
 
-def get_selling_units(master_barcode):
+def get_selling_units(master_barcode) -> list[dict]:
     """All selling units for a product, ordered by unit_qty. Returns list of dicts."""
-    conn = get_connection()
-    try:
-        return [dict(r) for r in conn.execute(
-            "SELECT id, label, unit_qty, plu, barcode, sell_price "
-            "FROM product_selling_units WHERE master_barcode=? ORDER BY unit_qty",
-            (master_barcode,)
-        ).fetchall()]
-    finally:
-        conn.close()
+    return selling_units_model.get_by_master(master_barcode)
 
 
-def get_selling_unit_by_id(su_id):
+def get_selling_unit_by_id(su_id) -> dict | None:
     """Single selling unit row as a dict, or None."""
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT id, label, unit_qty, plu, barcode, sell_price "
-            "FROM product_selling_units WHERE id=?",
-            (su_id,)
-        ).fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
+    return selling_units_model.get_by_id(su_id)
 
 
-def add_selling_unit(master_barcode, barcode, plu, label, unit_qty, sell_price):
+def add_selling_unit(master_barcode, barcode, plu, label, unit_qty, sell_price) -> None:
     """Insert a new selling unit row."""
-    conn = get_connection()
-    try:
-        conn.execute(
-            "INSERT INTO product_selling_units "
-            "(master_barcode, barcode, plu, label, unit_qty, sell_price) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (master_barcode, barcode, plu, label, unit_qty, sell_price)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    selling_units_model.add(master_barcode, barcode, plu, label, unit_qty, sell_price)
 
 
-def update_selling_unit(su_id, label, unit_qty, plu, barcode, sell_price):
+def update_selling_unit(su_id, label, unit_qty, plu, barcode, sell_price) -> None:
     """Update label, qty, PLU, barcode and price on a selling unit row."""
-    conn = get_connection()
-    try:
-        conn.execute(
-            "UPDATE product_selling_units "
-            "SET label=?, unit_qty=?, plu=?, barcode=?, sell_price=? WHERE id=?",
-            (label, unit_qty, plu, barcode, sell_price, su_id)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    selling_units_model.update(su_id, label, unit_qty, plu, barcode, sell_price)
 
 
-def delete_selling_unit(su_id):
+def delete_selling_unit(su_id) -> None:
     """Delete a selling unit row by id."""
-    conn = get_connection()
-    try:
-        conn.execute("DELETE FROM product_selling_units WHERE id=?", (su_id,))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    selling_units_model.delete(su_id)
 
 
-def get_recent_adjustments(limit=100):
+def get_recent_adjustments(limit=100) -> list[dict]:
     """
     Return the most recent non-sale/receipt stock movements across all products.
     Each row: (created_at, barcode, description, movement_type, quantity, reference, notes)
     """
-    conn = get_connection()
-    try:
-        rows = conn.execute("""
-            SELECT m.created_at, m.barcode, p.description,
-                   m.movement_type, m.quantity, m.reference, m.notes
-            FROM stock_movements m
-            LEFT JOIN products p ON m.barcode = p.barcode
-            WHERE m.movement_type NOT IN ('SALE', 'RECEIPT')
-            ORDER BY m.created_at DESC LIMIT ?
-        """, (limit,)).fetchall()
-        return [tuple(r) for r in rows]
-    finally:
-        conn.close()
+    return movements_model.get_recent_adjustments(limit)
 
 
 # ── GP calculation ────────────────────────────────────────────────────────────
 
-def calculate_gross_profit(sell_price, cost_price, tax_rate):
-    """Return an HTML string for the GP label (colour-coded percentage)."""
-    cost = cost_price * (1 + (tax_rate or 0.0) / 100)
-    if sell_price > 0:
-        gp = (1 - cost / sell_price) * 100
-        color = "green" if gp >= 30 else "orange" if gp >= 15 else "red"
-        return f"<b style='color:{color}'>{gp:.1f}%</b>"
-    return "<b style='color:grey'>--</b>"
+def calculate_gross_profit(sell_price, cost_price, tax_rate) -> float | None:
+    """Return gross profit as a percentage of sell price, or None if sell_price is zero."""
+    from utils.calculations import gross_profit_pct
+    return gross_profit_pct(sell_price, cost_price, tax_rate)
 
 
 # ── Product image helpers ─────────────────────────────────────────────────────
 
-def find_product_image(barcode):
+def find_product_image(barcode) -> str | None:
     """Return the path to an existing product image file, or None."""
     from config.settings import DATA_DIR
     img_dir = os.path.join(DATA_DIR, 'images')
@@ -447,7 +226,7 @@ def find_product_image(barcode):
     return None
 
 
-def prepare_image_destination(barcode):
+def prepare_image_destination(barcode) -> str:
     """
     Create the images directory, remove any alternate-extension copies of the
     product image, and return the canonical .jpg destination path.
@@ -462,7 +241,7 @@ def prepare_image_destination(barcode):
     return os.path.join(img_dir, f"{barcode}.jpg")
 
 
-def delete_product_image(barcode):
+def delete_product_image(barcode) -> None:
     """Delete the product image file if one exists."""
     path = find_product_image(barcode)
     if path:
@@ -471,16 +250,16 @@ def delete_product_image(barcode):
 
 # ── Product model wrappers ────────────────────────────────────────────────────
 
-def get_all_products(active_only=True, include_nonzero_inactive=False):
+def get_all_products(active_only=True, include_nonzero_inactive=False) -> list[dict]:
     return product_model.get_all(active_only=active_only,
                                  include_nonzero_inactive=include_nonzero_inactive)
 
 
-def get_product_by_barcode(barcode):
+def get_product_by_barcode(barcode) -> dict | None:
     return product_model.get_by_barcode(barcode)
 
 
-def get_products_by_barcodes(barcodes):
+def get_products_by_barcodes(barcodes) -> list[dict]:
     return product_model.get_by_barcodes(barcodes)
 
 
@@ -488,8 +267,16 @@ def add_product(barcode, description, department_id, supplier_id=None, unit='EA'
                 sell_price=0, cost_price=0, tax_rate=0, reorder_point=0,
                 reorder_max=0, variable_weight=0, expected=1, brand='',
                 plu='', supplier_sku='', base_sku='', pack_qty=1, pack_unit='EA',
-                group_id=None):
-    product_model.add(barcode, description, department_id, supplier_id=supplier_id,
+                group_id=None) -> None:
+    from utils.validators import positive_number, percentage
+    if not str(description).strip():
+        raise ValueError("Description is required.")
+    positive_number(sell_price,   "Sell price")
+    positive_number(cost_price,   "Cost price")
+    percentage(tax_rate,          "Tax rate")
+    positive_number(reorder_point, "Reorder point")
+    positive_number(reorder_max,   "Reorder max")
+    product_model.create(barcode, description, department_id, supplier_id=supplier_id,
                       unit=unit, sell_price=sell_price, cost_price=cost_price,
                       tax_rate=tax_rate, reorder_point=reorder_point,
                       reorder_max=reorder_max, variable_weight=variable_weight,
@@ -498,34 +285,90 @@ def add_product(barcode, description, department_id, supplier_id=None, unit='EA'
                       pack_qty=pack_qty, pack_unit=pack_unit, group_id=group_id)
 
 
-def search_products(term, active_only=True):
+def search_products(term, active_only=True) -> list[dict]:
     return product_model.search(term, active_only=active_only)
 
 
 # ── Stock on hand wrappers ────────────────────────────────────────────────────
 
-def get_soh_by_barcode(barcode):
+def get_soh_by_barcode(barcode) -> dict | None:
     return soh_model.get_by_barcode(barcode)
 
 
-def get_soh_by_barcodes(barcodes):
+def get_soh_by_barcodes(barcodes) -> list[dict]:
     return soh_model.get_by_barcodes(barcodes)
 
 
-def adjust_soh(barcode, quantity, movement_type, reference='', notes='', created_by=''):
+def adjust_soh(barcode, quantity, movement_type, reference='', notes='', created_by='') -> None:
     soh_model.adjust(barcode, quantity, movement_type,
                      reference=reference, notes=notes, created_by=created_by)
 
 
 # ── Barcode alias wrappers ────────────────────────────────────────────────────
 
-def get_aliases(master_barcode):
+def get_aliases(master_barcode) -> list[dict]:
     return alias_model.get_aliases(master_barcode)
 
 
-def add_alias(alias_barcode, master_barcode, description=''):
+def add_alias(alias_barcode, master_barcode, description='') -> None:
     alias_model.add(alias_barcode, master_barcode, description)
 
 
-def delete_alias(alias_id):
+def delete_alias(alias_id) -> None:
     alias_model.delete(alias_id)
+
+
+def get_all_for_pos(limit=200, offset=0) -> list[dict]:
+    """Product list with POS-specific fields for cache sync."""
+    return product_queries_model.get_all_for_pos(limit, offset)
+
+
+def get_product_by_plu(plu: int) -> dict | None:
+    """
+    Look up a product by PLU for POS.
+    Tries: plu_barcode_map → products.plu column → product_selling_units.plu column.
+    Returns a POS-display dict or None.
+    """
+    barcode = plu_map_model.find_barcode_by_plu(plu)
+    if not barcode:
+        barcode = product_plu_model.find_barcode_by_plu(str(plu))
+    if not barcode:
+        su_barcode = selling_units_model.find_barcode_by_plu(str(plu))
+        if su_barcode:
+            return get_product_for_pos(su_barcode)
+    if not barcode:
+        return None
+    return product_queries_model.get_with_soh(barcode)
+
+
+def get_product_for_pos(barcode: str) -> dict | None:
+    """
+    Get a product with SOH for POS, with selling unit support. Returns dict or None.
+    Resolves barcode aliases internally.
+    """
+    from models.barcode_alias import resolve as _resolve
+    resolved = _resolve(barcode)
+
+    row = product_queries_model.get_with_soh(resolved)
+    if row:
+        return row
+
+    su = selling_units_model.get_for_pos(resolved)
+    if su:
+        unit_qty = su['unit_qty'] or 0
+        soh_in_units = int(su['master_soh'] // unit_qty) if unit_qty > 0 else 0
+        return {
+            'barcode':        resolved,
+            'master_barcode': su['master_barcode'],
+            'plu':            su['su_plu'] or su['plu'] or '',
+            'description':    su['label'],
+            'sell_price':     su['sell_price'],
+            'cost_price':     su['cost_price'],
+            'tax_rate':       su['tax_rate'],
+            'unit':           su['unit'],
+            'brand':          su['brand'],
+            'dept_name':      su['dept_name'],
+            'unit_qty':       su['unit_qty'],
+            'soh_qty':        soh_in_units,
+        }
+    return None

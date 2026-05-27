@@ -16,7 +16,7 @@ def get_all_active():
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_username(username: str):
@@ -27,7 +27,7 @@ def get_by_username(username: str):
         ).fetchone()
         return dict(row) if row else None
     finally:
-        conn.close()
+        conn.release()
 
 
 def verify_pin(username: str, pin: str) -> bool:
@@ -62,8 +62,11 @@ def set_pin(username: str, pin: str):
             (_hash_pin(pin), username)
         )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def create(username: str, full_name: str, role: str, pin: str):
@@ -74,8 +77,11 @@ def create(username: str, full_name: str, role: str, pin: str):
             (username, full_name, role, _hash_pin(pin))
         )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_all():
@@ -87,7 +93,7 @@ def get_all():
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
-        conn.close()
+        conn.release()
 
 
 def update(user_id: int, username: str, full_name: str, role: str):
@@ -98,8 +104,11 @@ def update(user_id: int, username: str, full_name: str, role: str):
             (username, full_name, role, user_id)
         )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def set_active(user_id: int, active: bool):
@@ -107,8 +116,11 @@ def set_active(user_id: int, active: bool):
     try:
         conn.execute("UPDATE users SET active=? WHERE id=?", (1 if active else 0, user_id))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def set_pin_by_id(user_id: int, pin: str):
@@ -116,8 +128,11 @@ def set_pin_by_id(user_id: int, pin: str):
     try:
         conn.execute("UPDATE users SET pin=? WHERE id=?", (_hash_pin(pin), user_id))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def has_any_pin_set() -> bool:
@@ -129,4 +144,4 @@ def has_any_pin_set() -> bool:
         ).fetchone()
         return row[0] > 0
     finally:
-        conn.close()
+        conn.release()

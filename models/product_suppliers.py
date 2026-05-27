@@ -16,7 +16,7 @@ def get_by_barcode(barcode):
             ORDER BY ps.is_default DESC, s.name
         """, (barcode,)).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_supplier(supplier_id, default_only=True):
@@ -34,7 +34,7 @@ def get_by_supplier(supplier_id, default_only=True):
         sql += " ORDER BY p.description"
         return conn.execute(sql, (supplier_id,)).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def save_for_barcode(barcode, supplier_rows):
@@ -65,5 +65,8 @@ def save_for_barcode(barcode, supplier_rows):
             (default_id, barcode)
         )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()

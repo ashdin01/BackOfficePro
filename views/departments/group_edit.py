@@ -88,7 +88,7 @@ class GroupEdit(QWidget):
                 dept_ctrl.update_group(self.group_id, dept_id, code, name,
                                        int(self.active.isChecked()))
             else:
-                dept_ctrl.add_group(dept_id, code, name)
+                dept_ctrl.create_group(dept_id, code, name)
             if self.on_save:
                 self.on_save()
             self.close()

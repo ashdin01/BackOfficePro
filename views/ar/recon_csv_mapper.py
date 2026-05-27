@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 import controllers.ar_controller as ar_ctrl
+from utils.error_dialog import show_error
 
 FIELD_OPTIONS = ['— ignore —', 'Date', 'Amount', 'Debit', 'Credit',
                  'Description', 'Reference', 'Balance']
@@ -267,7 +268,7 @@ class ReconImportDialog(QDialog):
             with open(self._csv_path, newline='', encoding='utf-8-sig') as f:
                 all_rows = list(csv.reader(f, delimiter=self._delimiter()))
         except Exception as e:
-            QMessageBox.critical(self, "Read Error", str(e))
+            show_error(self, "Could not read the CSV file.", e, title="Read Error")
             return
 
         skip = self.skip_spin.value()
@@ -376,7 +377,7 @@ class ReconImportDialog(QDialog):
             with open(self._csv_path, newline='', encoding='utf-8-sig') as f:
                 all_rows = list(csv.reader(f, delimiter=self._delimiter()))
         except Exception as e:
-            QMessageBox.critical(self, "Read Error", str(e))
+            show_error(self, "Could not read the CSV file.", e, title="Read Error")
             return
 
         all_rows = all_rows[skip:]

@@ -475,7 +475,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
                     bank_account_number=self.bank_account_number.text().strip() if self._role == "ADMIN" else self._saved_bank_account_number,
                 )
             else:
-                supplier_ctrl.add(
+                supplier_ctrl.create(
                     code, name,
                     self.contact.text().strip(),
                     phone,

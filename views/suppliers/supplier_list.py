@@ -1,31 +1,27 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit
+    QTableWidget, QTableWidgetItem, QLabel, QHeaderView
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
+from views.widgets.search_bar import SearchBar
+from views.base_view import BaseView
 import controllers.supplier_controller as supplier_ctrl
 
 
-class SupplierList(KeyboardMixin, QWidget):
+class SupplierList(KeyboardMixin, BaseView):
     def __init__(self, current_user=None):
         super().__init__()
         self._current_user = current_user or {}
         self._open_wins = []
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search suppliers...")
-        self._search_timer = QTimer()
-        self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(500)
-        self._search_timer.timeout.connect(lambda: self._search(self.search.text()))
-        self.search.textChanged.connect(lambda _: self._search_timer.start())
-        self.search.returnPressed.connect(lambda: self.table.setFocus())
+        self.search = SearchBar("Search suppliers…", interval=500)
+        self.search.search_changed.connect(lambda: self._search(self.search.text()))
         top.addWidget(self.search)
         btn_add = QPushButton("&Add Supplier")
         btn_add.clicked.connect(self._add)
@@ -41,6 +37,7 @@ class SupplierList(KeyboardMixin, QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(self._edit)
+        self.search.returnPressed.connect(self.table.setFocus)
         layout.addWidget(self.table)
 
         self.status = QLabel("")

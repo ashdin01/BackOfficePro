@@ -4,18 +4,18 @@ import sqlite3
 from datetime import datetime
 
 from config.settings import DATABASE_PATH
-from database.connection import get_connection
+import models.settings as settings_model
 
 _BACKUP_DIR = os.path.join(os.path.expanduser("~"), "BackOfficeBackups")
 _KEEP_COUNT = 30
 _REQUIRED_TABLES = {"products", "suppliers", "departments", "purchase_orders"}
 
 
-def get_backup_dir():
+def get_backup_dir() -> str:
     return _BACKUP_DIR
 
 
-def do_backup(dest_path):
+def do_backup(dest_path) -> tuple[bool, str]:
     """Snapshot the live DB to dest_path using the SQLite online backup API.
     Returns (success: bool, message: str)."""
     try:
@@ -35,7 +35,7 @@ def do_backup(dest_path):
         return False, str(e)
 
 
-def silent_auto_backup():
+def silent_auto_backup() -> str | None:
     """
     Create a timestamped backup, prune old ones beyond _KEEP_COUNT.
     Returns the dest path on success, None on failure.
@@ -53,26 +53,16 @@ def silent_auto_backup():
         for old in files[:-_KEEP_COUNT]:
             os.remove(old)
     except Exception:
-        pass
+        logging.exception("backup pruning failed")
     return dest
 
 
-def get_backup_email():
+def get_backup_email() -> str:
     """Return the backup_email setting value, or '' if not set."""
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key='backup_email'"
-        ).fetchone()
-        return (row['value'] or '').strip() if row else ''
-    except Exception as e:
-        logging.error("Could not read backup_email setting: %s", e, exc_info=True)
-        return ''
-    finally:
-        conn.close()
+    return (settings_model.get_setting('backup_email') or '').strip()
 
 
-def get_last_backup_time():
+def get_last_backup_time() -> datetime | None:
     """
     Return the datetime of the most recent .db file in the backup dir, or None.
     """
@@ -85,11 +75,11 @@ def get_last_backup_time():
             ts = files[0].replace("supermarket_", "").replace(".db", "")
             return datetime.strptime(ts, "%Y%m%d_%H%M%S")
     except Exception:
-        pass
+        logging.exception("get_last_backup_time failed")
     return None
 
 
-def validate_backup_file(path):
+def validate_backup_file(path) -> tuple[bool, set]:
     """
     Check that path is a readable SQLite file with the required tables.
     Returns (valid: bool, missing_tables: set).
@@ -106,18 +96,28 @@ def validate_backup_file(path):
         raise RuntimeError(f"Could not read file: {e}") from e
 
 
-def restore_backup(src_path):
+def restore_backup(src_path) -> None:
     """
     Restore src_path over the live database using the SQLite backup API.
     Re-validates required tables on the same connection used to copy,
     eliminating any window between the caller's validation and the write.
     Raises RuntimeError on validation failure, or any sqlite3 error on copy failure.
+
+    Closes the calling thread's pooled connection before writing, then
+    invalidates all other threads' connections so they reopen fresh handles
+    to the restored database on their next query.
     """
+    from database.connection import close_thread_connection, invalidate_all_connections
+
     size_kb = os.path.getsize(src_path) / 1024
     logging.warning(
         "Database restore initiated: source=%s (%.1f KB) -> dest=%s",
         src_path, size_kb, DATABASE_PATH,
     )
+
+    # Release our own pooled handle before overwriting the file.
+    close_thread_connection()
+
     src = sqlite3.connect(src_path)
     try:
         tables = {r[0] for r in src.execute(
@@ -135,4 +135,9 @@ def restore_backup(src_path):
             dest.close()
     finally:
         src.close()
+
+    # Invalidate every thread's cached connection so the next get_connection()
+    # call opens a fresh handle to the restored database.
+    invalidate_all_connections()
+
     logging.warning("Database restore complete: %s", src_path)

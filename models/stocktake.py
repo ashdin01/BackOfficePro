@@ -18,7 +18,7 @@ def get_all_sessions():
             ORDER BY st.started_at DESC
         """).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_session(session_id):
@@ -31,7 +31,7 @@ def get_session(session_id):
             WHERE st.id = ?
         """, (session_id,)).fetchone()
     finally:
-        conn.close()
+        conn.release()
 
 
 def create_session(label, department_id=None, notes='', created_by=''):
@@ -44,8 +44,11 @@ def create_session(label, department_id=None, notes='', created_by=''):
         session_id = cur.lastrowid
         conn.commit()
         return session_id
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def close_session(session_id):
@@ -57,8 +60,11 @@ def close_session(session_id):
             WHERE id = ?
         """, (session_id,))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 # ── Counts ────────────────────────────────────────────────────────────────────
@@ -78,30 +84,36 @@ def get_counts(session_id):
             ORDER BY sc.scanned_at DESC
         """, (session_id,)).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def upsert_count(session_id, barcode, qty):
-    """Accumulate qty onto an existing count line, or insert a new one."""
+    """Accumulate qty onto an existing count line, or insert a new one.
+
+    Uses INSERT ... ON CONFLICT DO UPDATE so the read-modify-write is a single
+    atomic statement with no race window between concurrent device scans.
+    Raises ValueError if the session does not exist or is already CLOSED.
+    """
     conn = get_connection()
     try:
-        existing = conn.execute(
-            "SELECT id FROM stocktake_counts WHERE session_id=? AND barcode=?",
-            (session_id, barcode)
+        sess = conn.execute(
+            "SELECT status FROM stocktake_sessions WHERE id=?", (session_id,)
         ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE stocktake_counts SET counted_qty=counted_qty+?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
-                (qty, existing['id'])
-            )
-        else:
-            conn.execute(
-                "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
-                (session_id, barcode, qty)
-            )
+        if not sess or sess['status'] != 'OPEN':
+            raise ValueError(f"Stocktake session {session_id} is not open")
+        conn.execute("""
+            INSERT INTO stocktake_counts (session_id, barcode, counted_qty)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id, barcode) DO UPDATE SET
+                counted_qty = counted_qty + excluded.counted_qty,
+                scanned_at  = CURRENT_TIMESTAMP
+        """, (session_id, barcode, qty))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_count_for_barcode(session_id, barcode):
@@ -114,7 +126,7 @@ def get_count_for_barcode(session_id, barcode):
         ).fetchone()
         return float(row['counted_qty']) if row else 0.0
     finally:
-        conn.close()
+        conn.release()
 
 
 def delete_count(count_id):
@@ -122,8 +134,11 @@ def delete_count(count_id):
     try:
         conn.execute("DELETE FROM stocktake_counts WHERE id=?", (count_id,))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def import_from_csv(session_id, filepath):
@@ -209,8 +224,11 @@ def import_from_csv(session_id, filepath):
                     )
                 imported += 1
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
-            conn.close()
+            conn.release()
 
     logging.info(
         "Stocktake CSV import: session=%s file=%r imported=%d skipped=%d errors=%d",
@@ -324,8 +342,11 @@ def import_from_sqlite(session_id, filepath):
                 )
             imported += 1
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
     logging.info(
         "Stocktake SQLite import: session=%s file=%r imported=%d skipped=%d errors=%d",
@@ -373,11 +394,14 @@ def get_variance_report(session_id):
             ORDER BY d.name, p.description
         """, [session_id] + params_base).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def apply_session(session_id):
     """Write counted quantities to stock_on_hand and log movements."""
+    from database.audit_context import get_user, get_source
+    who = get_user()
+    src = get_source()
     conn = get_connection()
     try:
         session = conn.execute(
@@ -411,9 +435,9 @@ def apply_session(session_id):
             """, (barcode, counted))
             conn.execute("""
                 INSERT INTO stock_movements
-                    (barcode, movement_type, quantity, reference, notes)
-                VALUES (?, 'STOCKTAKE', ?, ?, ?)
-            """, (barcode, diff, f"Stocktake #{session_id}", "Applied from stocktake"))
+                    (barcode, movement_type, quantity, reference, notes, created_by, source)
+                VALUES (?, 'STOCKTAKE', ?, ?, ?, ?, ?)
+            """, (barcode, diff, f"Stocktake #{session_id}", "Applied from stocktake", who, src))
         conn.execute("""
             UPDATE stocktake_sessions
             SET status='CLOSED', closed_at=CURRENT_TIMESTAMP
@@ -428,4 +452,4 @@ def apply_session(session_id):
         conn.rollback()
         raise
     finally:
-        conn.close()
+        conn.release()

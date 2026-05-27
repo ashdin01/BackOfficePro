@@ -1,3 +1,4 @@
+import csv
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -7,26 +8,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
-
-class NumItem(QTableWidgetItem):
-    """Sorts numerically, stripping $, %, commas and +/-."""
-    def __lt__(self, other):
-        def _val(t):
-            try:
-                return float(t.replace('$','').replace('%','').replace(',','').replace('+','').strip())
-            except ValueError:
-                return t
-        return _val(self.text()) < _val(other.text())
+from views.base_view import BaseView
+from views.widgets.table_items import center_item, right_item
 
 
-import csv
-
-
-class ReorderReport(QWidget):
+class ReorderReport(BaseView):
     def __init__(self):
         super().__init__()
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -46,7 +36,7 @@ class ReorderReport(QWidget):
         self.sup_filter.addItem("All Suppliers", None)
         for s in report_ctrl.get_all_suppliers():
             self.sup_filter.addItem(s['name'], s['id'])
-        self.sup_filter.currentIndexChanged.connect(self._load)
+        self.sup_filter.currentIndexChanged.connect(lambda _: self.load())
         filter_row.addWidget(self.sup_filter)
 
         filter_row.addStretch()
@@ -112,14 +102,10 @@ class ReorderReport(QWidget):
         self.cost_label.setText(f"<b>Estimated Order Cost: ${total_cost:,.2f}</b>")
 
     def _center(self, row, col, text):
-        item = NumItem(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.table.setItem(row, col, item)
+        self.table.setItem(row, col, center_item(text))
 
     def _right(self, row, col, text):
-        item = NumItem(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.table.setItem(row, col, item)
+        self.table.setItem(row, col, right_item(text))
 
     def _export(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "reorder_report.csv"), "CSV (*.csv)")

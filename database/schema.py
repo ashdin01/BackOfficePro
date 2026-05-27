@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS departments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     code        TEXT    NOT NULL UNIQUE,
     name        TEXT    NOT NULL,
-    active      INTEGER NOT NULL DEFAULT 1
+    active      INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
 );
 
 INSERT OR IGNORE INTO departments (code, name) VALUES
@@ -32,20 +32,20 @@ CREATE TABLE IF NOT EXISTS suppliers (
     account_number  TEXT,
     payment_terms   TEXT,
     notes           TEXT,
-    active          INTEGER NOT NULL DEFAULT 1,
+    active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     abn             TEXT    DEFAULT '',
     rep_name        TEXT    DEFAULT '',
     rep_phone       TEXT    DEFAULT '',
-    order_minimum   REAL    DEFAULT 0,
+    order_minimum   REAL    DEFAULT 0   CHECK (order_minimum >= 0),
     email_orders        TEXT    DEFAULT '',
     email_admin         TEXT    DEFAULT '',
     email_accounts      TEXT    DEFAULT '',
     email_rep           TEXT    DEFAULT '',
-    online_order        INTEGER NOT NULL DEFAULT 0,
+    online_order        INTEGER NOT NULL DEFAULT 0 CHECK (online_order        IN (0,1)),
     online_order_note   TEXT    DEFAULT '',
     order_days              TEXT    DEFAULT '',
-    order_first_monday      INTEGER NOT NULL DEFAULT 0,
+    order_first_monday      INTEGER NOT NULL DEFAULT 0 CHECK (order_first_monday IN (0,1)),
     order_fortnightly_start TEXT    DEFAULT '',
     delivery_days           TEXT    DEFAULT '',
     bank_account_name       TEXT    DEFAULT '',
@@ -55,8 +55,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
 
 CREATE TABLE IF NOT EXISTS product_suppliers (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    barcode      TEXT    NOT NULL REFERENCES products(barcode),
-    supplier_id  INTEGER NOT NULL REFERENCES suppliers(id),
+    barcode      TEXT    NOT NULL REFERENCES products(barcode) ON DELETE CASCADE,
+    supplier_id  INTEGER NOT NULL REFERENCES suppliers(id)     ON DELETE CASCADE,
     is_default   INTEGER NOT NULL DEFAULT 0,
     supplier_sku TEXT    DEFAULT '',
     pack_qty     INTEGER DEFAULT 1,
@@ -72,8 +72,8 @@ CREATE TABLE IF NOT EXISTS product_groups (
     department_id INTEGER NOT NULL,
     code          TEXT    NOT NULL,
     name          TEXT    NOT NULL,
-    active        INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY (department_id) REFERENCES departments(id),
+    active        INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE RESTRICT,
     UNIQUE(department_id, code)
 );
 
@@ -85,26 +85,27 @@ CREATE TABLE IF NOT EXISTS products (
     department_id   INTEGER NOT NULL,
     supplier_id     INTEGER,
     unit            TEXT    DEFAULT 'EA',
-    sell_price      REAL    DEFAULT 0,
-    cost_price      REAL    DEFAULT 0,
-    tax_rate        REAL    DEFAULT 0,
-    reorder_point   REAL    DEFAULT 0,
-    reorder_qty     REAL    DEFAULT 0,
-    reorder_max     REAL    DEFAULT 0,
-    pack_qty        INTEGER DEFAULT 1,
+    sell_price      REAL    DEFAULT 0    CHECK (sell_price   >= 0),
+    cost_price      REAL    DEFAULT 0    CHECK (cost_price   >= 0),
+    tax_rate        REAL    DEFAULT 0    CHECK (tax_rate  BETWEEN 0 AND 100),
+    reorder_point   REAL    DEFAULT 0    CHECK (reorder_point >= 0),
+    reorder_qty     REAL    DEFAULT 0    CHECK (reorder_qty   >= 0),
+    reorder_max     REAL    DEFAULT 0    CHECK (reorder_max   >= 0),
+    pack_qty        INTEGER DEFAULT 1    CHECK (pack_qty > 0),
     pack_unit       TEXT    DEFAULT 'EA',
-    variable_weight INTEGER NOT NULL DEFAULT 0,
-    expected        INTEGER NOT NULL DEFAULT 1,
-    active          INTEGER NOT NULL DEFAULT 1,
+    variable_weight INTEGER NOT NULL DEFAULT 0 CHECK (variable_weight IN (0,1)),
+    expected        INTEGER NOT NULL DEFAULT 1 CHECK (expected        IN (0,1)),
+    active          INTEGER NOT NULL DEFAULT 1 CHECK (active          IN (0,1)),
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     brand           TEXT    DEFAULT '',
     sku             TEXT    DEFAULT '',
     supplier_sku    TEXT    DEFAULT '',
-    group_id        INTEGER REFERENCES product_groups(id),
-    auto_reorder    INTEGER DEFAULT 0,
-    FOREIGN KEY (department_id) REFERENCES departments(id),
-    FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)
+    group_id        INTEGER,
+    auto_reorder    INTEGER DEFAULT 0    CHECK (auto_reorder IN (0,1)),
+    FOREIGN KEY (department_id) REFERENCES departments(id)    ON DELETE RESTRICT,
+    FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)      ON DELETE SET NULL,
+    FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_department ON products(department_id);
@@ -115,7 +116,7 @@ CREATE TABLE IF NOT EXISTS stock_on_hand (
     barcode         TEXT    PRIMARY KEY,
     quantity        REAL    NOT NULL DEFAULT 0,
     last_updated    DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (barcode) REFERENCES products(barcode)
+    FOREIGN KEY (barcode) REFERENCES products(barcode) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS stock_movements (
@@ -127,7 +128,8 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     notes           TEXT,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by      TEXT,
-    FOREIGN KEY (barcode) REFERENCES products(barcode)
+    source          TEXT    DEFAULT '',
+    FOREIGN KEY (barcode) REFERENCES products(barcode) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_movements_barcode  ON stock_movements(barcode);
@@ -138,7 +140,10 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     po_number       TEXT    NOT NULL UNIQUE,
     supplier_id     INTEGER NOT NULL,
-    status          TEXT    NOT NULL DEFAULT 'DRAFT',
+    status          TEXT    NOT NULL DEFAULT 'DRAFT'
+                        CHECK (status IN ('DRAFT','SENT','PARTIAL',
+                                          'RECEIVED','CANCELLED',
+                                          'REVERSED','CLOSED')),
     po_type         TEXT    NOT NULL DEFAULT 'PO',
     delivery_date   DATE,
     notes           TEXT,
@@ -148,7 +153,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     created_by      TEXT,
     updated_at      DATETIME,
     supplier_invoice_number TEXT DEFAULT '',
-    FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_po_supplier ON purchase_orders(supplier_id);
@@ -168,8 +173,8 @@ CREATE TABLE IF NOT EXISTS po_lines (
     is_promo        INTEGER NOT NULL DEFAULT 0,
     is_note         INTEGER NOT NULL DEFAULT 0,
     sort_order      INTEGER,
-    FOREIGN KEY (po_id)   REFERENCES purchase_orders(id),
-    FOREIGN KEY (barcode) REFERENCES products(barcode)
+    FOREIGN KEY (po_id)   REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (barcode) REFERENCES products(barcode)   ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_po_lines_po_id   ON po_lines(po_id);
@@ -178,7 +183,7 @@ CREATE INDEX IF NOT EXISTS idx_po_lines_barcode ON po_lines(barcode);
 CREATE TABLE IF NOT EXISTS barcode_aliases (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     alias_barcode  TEXT    NOT NULL UNIQUE,
-    master_barcode TEXT    NOT NULL REFERENCES products(barcode),
+    master_barcode TEXT    NOT NULL REFERENCES products(barcode) ON DELETE CASCADE,
     description    TEXT,
     created_at     TEXT    DEFAULT (datetime('now'))
 );
@@ -187,13 +192,13 @@ CREATE TABLE IF NOT EXISTS barcode_aliases (
 -- base-unit stock pool tracked on master_barcode.
 CREATE TABLE IF NOT EXISTS product_selling_units (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    master_barcode TEXT    NOT NULL REFERENCES products(barcode),
+    master_barcode TEXT    NOT NULL REFERENCES products(barcode) ON DELETE CASCADE,
     barcode        TEXT    UNIQUE,              -- scannable barcode (optional)
     plu            TEXT,                        -- PLU number (optional)
     label          TEXT    NOT NULL,            -- e.g. "Case (24×375ml)"
-    unit_qty       REAL    NOT NULL DEFAULT 1,  -- base units consumed per sale
-    sell_price     REAL    NOT NULL DEFAULT 0,
-    active         INTEGER NOT NULL DEFAULT 1,
+    unit_qty       REAL    NOT NULL DEFAULT 1 CHECK (unit_qty   > 0),  -- base units consumed per sale
+    sell_price     REAL    NOT NULL DEFAULT 0 CHECK (sell_price >= 0),
+    active         INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_selling_units_master  ON product_selling_units(master_barcode);
@@ -203,12 +208,13 @@ CREATE TABLE IF NOT EXISTS stocktake_sessions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     label           TEXT    NOT NULL,
     department_id   INTEGER,
-    status          TEXT    NOT NULL DEFAULT 'OPEN',
+    status          TEXT    NOT NULL DEFAULT 'OPEN'
+                        CHECK (status IN ('OPEN','CLOSED')),
     started_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     closed_at       DATETIME,
     created_by      TEXT,
     notes           TEXT,
-    FOREIGN KEY (department_id) REFERENCES departments(id)
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS stocktake_counts (
@@ -217,8 +223,9 @@ CREATE TABLE IF NOT EXISTS stocktake_counts (
     barcode         TEXT    NOT NULL,
     counted_qty     REAL    NOT NULL DEFAULT 0,
     scanned_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES stocktake_sessions(id),
-    FOREIGN KEY (barcode)    REFERENCES products(barcode)
+    FOREIGN KEY (session_id) REFERENCES stocktake_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (barcode)    REFERENCES products(barcode) ON DELETE CASCADE,
+    UNIQUE(session_id, barcode)
 );
 
 CREATE INDEX IF NOT EXISTS idx_stocktake_counts_session ON stocktake_counts(session_id);
@@ -228,18 +235,20 @@ CREATE TABLE IF NOT EXISTS bundles (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     name         TEXT    NOT NULL,
     description  TEXT    DEFAULT '',
-    required_qty INTEGER NOT NULL DEFAULT 4,
-    price        REAL    NOT NULL DEFAULT 0,
-    active       INTEGER NOT NULL DEFAULT 1,
+    required_qty INTEGER NOT NULL DEFAULT 4 CHECK (required_qty > 0),
+    price        REAL    NOT NULL DEFAULT 0 CHECK (price >= 0),
+    active       INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS bundle_eligible (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    bundle_id   INTEGER NOT NULL REFERENCES bundles(id),
+    bundle_id   INTEGER NOT NULL,
     barcode     TEXT    NOT NULL,
     description TEXT    DEFAULT '',
     unit_qty    INTEGER DEFAULT 1,
+    FOREIGN KEY (bundle_id) REFERENCES bundles(id)       ON DELETE CASCADE,
+    FOREIGN KEY (barcode)   REFERENCES products(barcode) ON DELETE CASCADE,
     UNIQUE(bundle_id, barcode)
 );
 
@@ -277,8 +286,9 @@ CREATE TABLE IF NOT EXISTS users (
     full_name       TEXT,
     pin             TEXT,
     password_hash   TEXT,
-    role            TEXT    NOT NULL DEFAULT 'STAFF',
-    active          INTEGER NOT NULL DEFAULT 1,
+    role            TEXT    NOT NULL DEFAULT 'STAFF'
+                        CHECK (role IN ('ADMIN','MANAGER','STAFF')),
+    active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -304,9 +314,9 @@ CREATE TABLE IF NOT EXISTS customers (
     email               TEXT DEFAULT '',
     phone               TEXT DEFAULT '',
     contact_name        TEXT DEFAULT '',
-    payment_terms_days  INTEGER NOT NULL DEFAULT 37,
-    credit_limit        REAL DEFAULT 0,
-    active              INTEGER NOT NULL DEFAULT 1,
+    payment_terms_days  INTEGER NOT NULL DEFAULT 37 CHECK (payment_terms_days >= 0),
+    credit_limit        REAL DEFAULT 0              CHECK (credit_limit       >= 0),
+    active              INTEGER NOT NULL DEFAULT 1  CHECK (active IN (0,1)),
     notes               TEXT DEFAULT '',
     created_at          TEXT DEFAULT (datetime('now','localtime')),
     updated_at          TEXT DEFAULT (datetime('now','localtime'))
@@ -318,7 +328,9 @@ CREATE TABLE IF NOT EXISTS ar_invoices (
     customer_id     INTEGER NOT NULL,
     invoice_date    TEXT NOT NULL,
     due_date        TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'DRAFT',
+    status          TEXT NOT NULL DEFAULT 'DRAFT'
+                        CHECK (status IN ('DRAFT','SENT','PARTIAL',
+                                          'PAID','VOID','OVERDUE')),
     subtotal        REAL NOT NULL DEFAULT 0,
     gst_amount      REAL NOT NULL DEFAULT 0,
     total           REAL NOT NULL DEFAULT 0,
@@ -328,22 +340,23 @@ CREATE TABLE IF NOT EXISTS ar_invoices (
     exported_to_myob INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT DEFAULT (datetime('now','localtime')),
     updated_at      TEXT DEFAULT (datetime('now','localtime')),
-    FOREIGN KEY (customer_id) REFERENCES customers(id)
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS ar_invoice_lines (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     invoice_id      INTEGER NOT NULL,
-    barcode         TEXT DEFAULT '',
+    barcode         TEXT DEFAULT NULL CHECK (barcode IS NULL OR barcode != ''),
     description     TEXT NOT NULL,
-    quantity        REAL NOT NULL DEFAULT 1,
-    unit_price      REAL NOT NULL DEFAULT 0,
-    discount_pct    REAL NOT NULL DEFAULT 0,
-    gst_rate        REAL NOT NULL DEFAULT 10,
+    quantity        REAL NOT NULL DEFAULT 1  CHECK (quantity    > 0),
+    unit_price      REAL NOT NULL DEFAULT 0  CHECK (unit_price  >= 0),
+    discount_pct    REAL NOT NULL DEFAULT 0  CHECK (discount_pct BETWEEN 0 AND 100),
+    gst_rate        REAL NOT NULL DEFAULT 10 CHECK (gst_rate     BETWEEN 0 AND 100),
     line_subtotal   REAL NOT NULL DEFAULT 0,
     line_gst        REAL NOT NULL DEFAULT 0,
     line_total      REAL NOT NULL DEFAULT 0,
-    FOREIGN KEY (invoice_id) REFERENCES ar_invoices(id)
+    FOREIGN KEY (invoice_id) REFERENCES ar_invoices(id) ON DELETE CASCADE,
+    FOREIGN KEY (barcode)    REFERENCES products(barcode) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS ar_payments (
@@ -356,8 +369,9 @@ CREATE TABLE IF NOT EXISTS ar_payments (
     reference       TEXT DEFAULT '',
     notes           TEXT DEFAULT '',
     created_at      TEXT DEFAULT (datetime('now','localtime')),
-    FOREIGN KEY (invoice_id) REFERENCES ar_invoices(id),
-    FOREIGN KEY (customer_id) REFERENCES customers(id)
+    payment_ref     TEXT UNIQUE,
+    FOREIGN KEY (invoice_id)  REFERENCES ar_invoices(id)  ON DELETE RESTRICT,
+    FOREIGN KEY (customer_id) REFERENCES customers(id)    ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS ar_credit_notes (
@@ -366,21 +380,24 @@ CREATE TABLE IF NOT EXISTS ar_credit_notes (
     customer_id         INTEGER NOT NULL,
     invoice_id          INTEGER DEFAULT NULL,
     date                TEXT NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'DRAFT',
+    status              TEXT NOT NULL DEFAULT 'DRAFT'
+                            CHECK (status IN ('DRAFT','SENT','APPLIED','VOID')),
     subtotal            REAL NOT NULL DEFAULT 0,
     gst_amount          REAL NOT NULL DEFAULT 0,
     total               REAL NOT NULL DEFAULT 0,
     reason              TEXT DEFAULT '',
     created_at          TEXT DEFAULT (datetime('now','localtime')),
-    FOREIGN KEY (customer_id) REFERENCES customers(id),
-    FOREIGN KEY (invoice_id)  REFERENCES ar_invoices(id)
+    FOREIGN KEY (customer_id) REFERENCES customers(id)   ON DELETE RESTRICT,
+    FOREIGN KEY (invoice_id)  REFERENCES ar_invoices(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_ar_invoices_customer   ON ar_invoices(customer_id);
 CREATE INDEX IF NOT EXISTS idx_ar_invoices_status     ON ar_invoices(status);
 CREATE INDEX IF NOT EXISTS idx_ar_invoice_lines_inv   ON ar_invoice_lines(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_ar_payments_invoice    ON ar_payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_ar_payments_customer   ON ar_payments(customer_id);
 CREATE INDEX IF NOT EXISTS idx_ar_credit_notes_cust   ON ar_credit_notes(customer_id);
+CREATE INDEX IF NOT EXISTS idx_ar_credit_notes_invoice ON ar_credit_notes(invoice_id);
 
 INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('store_name',          'My Supermarket', 'Store trading name'),
@@ -395,7 +412,7 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('ar_next_invoice_number', '1',           'Next AR invoice sequence number'),
     ('ar_next_credit_number',  '1',           'Next AR credit note sequence number'),
     ('ar_invoice_pdf_path', '',               'Folder path for exported invoice PDFs'),
-    ('schema_version',      '32',             'Database schema version');
+    ('schema_version',      '50',             'Database schema version');
 
 CREATE TABLE IF NOT EXISTS bank_csv_profiles (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -418,28 +435,60 @@ CREATE TABLE IF NOT EXISTS bank_csv_profiles (
 
 CREATE TABLE IF NOT EXISTS bank_transactions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    profile_id      INTEGER NOT NULL REFERENCES bank_csv_profiles(id),
+    profile_id      INTEGER NOT NULL,
     import_batch    TEXT NOT NULL,
     txn_date        TEXT NOT NULL,
     amount          REAL NOT NULL,
     description     TEXT NOT NULL DEFAULT '',
     reference       TEXT DEFAULT '',
     balance         REAL,
-    status          TEXT NOT NULL DEFAULT 'UNMATCHED',
-    invoice_id      INTEGER REFERENCES ar_invoices(id),
-    payment_id      INTEGER REFERENCES ar_payments(id),
-    created_at      TEXT DEFAULT (datetime('now','localtime'))
+    status          TEXT NOT NULL DEFAULT 'UNMATCHED'
+                        CHECK (status IN ('UNMATCHED','MATCHED','IGNORED')),
+    invoice_id      INTEGER,
+    payment_id      INTEGER,
+    created_at      TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (profile_id) REFERENCES bank_csv_profiles(id) ON DELETE RESTRICT,
+    FOREIGN KEY (invoice_id) REFERENCES ar_invoices(id)       ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES ar_payments(id)       ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_bank_txn_batch  ON bank_transactions(import_batch);
-CREATE INDEX IF NOT EXISTS idx_bank_txn_status ON bank_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_bank_txn_batch   ON bank_transactions(import_batch);
+CREATE INDEX IF NOT EXISTS idx_bank_txn_status  ON bank_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_bank_txn_profile ON bank_transactions(profile_id);
 
 CREATE TABLE IF NOT EXISTS po_charges (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    po_id           INTEGER NOT NULL REFERENCES purchase_orders(id),
+    po_id           INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
     description     TEXT NOT NULL DEFAULT '',
-    tax_rate        REAL NOT NULL DEFAULT 0,
-    amount_inc_tax  REAL NOT NULL DEFAULT 0
+    tax_rate        REAL NOT NULL DEFAULT 0 CHECK (tax_rate BETWEEN 0 AND 100),
+    amount_inc_tax  REAL NOT NULL DEFAULT 0 CHECK (amount_inc_tax >= 0)
 );
 CREATE INDEX IF NOT EXISTS idx_po_charges_po ON po_charges(po_id);
+
+CREATE TABLE IF NOT EXISTS pos_sales (
+    reference   TEXT    PRIMARY KEY,
+    sale_date   TEXT    NOT NULL,
+    operator    TEXT    NOT NULL DEFAULT '',
+    received_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS migration_log (
+    version     INTEGER PRIMARY KEY,
+    applied_at  TEXT    NOT NULL,
+    description TEXT    NOT NULL DEFAULT '',
+    checksum    TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity      TEXT NOT NULL,
+    entity_key  TEXT NOT NULL,
+    field       TEXT NOT NULL,
+    old_value   TEXT,
+    new_value   TEXT,
+    changed_by  TEXT NOT NULL DEFAULT '',
+    changed_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_entity     ON audit_log(entity, entity_key);
+CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON audit_log(changed_at DESC);
 """

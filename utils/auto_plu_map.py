@@ -23,7 +23,7 @@ def auto_map_plu_barcodes() -> dict:
             "unmapped":  [plu, ...],                          # no product found at all
         }
     """
-    result = {"mapped": [], "skipped": [], "unmapped": []}
+    result: dict[str, list] = {"mapped": [], "skipped": [], "unmapped": []}
 
     try:
         conn = get_connection()
@@ -61,7 +61,7 @@ def auto_map_plu_barcodes() -> dict:
                 result["unmapped"].append(plu)
 
         conn.commit()
-        conn.close()
+        conn.release()
 
         logging.info(
             f"[auto_plu_map] Complete — "

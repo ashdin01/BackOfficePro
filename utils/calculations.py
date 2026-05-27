@@ -1,12 +1,53 @@
 """
-Financial calculation utilities.
+Shared calculation utilities: financial maths and date range helpers.
 All PO cost figures are stored ex-GST. GST is calculated forward: amount_ex × rate/100.
 """
+from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP as _RHU
+
+
+def round_half_up(value: float, places: int = 2) -> float:
+    """Round using commercial half-up rule (3.625 → 3.63, not Python's banker 3.62)."""
+    q = Decimal("0." + "0" * places)
+    return float(Decimal(str(value)).quantize(q, rounding=_RHU))
 
 
 def gst_on_ex(amount_ex: float, tax_rate: float) -> float:
     """GST amount given an ex-GST amount and a percentage tax rate (e.g. 10.0)."""
     return amount_ex * (tax_rate / 100.0)
+
+
+def week_bounds(offset: int = 0) -> tuple[date, date]:
+    """Return the Monday–Sunday bounds of a completed week.
+
+    offset=0 → last completed week; offset=1 → two weeks ago.
+    """
+    today = date.today()
+    mon   = today - timedelta(days=today.weekday())
+    start = mon - timedelta(weeks=(1 + offset))
+    return start, start + timedelta(days=6)
+
+
+def fy_bounds(year: int | None = None) -> tuple[date, date]:
+    """Return the start and end of an Australian financial year (1 Jul → 30 Jun).
+
+    If year is None, uses the current financial year.
+    """
+    today = date.today()
+    if year is None:
+        year = today.year if today.month >= 7 else today.year - 1
+    return date(year, 7, 1), date(year + 1, 6, 30)
+
+
+def gross_profit_pct(sell_price: float, cost_price: float, tax_rate: float) -> float | None:
+    """Return gross profit as a percentage of sell price, or None if sell_price is zero.
+
+    cost_price is treated as ex-GST; tax_rate is a percentage (e.g. 10.0).
+    """
+    cost = cost_price * (1 + (tax_rate or 0.0) / 100)
+    if sell_price > 0:
+        return (1 - cost / sell_price) * 100
+    return None
 
 
 def po_order_totals(lines: list) -> dict:
@@ -29,7 +70,7 @@ def po_order_totals(lines: list) -> dict:
         subtotal += line_ex
         gst_total += gst_on_ex(line_ex, float(line.get("tax_rate", 0.0)))
     return {
-        "subtotal": round(subtotal, 2),
-        "gst": round(gst_total, 2),
-        "order_total": round(subtotal + gst_total, 2),
+        "subtotal": round_half_up(subtotal),
+        "gst": round_half_up(gst_total),
+        "order_total": round_half_up(subtotal + gst_total),
     }

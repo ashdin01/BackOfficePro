@@ -338,6 +338,7 @@ class HomeScreen(QWidget):
         try:
             due = supplier_ctrl.get_order_due_today()
         except Exception:
+            logging.exception("HomeScreen: failed to load orders due today")
             return
 
         today_name = _date.today().strftime('%A')

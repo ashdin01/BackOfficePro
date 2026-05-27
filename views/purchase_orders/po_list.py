@@ -8,14 +8,15 @@ from PyQt6.QtGui import QAction, QKeySequence, QShortcut, QColor
 from config.constants import PO_STATUSES
 import config.styles as styles
 import controllers.purchase_order_controller as po_ctrl
+from views.base_view import BaseView
 
 
-class POList(QWidget):
+class POList(BaseView):
     def __init__(self):
         super().__init__()
         self._build_ui()
         self._startup_cleanup()
-        self._load()
+        self.load()
 
     def _startup_cleanup(self):
         """Delete old cancelled POs silently on startup."""
@@ -171,6 +172,14 @@ class POList(QWidget):
     # ── Data loading ──────────────────────────────────────────────────
 
     def _load(self):
+        # Remember the currently selected PO so we can restore it after refresh
+        prev_id = None
+        cur = self.active_table.currentRow()
+        if cur >= 0:
+            item = self.active_table.item(cur, 0)
+            if item:
+                prev_id = item.data(Qt.ItemDataRole.UserRole)
+
         rows = po_ctrl.get_all_pos(archived=False)
         self._populate_table(self.active_table, rows)
 
@@ -195,10 +204,22 @@ class POList(QWidget):
             f"{self.active_table.rowCount()} active purchase orders  "
             f"·  Enter to open  ·  Right-click for options"
         )
-        # Auto-focus table and select first row
+
         if self.active_table.rowCount() > 0:
             self.active_table.setFocus()
-            self.active_table.selectRow(0)
+            # Restore the previously selected PO; fall back to row 0 if it
+            # is no longer in the active list (e.g. was just archived/cancelled).
+            if prev_id is not None:
+                for r in range(self.active_table.rowCount()):
+                    id_item = self.active_table.item(r, 0)
+                    if id_item and id_item.data(Qt.ItemDataRole.UserRole) == prev_id:
+                        self.active_table.selectRow(r)
+                        self.active_table.scrollToItem(id_item)
+                        break
+                else:
+                    self.active_table.selectRow(0)
+            else:
+                self.active_table.selectRow(0)
 
     def _load_archive(self):
         status = self.archive_filter.currentData()
@@ -244,7 +265,7 @@ class POList(QWidget):
             table.setItem(r, 2, QTableWidgetItem(row['supplier_name']))
             table.setItem(r, 3, QTableWidgetItem(row['status']))
             table.setItem(r, 4, QTableWidgetItem(row['delivery_date'] or ''))
-            table.setItem(r, 5, QTableWidgetItem(row['created_at'][:10]))
+            table.setItem(r, 5, QTableWidgetItem((row['created_at'] or '')[:10]))
             table.setItem(r, 6, QTableWidgetItem(row['notes'] or ''))
             table.item(r, 0).setData(Qt.ItemDataRole.UserRole, row['id'])
 
@@ -353,7 +374,7 @@ class POList(QWidget):
             return
         from config.constants import PO_STATUS_RECEIVED
         po_ctrl.update_po_status(po_id, PO_STATUS_RECEIVED)
-        self._load()
+        self.load()
         QMessageBox.information(
             self, "Updated",
             f"{po['po_number']} has been marked as Received."
@@ -378,7 +399,7 @@ class POList(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             po_ctrl.cancel_po(po_id)
-            self._load()
+            self.load()
 
     def showEvent(self, event):
         """Auto-focus table when screen becomes visible."""
@@ -409,7 +430,7 @@ class POList(QWidget):
 
         if not unreceived:
             po_ctrl.update_po_status(po_id, 'RECEIVED')
-            self._load()
+            self.load()
             return
 
         lines_text = "\n".join(
@@ -472,7 +493,7 @@ class POList(QWidget):
 
         QMessageBox.information(self, "PO Closed",
             f"PO closed.\n{len(unreceived)} unreceived line(s) marked:\n\"{reason}\"")
-        self._load()
+        self.load()
 
     def _show_context_menu(self, pos):
         row = self.active_table.rowAt(pos.y())

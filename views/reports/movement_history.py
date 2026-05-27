@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
+from views.base_view import BaseView
 
 class NumItem(QTableWidgetItem):
     """Sorts numerically, stripping $, %, commas and +/-."""
@@ -22,11 +23,11 @@ class NumItem(QTableWidgetItem):
 import csv
 
 
-class MovementHistoryReport(QWidget):
+class MovementHistoryReport(BaseView):
     def __init__(self):
         super().__init__()
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -59,7 +60,7 @@ class MovementHistoryReport(QWidget):
         filter_row.addWidget(self.date_to)
 
         btn_search = QPushButton("Search")
-        btn_search.clicked.connect(self._load)
+        btn_search.clicked.connect(self.load)
         filter_row.addWidget(btn_search)
 
         filter_row.addStretch()

@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 import controllers.ar_controller as ar_ctrl
+from utils.error_dialog import show_error
 
 
 class CustomerEdit(QWidget):
@@ -142,11 +143,11 @@ class CustomerEdit(QWidget):
         )
         try:
             if self._id is None:
-                ar_ctrl.add_customer(**kwargs)
+                ar_ctrl.create_customer(**kwargs)
             else:
                 ar_ctrl.update_customer(self._id, **kwargs)
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not save customer.", e)
             return
         if self._on_saved:
             self._on_saved()

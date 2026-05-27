@@ -43,7 +43,7 @@ def ensure_tables():
         )
     """)
     conn.commit()
-    conn.close()
+    conn.release()
 
 
 def _parse_date_dmy(text):
@@ -240,7 +240,7 @@ def _import_rows(rows, source):
 
         conn.commit()
     finally:
-        conn.close()
+        conn.release()
 
     print(f"  Rows upserted:                {upserted}")
     print(f"  Stock movements created:      {movements_created}")

@@ -19,6 +19,8 @@ import os
 import config.styles as styles
 import controllers.report_controller as report_ctrl
 from utils.error_dialog import show_error
+from views.base_view import BaseView
+from utils.calculations import fy_bounds
 
 RIGHT  = Qt.AlignmentFlag.AlignRight  | Qt.AlignmentFlag.AlignVCenter
 CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
@@ -27,17 +29,9 @@ LEFT   = Qt.AlignmentFlag.AlignLeft   | Qt.AlignmentFlag.AlignVCenter
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _fy_bounds(year=None):
-    """Australian FY: 1 Jul → 30 Jun."""
-    today = date.today()
-    if year is None:
-        year = today.year if today.month >= 7 else today.year - 1
-    return date(year, 7, 1), date(year + 1, 6, 30)
-
-
 def _bas_quarters():
     """Return the 4 BAS quarter labels and bounds for the current FY."""
-    fy_s, _ = _fy_bounds()
+    fy_s, _ = fy_bounds()
     quarters = []
     for i in range(4):
         q_start = date(fy_s.year + (1 if i >= 2 else 0),
@@ -75,7 +69,7 @@ def _money_item(value: float, color=None, bold=False):
 
 # ── Main Widget ───────────────────────────────────────────────────────────────
 
-class GSTReport(QWidget):
+class GSTReport(BaseView):
     def __init__(self):
         super().__init__()
         self._build_ui()
@@ -83,7 +77,7 @@ class GSTReport(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._load()
+        self.load()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -148,7 +142,7 @@ class GSTReport(QWidget):
             "border-radius:4px;padding:0 16px;font-weight:bold;}"
             f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
-        apply_btn.clicked.connect(self._load)
+        apply_btn.clicked.connect(self.load)
         date_row.addWidget(apply_btn)
 
         export_btn = QPushButton("⬇ Export CSV")
@@ -229,7 +223,7 @@ class GSTReport(QWidget):
     def _set_dates(self, d_from: date, d_to: date):
         self.date_from.setDate(QDate(d_from.year, d_from.month, d_from.day))
         self.date_to.setDate(QDate(d_to.year,   d_to.month,   d_to.day))
-        self._load()
+        self.load()
 
     def _set_this_quarter(self):
         today = date.today()
@@ -237,7 +231,7 @@ class GSTReport(QWidget):
             if q_start <= today <= q_end:
                 self._set_dates(q_start, min(q_end, today))
                 return
-        s, _ = _fy_bounds()
+        s, _ = fy_bounds()
         self._set_dates(s, today)
 
     def _set_this_month(self):
@@ -250,13 +244,13 @@ class GSTReport(QWidget):
         self._set_dates(last_end.replace(day=1), last_end)
 
     def _set_this_fy(self):
-        s, e = _fy_bounds()
+        s, e = fy_bounds()
         self._set_dates(s, min(e, date.today()))
 
     def _set_last_fy(self):
         t = date.today()
         y = t.year if t.month >= 7 else t.year - 1
-        s, e = _fy_bounds(y - 1)
+        s, e = fy_bounds(y - 1)
         self._set_dates(s, e)
 
     # ── Main load ─────────────────────────────────────────────────────

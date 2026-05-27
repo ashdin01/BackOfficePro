@@ -12,6 +12,7 @@ from PyQt6.QtGui import QColor
 import config.styles as styles
 import controllers.report_controller as report_ctrl
 from utils.error_dialog import show_error
+from views.base_view import BaseView
 
 SPOILAGE_TYPES  = ['OD - Out of Date']
 SHRINKAGE_TYPES = ['IS - Incorrectly Sold', 'NS - Not on Shelf', 'DG', 'SE - Stocktake Error']
@@ -35,7 +36,7 @@ class NumItem(QTableWidgetItem):
         except ValueError:
             return super().__lt__(other)
 
-class WriteOffReport(QWidget):
+class WriteOffReport(BaseView):
     def __init__(self):
         super().__init__()
         self._last_rows = []
@@ -44,7 +45,7 @@ class WriteOffReport(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -107,7 +108,7 @@ class WriteOffReport(QWidget):
             "border-radius:4px;padding:0 16px;font-weight:bold;}"
             f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}"
         )
-        apply_btn.clicked.connect(self._load)
+        apply_btn.clicked.connect(self.load)
         filter_row.addWidget(apply_btn)
         filter_row.addStretch()
         btn_export = QPushButton("⬇ Export CSV")
@@ -279,7 +280,7 @@ class WriteOffReport(QWidget):
     def _set_dates(self, d_from, d_to):
         self.date_from.setDate(QDate(d_from.year, d_from.month, d_from.day))
         self.date_to.setDate(QDate(d_to.year, d_to.month, d_to.day))
-        self._load()
+        self.load()
 
     def _set_this_month(self):
         t = date.today()

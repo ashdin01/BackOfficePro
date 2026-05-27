@@ -1,12 +1,14 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox,
-    QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit,
+    QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
     QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent
+from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor
 import controllers.ar_controller as ar_ctrl
 import config.styles as styles
+from views.base_view import BaseView
+from views.widgets.search_bar import SearchBar
 
 
 STATUS_COLOURS = {
@@ -19,22 +21,19 @@ STATUS_COLOURS = {
 }
 
 
-class InvoiceList(QWidget):
+class InvoiceList(BaseView):
     def __init__(self):
         super().__init__()
         self._open_wins = []
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
 
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search customer or invoice…")
-        self._timer = QTimer(); self._timer.setSingleShot(True); self._timer.setInterval(350)
-        self._timer.timeout.connect(self._filter)
-        self.search.textChanged.connect(lambda _: self._timer.start())
+        self.search = SearchBar("Search customer or invoice…", interval=350)
+        self.search.search_changed.connect(self._filter)
         top.addWidget(self.search)
 
         self.status_filter = QComboBox()
@@ -182,5 +181,5 @@ class InvoiceList(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._load()
+        self.load()
         self.table.setFocus()

@@ -1,5 +1,6 @@
 PyQt6>=6.4.0
 flask>=3.0.0
+waitress>=3.0.0
 pillow>=9.0.0
 reportlab>=4.0.0
 msal
@@ -8,3 +9,4 @@ keyring
 pytest>=7.4.0
 pytest-cov>=4.1.0
 pytest-qt>=4.2.0
+mypy>=1.9.0

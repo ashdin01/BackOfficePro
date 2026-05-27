@@ -1,4 +1,5 @@
 """Tests for controllers/ar_controller.py."""
+import os
 import pytest
 from datetime import date
 import models.customer as customer_model
@@ -160,7 +161,8 @@ class TestRefreshOverdueStatuses:
         inv_id = invoice_model.create(
             "INV-99002", customer_id, "2025-01-01", "2025-02-07"
         )
-        invoice_model.update_status(inv_id, "PARTIAL")
+        invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=10.0)
+        invoice_model.apply_payment(inv_id, customer_id, "2025-01-01", 50.00)
         ar_ctrl.refresh_overdue_statuses()
         assert invoice_model.get_by_id(inv_id)["status"] == "OVERDUE"
 
@@ -176,7 +178,8 @@ class TestRefreshOverdueStatuses:
         inv_id = invoice_model.create(
             "INV-99004", customer_id, "2025-01-01", "2025-02-07"
         )
-        invoice_model.update_status(inv_id, "PAID")
+        invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=10.0)
+        invoice_model.apply_payment(inv_id, customer_id, "2025-01-01", 110.00)
         ar_ctrl.refresh_overdue_statuses()
         assert invoice_model.get_by_id(inv_id)["status"] == "PAID"
 
@@ -225,8 +228,7 @@ class TestGetAgedDebtors:
 
     def test_paid_invoice_excluded(self, test_db, customer_id):
         inv_id = self._make_invoice_with_balance(customer_id, "INV-A005", "2026-04-15")
-        invoice_model.update_status(inv_id, "PAID")
-        invoice_model.update_amount_paid(inv_id, 110.00)
+        invoice_model.apply_payment(inv_id, customer_id, "2026-04-15", 110.00)
         result = ar_ctrl.get_aged_debtors("2026-05-15")
         assert result == []
 
@@ -242,3 +244,222 @@ class TestGetAgedDebtors:
         row = result[0]
         bucket_sum = row["current"] + row["days_30"] + row["days_60"] + row["days_90plus"]
         assert bucket_sum == pytest.approx(row["total"])
+
+
+# ── Invoice line management ───────────────────────────────────────────────────
+
+class TestInvoiceLines:
+    def _make_draft(self, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        return inv_id
+
+    def test_add_line_appears_in_get_lines(self, test_db, customer_id):
+        inv_id = self._make_draft(customer_id)
+        ar_ctrl.add_invoice_line(inv_id, "Apples", 10, 1.50)
+        lines = ar_ctrl.get_invoice_lines(inv_id)
+        assert len(lines) == 1
+        assert lines[0]["description"] == "Apples"
+
+    def test_add_line_updates_invoice_total(self, test_db, customer_id):
+        inv_id = self._make_draft(customer_id)
+        ar_ctrl.add_invoice_line(inv_id, "Apples", 10, 1.00, gst_rate=10.0)
+        inv = ar_ctrl.get_invoice_by_id(inv_id)
+        assert inv["subtotal"] == pytest.approx(10.00)
+        assert inv["gst_amount"] == pytest.approx(1.00)
+        assert inv["total"] == pytest.approx(11.00)
+
+    def test_update_line_changes_values(self, test_db, customer_id):
+        inv_id = self._make_draft(customer_id)
+        ar_ctrl.add_invoice_line(inv_id, "Apples", 10, 1.00)
+        line_id = ar_ctrl.get_invoice_lines(inv_id)[0]["id"]
+        ar_ctrl.update_invoice_line(line_id, "Oranges", 5, 2.00)
+        lines = ar_ctrl.get_invoice_lines(inv_id)
+        assert lines[0]["description"] == "Oranges"
+        assert lines[0]["quantity"] == pytest.approx(5.0)
+
+    def test_delete_line_removes_it(self, test_db, customer_id):
+        inv_id = self._make_draft(customer_id)
+        ar_ctrl.add_invoice_line(inv_id, "Apples", 10, 1.00)
+        line_id = ar_ctrl.get_invoice_lines(inv_id)[0]["id"]
+        ar_ctrl.delete_invoice_line(line_id)
+        assert ar_ctrl.get_invoice_lines(inv_id) == []
+
+    def test_multiple_lines_accumulate_total(self, test_db, customer_id):
+        inv_id = self._make_draft(customer_id)
+        ar_ctrl.add_invoice_line(inv_id, "A", 1, 10.00, gst_rate=10.0)
+        ar_ctrl.add_invoice_line(inv_id, "B", 1, 20.00, gst_rate=10.0)
+        inv = ar_ctrl.get_invoice_by_id(inv_id)
+        assert inv["subtotal"] == pytest.approx(30.00)
+
+
+# ── Invoice query wrappers ────────────────────────────────────────────────────
+
+class TestInvoiceQueries:
+    def test_get_invoice_by_id_returns_dict(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        inv = ar_ctrl.get_invoice_by_id(inv_id)
+        assert isinstance(inv, dict)
+        assert inv["id"] == inv_id
+
+    def test_get_invoice_by_id_unknown_returns_none(self, test_db):
+        assert ar_ctrl.get_invoice_by_id(99999) is None
+
+    def test_get_all_invoices_returns_list(self, test_db, customer_id):
+        ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        result = ar_ctrl.get_all_invoices()
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+    def test_get_all_invoices_filtered_by_customer(self, test_db, customer_id):
+        ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        result = ar_ctrl.get_all_invoices(customer_id=customer_id)
+        assert all(r["customer_id"] == customer_id for r in result)
+
+    def test_get_all_invoices_filtered_by_status(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        ar_ctrl.update_invoice_status(inv_id, "SENT")
+        drafts = ar_ctrl.get_all_invoices(status="DRAFT")
+        assert all(r["status"] == "DRAFT" for r in drafts)
+
+    def test_get_all_invoices_limit(self, test_db, customer_id):
+        for _ in range(5):
+            ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        result = ar_ctrl.get_all_invoices(limit=3)
+        assert len(result) == 3
+
+    def test_get_all_invoices_offset(self, test_db, customer_id):
+        for _ in range(5):
+            ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        all_rows   = ar_ctrl.get_all_invoices()
+        page2_rows = ar_ctrl.get_all_invoices(limit=2, offset=2)
+        assert page2_rows[0]["id"] == all_rows[2]["id"]
+
+    def test_count_invoices(self, test_db, customer_id):
+        for _ in range(3):
+            ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        assert ar_ctrl.count_invoices(customer_id=customer_id) == 3
+
+    def test_update_invoice_notes(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        ar_ctrl.update_invoice_notes(inv_id, "Special delivery")
+        assert ar_ctrl.get_invoice_by_id(inv_id)["notes"] == "Special delivery"
+
+
+# ── Customer management ───────────────────────────────────────────────────────
+
+class TestCustomerManagement:
+    def test_create_customer_returns_int(self, test_db):
+        cid = ar_ctrl.create_customer("NEW001", "New Customer")
+        assert isinstance(cid, int) and cid > 0
+
+    def test_get_customer_by_id_returns_dict(self, test_db, customer_id):
+        c = ar_ctrl.get_customer_by_id(customer_id)
+        assert isinstance(c, dict)
+        assert c["code"] == "CUST001"
+
+    def test_get_customer_by_id_unknown_returns_none(self, test_db):
+        assert ar_ctrl.get_customer_by_id(99999) is None
+
+    def test_get_all_customers_returns_list(self, test_db, customer_id):
+        result = ar_ctrl.get_all_customers()
+        assert isinstance(result, list)
+        assert any(c["id"] == customer_id for c in result)
+
+    def test_get_all_customers_limit(self, test_db):
+        for i in range(5):
+            ar_ctrl.create_customer(f"C{i:03d}", f"Customer {i}")
+        result = ar_ctrl.get_all_customers(limit=2)
+        assert len(result) == 2
+
+    def test_get_all_customers_offset(self, test_db):
+        for i in range(5):
+            ar_ctrl.create_customer(f"D{i:03d}", f"Delta {i}")
+        all_rows   = ar_ctrl.get_all_customers()
+        page2_rows = ar_ctrl.get_all_customers(limit=2, offset=2)
+        assert page2_rows[0]["id"] == all_rows[2]["id"]
+
+    def test_count_customers(self, test_db):
+        for i in range(4):
+            ar_ctrl.create_customer(f"E{i:03d}", f"Echo {i}")
+        assert ar_ctrl.count_customers() >= 4
+
+    def test_update_customer_persists_changes(self, test_db, customer_id):
+        ar_ctrl.update_customer(customer_id, "CUST001", "Updated Name")
+        c = ar_ctrl.get_customer_by_id(customer_id)
+        assert c["name"] == "Updated Name"
+
+
+# ── get_statement_data ────────────────────────────────────────────────────────
+
+class TestGetStatementData:
+    def test_returns_dict_with_required_keys(self, test_db, customer_id):
+        data = ar_ctrl.get_statement_data(customer_id, "2026-01-01", "2026-12-31")
+        assert "invoices" in data
+        assert "payments" in data
+        assert "opening_balance" in data
+
+    def test_empty_range_has_zero_opening_balance(self, test_db, customer_id):
+        data = ar_ctrl.get_statement_data(customer_id, "2026-01-01", "2026-12-31")
+        assert data["opening_balance"] == pytest.approx(0.0)
+
+    def test_sent_invoice_appears_in_statement(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, "2026-06-01")
+        invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=10.0)
+        invoice_model.update_status(inv_id, "SENT")
+        data = ar_ctrl.get_statement_data(customer_id, "2026-01-01", "2026-12-31")
+        assert len(data["invoices"]) == 1
+
+
+# ── create_credit_note ────────────────────────────────────────────────────────
+
+class TestCreateCreditNote:
+    def test_returns_tuple_of_id_and_number(self, test_db, customer_id):
+        result = ar_ctrl.create_credit_note(customer_id, reason="Return")
+        cn_id, cn_num = result
+        assert isinstance(cn_id, int) and cn_id > 0
+        assert isinstance(cn_num, str)
+
+    def test_credit_note_number_starts_with_cn(self, test_db, customer_id):
+        cn_id, cn_num = ar_ctrl.create_credit_note(customer_id, reason="Overcharge")
+        assert cn_num.startswith("CN-")
+
+    def test_sequential_credit_note_numbers(self, test_db, customer_id):
+        _, cn_num1 = ar_ctrl.create_credit_note(customer_id)
+        _, cn_num2 = ar_ctrl.create_credit_note(customer_id)
+        seq1 = int(cn_num1.split("-")[1])
+        seq2 = int(cn_num2.split("-")[1])
+        assert seq2 == seq1 + 1
+
+
+# ── generate_invoice_pdf ──────────────────────────────────────────────────────
+
+class TestGenerateInvoicePdf:
+    def test_creates_file(self, test_db, customer_id, tmp_path):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        invoice_model.add_line(inv_id, "Goods", 2, 10.00, gst_rate=10.0)
+        out = str(tmp_path / "inv.pdf")
+        result = ar_ctrl.generate_invoice_pdf(inv_id, output_path=out)
+        assert result == out
+        assert os.path.exists(out)
+        assert os.path.getsize(out) > 0
+
+    def test_unknown_invoice_raises(self, test_db):
+        with pytest.raises(ValueError):
+            ar_ctrl.generate_invoice_pdf(99999, output_path="/tmp/nope.pdf")
+
+
+# ── generate_statement_pdf ────────────────────────────────────────────────────
+
+class TestGenerateStatementPdf:
+    def test_creates_file(self, test_db, customer_id, tmp_path):
+        out = str(tmp_path / "stmt.pdf")
+        result = ar_ctrl.generate_statement_pdf(
+            customer_id, "2026-01-01", "2026-12-31", output_path=out
+        )
+        assert result == out
+        assert os.path.exists(out)
+        assert os.path.getsize(out) > 0
+
+    def test_unknown_customer_raises(self, test_db):
+        with pytest.raises(ValueError):
+            ar_ctrl.generate_statement_pdf(99999, "2026-01-01", "2026-12-31", output_path="/tmp/nope.pdf")

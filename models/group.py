@@ -13,7 +13,7 @@ def get_all(active_only=True):
             ORDER BY d.name, g.name
         """).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_department(department_id, active_only=True):
@@ -27,23 +27,24 @@ def get_by_department(department_id, active_only=True):
             ORDER BY name
         """, (department_id,)).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_id(group_id):
     conn = get_connection()
     try:
-        return conn.execute("""
+        row = conn.execute("""
             SELECT g.*, d.name as dept_name
             FROM product_groups g
             JOIN departments d ON g.department_id = d.id
             WHERE g.id = ?
         """, (group_id,)).fetchone()
+        return dict(row) if row else None
     finally:
-        conn.close()
+        conn.release()
 
 
-def add(department_id, code, name):
+def create(department_id, code, name):
     conn = get_connection()
     try:
         conn.execute(
@@ -51,8 +52,11 @@ def add(department_id, code, name):
             (department_id, code.upper(), name)
         )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def update(group_id, department_id, code, name, active):
@@ -63,5 +67,8 @@ def update(group_id, department_id, code, name, active):
             (department_id, code.upper(), name, active, group_id)
         )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()

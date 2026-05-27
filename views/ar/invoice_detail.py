@@ -11,9 +11,11 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 import controllers.ar_controller as ar_ctrl
 import controllers.product_controller as product_ctrl
 import config.styles as styles
+from utils.error_dialog import show_error
+from views.base_view import BaseView, BaseDialog
 
 
-class InvoiceDetail(QWidget):
+class InvoiceDetail(BaseView):
     def __init__(self, invoice_id=None, on_saved=None):
         super().__init__()
         self._id       = invoice_id
@@ -23,7 +25,7 @@ class InvoiceDetail(QWidget):
         self.setMinimumSize(1000, 700)
         self._build_ui()
         if invoice_id:
-            self._load()
+            self.load()
         else:
             self._new_invoice_dialog()
 
@@ -161,12 +163,12 @@ class InvoiceDetail(QWidget):
                 notes=notes_edit.text().strip(),
             )
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            show_error(self, "Could not create invoice.", e)
             self.close()
             return
 
         self._id = inv_id
-        self._load()
+        self.load()
         if self._on_saved:
             self._on_saved()
 
@@ -310,7 +312,7 @@ class InvoiceDetail(QWidget):
         if not self._id:
             return
         ar_ctrl.update_invoice_status(self._id, status)
-        self._load()
+        self.load()
         if self._on_saved:
             self._on_saved()
 
@@ -333,7 +335,7 @@ class InvoiceDetail(QWidget):
                 reference=d['reference'],
                 notes=d['notes'],
             )
-            self._load()
+            self.load()
             if self._on_saved:
                 self._on_saved()
 
@@ -355,7 +357,7 @@ class InvoiceDetail(QWidget):
             QMessageBox.information(self, "PDF Saved", f"Saved to:\n{path}")
             os.startfile(path) if os.name == 'nt' else os.system(f'xdg-open "{path}"')
         except Exception as e:
-            QMessageBox.critical(self, "PDF Error", str(e))
+            show_error(self, "Could not generate PDF.", e, title="PDF Error")
 
 
 class _LineDialog(QDialog):
@@ -470,7 +472,7 @@ class _LineDialog(QDialog):
         }
 
 
-class _ProductPickerDialog(QDialog):
+class _ProductPickerDialog(BaseDialog):
     """Searchable product browser — opened via 🔍 button or F2."""
 
     def __init__(self, parent=None):
@@ -480,7 +482,7 @@ class _ProductPickerDialog(QDialog):
         self._selected  = None
         self._all_rows  = []
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         from PyQt6.QtCore import QTimer
@@ -521,17 +523,11 @@ class _ProductPickerDialog(QDialog):
         QShortcut(QKeySequence("Return"), self, self._pick)
 
     def _load(self):
-        from database.connection import get_connection
-        conn = get_connection()
-        try:
-            self._all_rows = [dict(r) for r in conn.execute("""
-                SELECT barcode, description, sell_price, tax_rate
-                FROM products
-                WHERE active = 1
-                ORDER BY description COLLATE NOCASE
-            """).fetchall()]
-        finally:
-            conn.close()
+        self._all_rows = [
+            {'barcode': p['barcode'], 'description': p['description'],
+             'sell_price': p['sell_price'], 'tax_rate': p['tax_rate']}
+            for p in product_ctrl.get_all_products(active_only=True)
+        ]
         self._render(self._all_rows)
         self.search.setFocus()
 

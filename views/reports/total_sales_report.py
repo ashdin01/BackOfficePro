@@ -6,39 +6,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor, QFont
 
-from database.connection import get_connection
+import controllers.report_controller as report_ctrl
 import config.styles as styles
+from views.base_view import BaseView
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _fetch(d_from: str, d_to: str) -> dict:
     """Return {date_str: {'pos': float, 'ar': float}} for the date range."""
-    conn = get_connection()
-    try:
-        pos_rows = conn.execute("""
-            SELECT sale_date, SUM(sales_dollars) AS total
-            FROM sales_daily
-            WHERE sale_date BETWEEN ? AND ?
-            GROUP BY sale_date
-        """, (d_from, d_to)).fetchall()
-
-        ar_rows = conn.execute("""
-            SELECT invoice_date, SUM(total) AS total
-            FROM ar_invoices
-            WHERE invoice_date BETWEEN ? AND ?
-              AND status NOT IN ('VOID', 'DRAFT')
-            GROUP BY invoice_date
-        """, (d_from, d_to)).fetchall()
-    finally:
-        conn.close()
-
-    data: dict = {}
-    for r in pos_rows:
-        data.setdefault(r['sale_date'], {'pos': 0.0, 'ar': 0.0})['pos'] = float(r['total'] or 0)
-    for r in ar_rows:
-        data.setdefault(r['invoice_date'], {'pos': 0.0, 'ar': 0.0})['ar'] = float(r['total'] or 0)
-    return data
+    return report_ctrl.get_combined_daily_revenue(d_from, d_to)
 
 
 def _stat_card(label: str, value: str, colour: str = None) -> QFrame:
@@ -65,13 +42,13 @@ def _stat_card(label: str, value: str, colour: str = None) -> QFrame:
 
 # ── widget ────────────────────────────────────────────────────────────────────
 
-class TotalSalesReport(QWidget):
+class TotalSalesReport(BaseView):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Total Sales")
         self.resize(820, 560)
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -93,7 +70,7 @@ class TotalSalesReport(QWidget):
         bar.addWidget(self.date_to)
 
         btn_run = QPushButton("Run")
-        btn_run.clicked.connect(self._load)
+        btn_run.clicked.connect(self.load)
         bar.addWidget(btn_run)
         bar.addStretch()
         root.addLayout(bar)

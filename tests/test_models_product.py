@@ -89,7 +89,7 @@ def test_get_all_includes_inactive(test_db, db_conn, dept_id, supplier_id):
 # ── add ───────────────────────────────────────────────────────────────────────
 
 def test_add_product(test_db, dept_id, supplier_id):
-    product_model.add(
+    product_model.create(
         barcode='8888888888888',
         description='New Product',
         department_id=dept_id,

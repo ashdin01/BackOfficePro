@@ -9,44 +9,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QDate, QTimer
 from PyQt6.QtGui import QColor, QAction, QKeySequence, QShortcut
 import csv, os, subprocess, sys, logging
+import logging
 import config.styles as styles
 import controllers.sales_report_controller as sales_ctrl
 from utils.error_dialog import show_error
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Table helpers
-# ─────────────────────────────────────────────────────────────────────────────
-class NumItem(QTableWidgetItem):
-    def __lt__(self, other):
-        try:
-            return float(self.text().replace('$','').replace(',','').replace('%','')) < \
-                   float(other.text().replace('$','').replace(',','').replace('%',''))
-        except ValueError:
-            return self.text() < other.text()
-
-
-def _item(text, align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, numeric=False):
-    i = NumItem(str(text)) if numeric else QTableWidgetItem(str(text))
-    i.setTextAlignment(align)
-    return i
-
-
-RIGHT  = Qt.AlignmentFlag.AlignRight  | Qt.AlignmentFlag.AlignVCenter
-CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-
-
-def _make_table(headers, stretch_col=1):
-    t = QTableWidget()
-    t.setColumnCount(len(headers))
-    t.setHorizontalHeaderLabels(headers)
-    t.horizontalHeader().setSectionResizeMode(stretch_col, QHeaderView.ResizeMode.Stretch)
-    t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-    t.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-    t.setAlternatingRowColors(True)
-    t.verticalHeader().setVisible(False)
-    t.setSortingEnabled(True)
-    return t
+from views.base_view import BaseView
+from views.widgets.table_items import NumItem, item as _item, RIGHT, CENTER
+from views.widgets.table_utils import make_table as _make_table
 
 
 def _stat_card(label, value, color=None):
@@ -567,12 +536,12 @@ class _MatchItemDialog(QDialog):
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Sales Report View
 # ─────────────────────────────────────────────────────────────────────────────
-class SalesReportView(QWidget):
+class SalesReportView(BaseView):
     def __init__(self):
         super().__init__()
         _ensure_plu_map_table()   # create plu_barcode_map if not exists
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -707,7 +676,7 @@ class SalesReportView(QWidget):
                 self.group_filter.setCurrentIndex(idx)
             self.group_filter.blockSignals(False)
         except Exception:
-            pass
+            logging.exception("sales_report_view: group filter reload failed")
 
     def _load(self):
         if not sales_ctrl.sales_table_exists():
@@ -947,13 +916,13 @@ class SalesReportView(QWidget):
                 perfect.append(p)
         if len(perfect) == 1:
             _save_plu_map(row_data.get("plu"), perfect[0]["barcode"])
-            self._load()
+            self.load()
             return
 
         # Otherwise open dialog for manual selection
         dlg = _MatchItemDialog(row_data, parent=self)
         if dlg.exec():
-            self._load()
+            self.load()
 
     def _view_product(self, row_data: dict):
         import controllers.product_controller as product_ctrl
@@ -1018,7 +987,7 @@ class SalesReportView(QWidget):
             show_error(self, "Could not import sales file.", e, title="Import Failed")
             return
 
-        self._load()
+        self.load()
 
     def _export(self):
         d_from, d_to = self._get_dates()

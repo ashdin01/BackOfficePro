@@ -9,43 +9,43 @@ import models.ar_payment as payment_model
 
 class TestCustomer:
     def test_add_returns_id(self, test_db):
-        cid = customer_model.add("ACME", "Acme Corp")
+        cid = customer_model.create("ACME", "Acme Corp")
         assert isinstance(cid, int) and cid > 0
 
     def test_get_by_id(self, test_db):
-        cid = customer_model.add("ACME", "Acme Corp")
+        cid = customer_model.create("ACME", "Acme Corp")
         c = customer_model.get_by_id(cid)
         assert c["name"] == "Acme Corp"
         assert c["code"] == "ACME"
 
     def test_get_by_code(self, test_db):
-        customer_model.add("ACME", "Acme Corp")
+        customer_model.create("ACME", "Acme Corp")
         c = customer_model.get_by_code("ACME")
         assert c is not None
         assert c["name"] == "Acme Corp"
 
     def test_add_with_active_false(self, test_db):
-        cid = customer_model.add("INACT", "Inactive Co", active=0)
+        cid = customer_model.create("INACT", "Inactive Co", active=0)
         c = customer_model.get_by_id(cid)
         assert c["active"] == 0
 
     def test_get_all_returns_active_only_by_default(self, test_db):
-        customer_model.add("ACT", "Active Co", active=1)
-        customer_model.add("INACT", "Inactive Co", active=0)
+        customer_model.create("ACT", "Active Co", active=1)
+        customer_model.create("INACT", "Inactive Co", active=0)
         rows = customer_model.get_all(active_only=True)
         codes = [r["code"] for r in rows]
         assert "ACT" in codes
         assert "INACT" not in codes
 
     def test_get_all_includes_inactive_when_requested(self, test_db):
-        customer_model.add("ACT", "Active Co", active=1)
-        customer_model.add("INACT", "Inactive Co", active=0)
+        customer_model.create("ACT", "Active Co", active=1)
+        customer_model.create("INACT", "Inactive Co", active=0)
         rows = customer_model.get_all(active_only=False)
         codes = [r["code"] for r in rows]
         assert "INACT" in codes
 
     def test_deactivate(self, test_db):
-        cid = customer_model.add("ACME", "Acme Corp")
+        cid = customer_model.create("ACME", "Acme Corp")
         customer_model.deactivate(cid)
         assert customer_model.get_by_id(cid)["active"] == 0
 
@@ -53,12 +53,12 @@ class TestCustomer:
         assert customer_model.get_by_id(99999) is None
 
     def test_update_name(self, test_db):
-        cid = customer_model.add("ACME", "Acme Corp")
+        cid = customer_model.create("ACME", "Acme Corp")
         customer_model.update(cid, "ACME", "Acme Pty Ltd")
         assert customer_model.get_by_id(cid)["name"] == "Acme Pty Ltd"
 
     def test_default_payment_terms(self, test_db):
-        cid = customer_model.add("ACME", "Acme Corp")
+        cid = customer_model.create("ACME", "Acme Corp")
         assert customer_model.get_by_id(cid)["payment_terms_days"] == 37
 
 
@@ -144,7 +144,7 @@ class TestArInvoice:
         assert invoice_model.get_by_id(inv_id)["amount_paid"] == pytest.approx(0.0)
 
     def test_get_all_filters_by_customer(self, test_db, customer_id):
-        cid2 = customer_model.add("OTHER", "Other Co")
+        cid2 = customer_model.create("OTHER", "Other Co")
         invoice_model.create("INV-00001", customer_id, "2026-05-01", "2026-06-07")
         invoice_model.create("INV-00002", cid2, "2026-05-01", "2026-06-07")
         rows = invoice_model.get_all(customer_id=customer_id)
@@ -192,18 +192,18 @@ class TestArPayment:
 
     def test_add_payment_returns_id(self, test_db, customer_id):
         inv_id = self._make_invoice(customer_id)
-        pid = payment_model.add(inv_id, customer_id, "2026-05-15", 110.00)
+        pid = payment_model.create(inv_id, customer_id, "2026-05-15", 110.00)
         assert isinstance(pid, int) and pid > 0
 
     def test_total_paid_reflects_payment(self, test_db, customer_id):
         inv_id = self._make_invoice(customer_id)
-        payment_model.add(inv_id, customer_id, "2026-05-15", 50.00)
+        payment_model.create(inv_id, customer_id, "2026-05-15", 50.00)
         assert payment_model.total_paid(inv_id) == pytest.approx(50.00)
 
     def test_total_paid_accumulates_multiple_payments(self, test_db, customer_id):
         inv_id = self._make_invoice(customer_id)
-        payment_model.add(inv_id, customer_id, "2026-05-15", 50.00)
-        payment_model.add(inv_id, customer_id, "2026-05-20", 60.00)
+        payment_model.create(inv_id, customer_id, "2026-05-15", 50.00)
+        payment_model.create(inv_id, customer_id, "2026-05-20", 60.00)
         assert payment_model.total_paid(inv_id) == pytest.approx(110.00)
 
     def test_total_paid_zero_for_no_payments(self, test_db, customer_id):
@@ -212,7 +212,7 @@ class TestArPayment:
 
     def test_get_by_invoice(self, test_db, customer_id):
         inv_id = self._make_invoice(customer_id)
-        payment_model.add(inv_id, customer_id, "2026-05-15", 110.00)
+        payment_model.create(inv_id, customer_id, "2026-05-15", 110.00)
         payments = payment_model.get_by_invoice(inv_id)
         assert len(payments) == 1
         assert payments[0]["amount"] == pytest.approx(110.00)

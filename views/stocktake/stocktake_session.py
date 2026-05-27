@@ -9,16 +9,17 @@ from utils.error_dialog import show_error
 import controllers.stocktake_controller as stocktake_ctrl
 import controllers.product_controller as product_ctrl
 import config.styles as styles
+from views.base_view import BaseView
 
 
-class StocktakeSession(QWidget):
+class StocktakeSession(BaseView):
     def __init__(self, session_id, on_close=None):
         super().__init__()
         self.session_id = session_id
         self.on_close = on_close
         self.setMinimumSize(1000, 650)
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -232,7 +233,7 @@ class StocktakeSession(QWidget):
                 self.session_id, path
             )
             self._show_import_result(imported, skipped, errors, path)
-            self._load()
+            self.load()
         except Exception as e:
             show_error(self, "Could not import stocktake from CSV.", e, title="Import Failed")
 
@@ -251,7 +252,7 @@ class StocktakeSession(QWidget):
                 self.session_id, path
             )
             self._show_import_result(imported, skipped, errors, path)
-            self._load()
+            self.load()
         except Exception as e:
             show_error(self, "Could not import stocktake from database file.", e, title="Import Failed")
 
@@ -288,7 +289,7 @@ class StocktakeSession(QWidget):
         )
         self.scan_input.clear()
         self.qty_input.setValue(1)
-        self._load()
+        self.load()
         self.scan_input.setFocus()
 
     # ── Variance Report ───────────────────────────────────────────────────────
@@ -303,7 +304,7 @@ class StocktakeSession(QWidget):
         self.variance_win.show()
 
     def _on_applied(self):
-        self._load()
+        self.load()
         if self.on_close:
             self.on_close()
 
@@ -350,7 +351,7 @@ class StocktakeSession(QWidget):
         inp.setFocus()
         if dlg.exec() and result[0]:
             stocktake_ctrl.upsert_count(self.session_id, barcode, int(inp.value()))
-            self._load()
+            self.load()
 
     def _remove_line(self):
         row = self.table.currentRow()
@@ -362,7 +363,7 @@ class StocktakeSession(QWidget):
         reply = QMessageBox.question(self, "Confirm", f"Remove count for:\n{desc}?")
         if reply == QMessageBox.StandardButton.Yes:
             stocktake_ctrl.delete_count(count_id)
-            self._load()
+            self.load()
 
     # ── Apply ─────────────────────────────────────────────────────────────────
 
@@ -401,7 +402,7 @@ class StocktakeSession(QWidget):
                     self, "Complete",
                     f"Stocktake applied. {count} product(s) updated."
                 )
-                self._load()
+                self.load()
                 if self.on_close:
                     self.on_close()
             except Exception as e:

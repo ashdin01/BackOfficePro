@@ -19,7 +19,7 @@ def setup():
     conn.executescript(SCHEMA)
     conn.commit()
     run_migrations(conn)
-    conn.close()
+    conn.release()
     print("✅ Fresh database created")
 
 if __name__ == "__main__":

@@ -183,7 +183,7 @@ class BundleEdit(QWidget):
 
     def _remove_eligible(self, item_id):
         if item_id and item_id > 0:
-            bundle_ctrl.remove_eligible(item_id)
+            bundle_ctrl.delete_eligible(item_id)
         # Remove from table
         for row in range(self._elig_table.rowCount()):
             if self._elig_table.item(row, 0).data(Qt.ItemDataRole.UserRole) == item_id:
@@ -204,7 +204,7 @@ class BundleEdit(QWidget):
         if self.bundle_id:
             bundle_ctrl.update(self.bundle_id, name, desc, req_qty, price, active)
         else:
-            self.bundle_id = bundle_ctrl.add(name, desc, req_qty, price)
+            self.bundle_id = bundle_ctrl.create(name, desc, req_qty, price)
             # Persist any buffered eligible items
             for row in range(self._elig_table.rowCount()):
                 barcode = self._elig_table.item(row, 0).text()

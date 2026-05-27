@@ -142,19 +142,50 @@ def _init_db_with_lock_recovery(app):
 
 
 def _start_api_server():
-    """Start the Flask REST API in a background daemon thread."""
+    """Start the Flask REST API in a background daemon thread.
+
+    Restarts automatically on unexpected crashes (up to _MAX_RESTARTS times)
+    with exponential back-off.  Returns the thread so the UI can monitor its
+    liveness via thread.is_alive().
+    """
     import threading
+    import time
+
+    _MAX_RESTARTS = 5
+    _BACKOFF_BASE = 5   # seconds; doubles each attempt, capped at 60
+
     def _run():
-        try:
-            from api_server import app as flask_app
-            logging.info("API server starting on 0.0.0.0:5050")
-            flask_app.run(host='0.0.0.0', port=5050, debug=False, use_reloader=False)
-        except OSError as e:
-            logging.warning(f"API server could not start (port already in use?): {e}")
-        except Exception as e:
-            logging.error(f"API server crashed: {e}", exc_info=True)
+        failures = 0
+        while True:
+            try:
+                from api_server import app as flask_app
+                logging.info("API server starting on 0.0.0.0:5050")
+                flask_app.run(host='0.0.0.0', port=5050, debug=False, use_reloader=False)
+                logging.warning("API server stopped normally — not restarting")
+                return
+            except OSError as e:
+                # Port conflict won't resolve on its own — don't retry
+                logging.error(f"API server could not bind (port in use?): {e}")
+                return
+            except Exception as e:
+                failures += 1
+                delay = min(_BACKOFF_BASE * (2 ** (failures - 1)), 60)
+                logging.error(
+                    f"API server crashed (attempt {failures}/{_MAX_RESTARTS}): {e}",
+                    exc_info=True,
+                )
+                if failures >= _MAX_RESTARTS:
+                    logging.critical(
+                        f"API server failed {_MAX_RESTARTS} consecutive times — giving up. "
+                        "POS and Android clients will not be able to connect."
+                    )
+                    return
+                logging.info(f"API server restarting in {delay}s…")
+                time.sleep(delay)
+
     t = threading.Thread(target=_run, daemon=True, name="api-server")
     t.start()
+    return t
 
 
 def main():
@@ -162,7 +193,7 @@ def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
     _init_db_with_lock_recovery(app)
-    _start_api_server()
+    api_thread = _start_api_server()
 
     import models.user as user_model
     from views.login_screen import LoginScreen, _SetupPinDialog
@@ -174,9 +205,11 @@ def main():
     main_win   = [None]
     def on_login(user):
         logging.info(f"Login successful: {user.get('username')} ({user.get('role')})")
+        from database.audit_context import set_context
+        set_context(user.get('username', ''), 'UI')
         from views.main_window import MainWindow
         login_win[0].hide()
-        main_win[0] = MainWindow(current_user=user)
+        main_win[0] = MainWindow(current_user=user, api_thread=api_thread)
         main_win[0].show()
     login_win[0] = LoginScreen(on_login=on_login)
     login_win[0].show()

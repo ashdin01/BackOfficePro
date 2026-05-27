@@ -60,7 +60,7 @@ class DepartmentEdit(KeyboardMixin, QWidget):
             if self.dept_id:
                 dept_ctrl.update(self.dept_id, code, name, int(self.active.isChecked()))
             else:
-                dept_ctrl.add(code, name)
+                dept_ctrl.create(code, name)
             if self.on_save:
                 self.on_save()
             self.close()

@@ -1,24 +1,19 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLineEdit, QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
+    QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
     QFileDialog, QMessageBox, QCheckBox
 )
-from PyQt6.QtCore import Qt, QObject, QEvent, QTimer
+from PyQt6.QtCore import Qt, QObject, QEvent
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.keyboard_mixin import KeyboardMixin
+from views.base_view import BaseView
+from views.widgets.search_bar import SearchBar
+from views.widgets.table_items import NumItem
 from utils.error_dialog import show_error
 import controllers.product_controller as product_ctrl
 import config.styles as styles
 import csv
 import os
-
-
-class NumericTableWidgetItem(QTableWidgetItem):
-    def __lt__(self, other):
-        try:
-            return float(self.text().replace("$", "")) < float(other.text().replace("$", ""))
-        except ValueError:
-            return super().__lt__(other)
 
 
 class _SearchEscapeFilter(QObject):
@@ -42,12 +37,12 @@ class _SearchEscapeFilter(QObject):
         return False
 
 
-class ProductList(KeyboardMixin, QWidget):
+class ProductList(KeyboardMixin, BaseView):
     def __init__(self, on_escape=None):
         super().__init__()
         self._on_escape = on_escape
         self._build_ui()
-        self._load()
+        self.load()
 
     def showEvent(self, event):
         """Auto-focus search bar every time this screen becomes visible."""
@@ -60,13 +55,11 @@ class ProductList(KeyboardMixin, QWidget):
 
         # ── Search row ────────────────────────────────────────────────
         search_row = QHBoxLayout()
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by barcode, PLU, description, brand, supplier or department…")
-        self._search_timer = QTimer()
-        self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(500)
-        self._search_timer.timeout.connect(lambda: self._search(self.search_input.text()))
-        self.search_input.textChanged.connect(lambda: self._search_timer.start())
+        self.search_input = SearchBar(
+            "Search by barcode, PLU, description, brand, supplier or department…",
+            interval=500,
+        )
+        self.search_input.search_changed.connect(lambda: self._search(self.search_input.text()))
         self.search_input.returnPressed.connect(self._focus_table)
 
         # Escape key: clear search, return to main nav
@@ -194,9 +187,9 @@ class ProductList(KeyboardMixin, QWidget):
             self.table.setItem(r, 4,  QTableWidgetItem(row['dept_name'] or ''))
             self.table.setItem(r, 5,  QTableWidgetItem(row['supplier_name'] or ''))
             self.table.setItem(r, 6,  QTableWidgetItem(row['unit'] or ''))
-            self.table.setItem(r, 7,  NumericTableWidgetItem(f"${row['sell_price']:.2f}"))
-            self.table.setItem(r, 8,  NumericTableWidgetItem(f"${row['cost_price']:.2f}"))
-            soh_item = NumericTableWidgetItem(str(soh_qty))
+            self.table.setItem(r, 7,  NumItem(f"${row['sell_price']:.2f}"))
+            self.table.setItem(r, 8,  NumItem(f"${row['cost_price']:.2f}"))
+            soh_item = NumItem(str(soh_qty))
             soh_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if is_warning:
                 soh_item.setForeground(QColor(styles.CLR_ORANGE))
@@ -239,7 +232,7 @@ class ProductList(KeyboardMixin, QWidget):
             rows = product_ctrl.search_products(term, active_only=not self._show_inactive())
             self._load(rows)
         else:
-            self._load()
+            self.load()
 
     def _reload_with_search(self):
         term = self.search_input.text().strip()
@@ -247,7 +240,7 @@ class ProductList(KeyboardMixin, QWidget):
             rows = product_ctrl.search_products(term, active_only=not self._show_inactive())
             self._load(rows)
         else:
-            self._load()
+            self.load()
 
     def _add(self):
         from views.products.product_add import ProductAdd

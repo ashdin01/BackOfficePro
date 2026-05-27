@@ -2,7 +2,7 @@ import logging
 from PyQt6.QtWidgets import QMessageBox
 
 
-def show_error(parent, context: str, exc: Exception = None, title: str = "Error") -> None:
+def show_error(parent, context: str, exc: Exception | None = None, title: str = "Error") -> None:
     """Log exc with full traceback, then show a clean error dialog.
 
     Users see a plain context sentence plus one-line detail.

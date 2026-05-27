@@ -5,33 +5,143 @@ Run alongside the desktop app:
 """
 import argparse
 import hmac
+import logging
 import re
 import secrets
 import sys
 import os
+import threading
+import time
+from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, request, jsonify, send_file
-from database.connection import get_connection
-from models import stocktake
-from models.barcode_alias import resolve as resolve_alias
-from models.settings import get_setting, set_setting
-import models.product as product_model
+from flask import Flask, g, request, jsonify, send_file
+import controllers.settings_controller as settings_ctrl
+import controllers.department_controller as department_ctrl
+import controllers.product_controller as product_ctrl
+import controllers.stocktake_controller as stocktake_ctrl
+import controllers.bundle_controller as bundle_ctrl
+import controllers.sales_report_controller as sales_ctrl
 
 app = Flask(__name__)
 
 # Routes that do not require authentication (liveness check only)
 _AUTH_EXEMPT = {"/api/v1/health"}
 
+# ── Rate limiters (sliding window) ───────────────────────────────────────────
+
+# /pos/sale — tight limit to prevent runaway POS retries
+_SALE_WINDOW   = 1.0   # seconds
+_SALE_MAX      = 10    # max requests per window
+_sale_lock     = threading.Lock()
+_sale_times: deque = deque()
+
+# All other authenticated endpoints — permissive, guards against runaway clients
+_READ_WINDOW   = 10.0  # seconds
+_READ_MAX      = 60    # max requests per window
+_read_lock     = threading.Lock()
+_read_times: deque = deque()
+
+
+def _sale_rate_ok() -> bool:
+    """Return True if the /pos/sale request is within the allowed rate."""
+    now = time.monotonic()
+    with _sale_lock:
+        while _sale_times and _sale_times[0] < now - _SALE_WINDOW:
+            _sale_times.popleft()
+        if len(_sale_times) >= _SALE_MAX:
+            return False
+        _sale_times.append(now)
+        return True
+
+
+def _read_rate_ok() -> bool:
+    """Return True if the read request is within the allowed rate."""
+    now = time.monotonic()
+    with _read_lock:
+        while _read_times and _read_times[0] < now - _READ_WINDOW:
+            _read_times.popleft()
+        if len(_read_times) >= _READ_MAX:
+            return False
+        _read_times.append(now)
+        return True
+
+
+_api_key_cache: str = ""
+_api_key_lock = threading.Lock()
+
 
 def _get_api_key():
-    """Return the stored API key, generating one on first use."""
-    key = get_setting("api_key", "")
-    if not key:
-        key = secrets.token_hex(32)
-        set_setting("api_key", key)
-    return key
+    """Return the stored API key, generating one on first use.
+
+    Primary store is the OS keychain (keyring); the settings DB is a fallback
+    for environments where keyring is unavailable (e.g. headless servers).
+    Existing installs that still have the key in plaintext DB are migrated to
+    keyring on first call and the DB copy is cleared.
+    The resolved key is cached in-process so every request in the same process
+    sees the same value without a keyring/DB round-trip.
+
+    Double-checked locking: the fast path (cache hit) reads the str without a
+    lock — safe under CPython's GIL. The slow initialization path acquires the
+    lock and re-checks, so concurrent threads can't both run the keyring/DB
+    migration or both generate a new key.
+    """
+    global _api_key_cache
+    if _api_key_cache:          # fast path — GIL makes str read effectively atomic
+        return _api_key_cache
+
+    with _api_key_lock:
+        if _api_key_cache:      # re-check: another thread may have initialized while we waited
+            return _api_key_cache
+
+        from utils.secret_store import get_secret, set_secret
+        key = get_secret("api_key")
+
+        if not key:
+            # Migration path: key may still be in the plaintext settings table.
+            key = settings_ctrl.get_setting("api_key", "")
+            if key:
+                set_secret("api_key", key)
+                if get_secret("api_key"):
+                    settings_ctrl.set_setting("api_key", "")  # clear plaintext copy
+            else:
+                key = secrets.token_hex(32)
+                set_secret("api_key", key)
+                if not get_secret("api_key"):
+                    # Keyring unavailable — persist in DB so the key survives restart.
+                    settings_ctrl.set_setting("api_key", key)
+
+        _api_key_cache = key
+        return key
+
+
+@app.teardown_appcontext
+def _close_db_connection(exc):
+    if not app.config.get('TESTING'):
+        from database.connection import close_thread_connection
+        close_thread_connection()
+
+
+@app.before_request
+def _log_request_start():
+    """Assign a short request ID and capture start time for duration logging."""
+    g.request_id    = secrets.token_hex(4)   # 8-char hex, unique per request
+    g.request_start = time.monotonic()
+
+
+@app.after_request
+def _log_response(response):
+    duration_ms = (time.monotonic() - getattr(g, 'request_start', time.monotonic())) * 1000
+    req_id = getattr(g, 'request_id', '--------')
+    response.headers['X-Request-ID'] = req_id
+    msg  = "API %s %s → %d (%.1f ms) [req=%s]"
+    args = (request.method, request.path, response.status_code, duration_ms, req_id)
+    if response.status_code == 401:
+        logging.warning(msg, *args)
+    else:
+        logging.debug(msg, *args)
+    return response
 
 
 @app.before_request
@@ -47,43 +157,50 @@ def _require_api_key():
         return jsonify({"error": "Unauthorized"}), 401
 
 
-def _row(row):
-    return dict(row) if row else None
+@app.before_request
+def _setup_audit_context():
+    """Tag this thread as an API request so stock movements record their source."""
+    if request.path in _AUTH_EXEMPT:
+        return
+    from database.audit_context import set_context
+    set_context('API', 'API')
 
 
-def _rows(rows):
-    return [dict(r) for r in rows]
+@app.before_request
+def _rate_limit_reads():
+    """/pos/sale has its own tighter limiter; apply the general one to everything else."""
+    if request.path in _AUTH_EXEMPT:
+        return
+    if request.endpoint == 'record_pos_sale':
+        return
+    if not _read_rate_ok():
+        logging.warning("API read rate limit exceeded [req=%s]", getattr(g, 'request_id', '?'))
+        return jsonify({"error": "Rate limit exceeded — slow down and retry"}), 429
 
 
 @app.route("/api/v1/health")
 def health():
+    try:
+        from database.connection import get_connection
+        conn = get_connection()
+        conn.execute("SELECT 1 FROM settings LIMIT 1")
+        conn.release()
+    except Exception:
+        logging.exception("Health check DB query failed")
+        return jsonify({"status": "error", "app": "BackOfficePro"}), 503
     return jsonify({"status": "ok", "app": "BackOfficePro"})
 
 
 @app.route("/api/v1/store")
 def get_store():
     """Public store settings — consumed by RetailPOSPro to display store name etc."""
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            "SELECT key, value FROM settings "
-            "WHERE key IN ('store_name','store_address','store_phone','store_abn','gst_rate')"
-        ).fetchall()
-        return jsonify({r["key"]: r["value"] or "" for r in rows})
-    finally:
-        conn.close()
+    return jsonify(settings_ctrl.get_store_settings())
 
 
 @app.route("/api/v1/departments")
 def get_departments():
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            "SELECT id, code, name FROM departments WHERE active=1 ORDER BY name"
-        ).fetchall()
-        return jsonify(_rows(rows))
-    finally:
-        conn.close()
+    rows = department_ctrl.get_all(active_only=True)
+    return jsonify([{'id': r['id'], 'code': r['code'], 'name': r['name']} for r in rows])
 
 
 @app.route("/api/v1/products")
@@ -100,141 +217,32 @@ def list_products():
         return jsonify({"error": "limit and offset must be integers"}), 400
 
     if search:
-        rows = product_model.search(search, active_only=True, limit=limit, offset=offset)
-        return jsonify(_rows(rows))
+        rows = product_ctrl.search_products(search, active_only=True)
+        return jsonify([dict(r) for r in rows])
 
-    conn = get_connection()
-    try:
-        rows = conn.execute("""
-            SELECT p.barcode, p.plu, p.description, p.brand, p.unit,
-                   p.sell_price, p.tax_rate, d.name AS dept_name,
-                   g.name AS group_name
-            FROM products p
-            LEFT JOIN departments d    ON p.department_id = d.id
-            LEFT JOIN product_groups g ON p.group_id = g.id
-            WHERE p.active = 1
-            ORDER BY p.description
-            LIMIT ? OFFSET ?
-        """, (limit, offset)).fetchall()
-        return jsonify(_rows(rows))
-    finally:
-        conn.close()
+    return jsonify(product_ctrl.get_all_for_pos(limit, offset))
 
 
 @app.route("/api/v1/products/plu/<int:plu>")
 def get_product_by_plu(plu):
     """Look up a product by its PLU number."""
-    conn = get_connection()
-    try:
-        # Check the plu_barcode_map table first
-        map_row = conn.execute(
-            "SELECT barcode FROM plu_barcode_map WHERE plu = ?", (plu,)
-        ).fetchone()
-        barcode = map_row["barcode"] if map_row else None
-
-        # Fallback: check the plu column on products directly
-        if not barcode:
-            p_row = conn.execute(
-                "SELECT barcode FROM products WHERE plu = ? AND active = 1 LIMIT 1",
-                (str(plu),)
-            ).fetchone()
-            barcode = p_row["barcode"] if p_row else None
-
-        # Fallback: check selling units PLU
-        if not barcode:
-            su_row = conn.execute(
-                "SELECT barcode FROM product_selling_units WHERE plu = ? AND active = 1 LIMIT 1",
-                (str(plu),)
-            ).fetchone()
-            if su_row and su_row["barcode"]:
-                # Delegate to get_product() logic via the barcode
-                conn.close()
-                return get_product(su_row["barcode"])
-
-        if not barcode:
-            return jsonify({"error": "Product not found"}), 404
-
-        row = conn.execute(
-            """
-            SELECT p.barcode, p.plu, p.description, p.sell_price, p.cost_price,
-                   p.tax_rate, p.unit, p.brand, d.name AS dept_name,
-                   COALESCE(soh.quantity, 0) AS soh_qty
-            FROM products p
-            LEFT JOIN departments d     ON p.department_id = d.id
-            LEFT JOIN stock_on_hand soh ON soh.barcode = p.barcode
-            WHERE p.barcode = ? AND p.active = 1
-            """,
-            (barcode,),
-        ).fetchone()
-        if not row:
-            return jsonify({"error": "Product not found"}), 404
-        return jsonify(_row(row))
-    finally:
-        conn.close()
+    result = product_ctrl.get_product_by_plu(plu)
+    if not result:
+        return jsonify({"error": "Product not found"}), 404
+    return jsonify(result)
 
 
 @app.route("/api/v1/products/<barcode>")
 def get_product(barcode):
-    resolved = resolve_alias(barcode)
-    conn = get_connection()
-    try:
-        row = conn.execute(
-            """
-            SELECT p.barcode, p.plu, p.description, p.sell_price, p.cost_price,
-                   p.tax_rate, p.unit, p.brand, d.name AS dept_name,
-                   COALESCE(soh.quantity, 0) AS soh_qty
-            FROM products p
-            LEFT JOIN departments d     ON p.department_id = d.id
-            LEFT JOIN stock_on_hand soh ON soh.barcode = p.barcode
-            WHERE p.barcode = ? AND p.active = 1
-            """,
-            (resolved,),
-        ).fetchone()
-        if row:
-            return jsonify(_row(row))
-
-        # Check selling units (case, 6-pack, etc.)
-        su = conn.execute(
-            """
-            SELECT su.barcode, su.label, su.unit_qty, su.sell_price,
-                   su.plu AS su_plu,
-                   p.barcode AS master_barcode, p.plu, p.cost_price,
-                   p.tax_rate, p.unit, p.brand, d.name AS dept_name,
-                   COALESCE(soh.quantity, 0) AS master_soh
-            FROM product_selling_units su
-            JOIN products p             ON su.master_barcode = p.barcode
-            LEFT JOIN departments d     ON p.department_id = d.id
-            LEFT JOIN stock_on_hand soh ON soh.barcode = p.barcode
-            WHERE su.barcode = ? AND su.active = 1 AND p.active = 1
-            """,
-            (resolved,),
-        ).fetchone()
-        if not su:
-            return jsonify({"error": "Product not found"}), 404
-
-        unit_qty = su['unit_qty'] or 0
-        soh_in_units = int(su['master_soh'] // unit_qty) if unit_qty > 0 else 0
-        return jsonify({
-            'barcode':        resolved,
-            'master_barcode': su['master_barcode'],
-            'plu':            su['su_plu'] or su['plu'] or '',
-            'description':    su['label'],
-            'sell_price':     su['sell_price'],
-            'cost_price':     su['cost_price'],
-            'tax_rate':       su['tax_rate'],
-            'unit':           su['unit'],
-            'brand':          su['brand'],
-            'dept_name':      su['dept_name'],
-            'unit_qty':       su['unit_qty'],
-            'soh_qty':        soh_in_units,
-        })
-    finally:
-        conn.close()
+    result = product_ctrl.get_product_for_pos(barcode)
+    if not result:
+        return jsonify({"error": "Product not found"}), 404
+    return jsonify(result)
 
 
 @app.route("/api/v1/sessions", methods=["GET"])
 def list_sessions():
-    return jsonify(_rows(stocktake.get_all_sessions()))
+    return jsonify([dict(r) for r in stocktake_ctrl.get_all_sessions()])
 
 
 @app.route("/api/v1/sessions", methods=["POST"])
@@ -243,58 +251,51 @@ def create_session():
     label = str(data.get("label", "")).strip()
     if not label:
         return jsonify({"error": "label required"}), 400
-    dept_id = data.get("department_id")
-    notes = data.get("notes", "")
+    dept_id    = data.get("department_id")
+    notes      = data.get("notes", "")
     created_by = data.get("created_by", "Android")
-    session_id = stocktake.create_session(label, dept_id, notes, created_by)
+    session_id = stocktake_ctrl.create_session(label, dept_id, notes, created_by)
     return jsonify({"id": session_id}), 201
 
 
 @app.route("/api/v1/sessions/<int:session_id>", methods=["GET"])
 def get_session(session_id):
-    row = stocktake.get_session(session_id)
+    row = stocktake_ctrl.get_session(session_id)
     if not row:
         return jsonify({"error": "Session not found"}), 404
-    return jsonify(_row(row))
+    return jsonify(dict(row))
 
 
 @app.route("/api/v1/sessions/<int:session_id>/counts", methods=["GET"])
 def list_counts(session_id):
-    return jsonify(_rows(stocktake.get_counts(session_id)))
+    return jsonify([dict(r) for r in stocktake_ctrl.get_counts(session_id)])
 
 
 @app.route("/api/v1/sessions/<int:session_id>/counts", methods=["POST"])
 def add_count(session_id):
-    data = request.get_json(force=True) or {}
+    data    = request.get_json(force=True) or {}
     barcode = str(data.get("barcode", "")).strip()
-    qty = data.get("qty")
+    qty     = data.get("qty")
     if not barcode or qty is None:
         return jsonify({"error": "barcode and qty required"}), 400
 
-    resolved = resolve_alias(barcode)
-    conn = get_connection()
-    try:
-        product = conn.execute(
-            "SELECT barcode FROM products WHERE barcode=? AND active=1", (resolved,)
-        ).fetchone()
-        if not product:
-            return jsonify({"error": "Product not found"}), 404
-    finally:
-        conn.close()
+    product = product_ctrl.get_product_by_barcode(barcode)
+    if not product or not product['active']:
+        return jsonify({"error": "Product not found"}), 404
 
-    stocktake.upsert_count(session_id, resolved, float(qty))
-    return jsonify({"ok": True, "barcode": resolved}), 200
+    stocktake_ctrl.upsert_count(session_id, product['barcode'], float(qty))
+    return jsonify({"ok": True, "barcode": product['barcode']}), 200
 
 
 @app.route("/api/v1/sessions/<int:session_id>/counts/barcode/<barcode>", methods=["GET"])
 def get_count_for_barcode(session_id, barcode):
-    qty = stocktake.get_count_for_barcode(session_id, resolve_alias(barcode))
+    qty = stocktake_ctrl.get_count_for_barcode(session_id, barcode)
     return jsonify({"counted_qty": qty}), 200
 
 
 @app.route("/api/v1/sessions/<int:session_id>/counts/<int:count_id>", methods=["DELETE"])
 def delete_count(session_id, count_id):
-    stocktake.delete_count(count_id)
+    stocktake_ctrl.delete_count(count_id)
     return jsonify({"ok": True}), 200
 
 
@@ -312,31 +313,23 @@ def get_product_image(barcode):
     barcode = _safe_barcode(barcode)
     if not barcode:
         return jsonify({"error": "Invalid barcode"}), 400
-    from config.settings import DATA_DIR
-    img_dir = os.path.join(DATA_DIR, 'images')
-    for ext in ('jpg', 'jpeg', 'png', 'webp'):
-        path = os.path.join(img_dir, f"{barcode}.{ext}")
-        if os.path.exists(path):
-            mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext}'
-            return send_file(path, mimetype=mime)
-    return jsonify({"error": "No image"}), 404
+    path = product_ctrl.find_product_image(barcode)
+    if not path:
+        return jsonify({"error": "No image"}), 404
+    ext  = path.rsplit('.', 1)[-1].lower()
+    mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext}'
+    return send_file(path, mimetype=mime)
 
 
 @app.route("/api/v1/products/<barcode>/image", methods=["DELETE"])
-def delete_product_image(barcode):
+def delete_product_image_route(barcode):
     """Remove a product image (used by BackOfficePro desktop — not RetailPOSPro)."""
     barcode = _safe_barcode(barcode)
     if not barcode:
         return jsonify({"error": "Invalid barcode"}), 400
-    from config.settings import DATA_DIR
-    img_dir = os.path.join(DATA_DIR, 'images')
-    deleted = False
-    for ext in ('jpg', 'jpeg', 'png', 'webp'):
-        path = os.path.join(img_dir, f"{barcode}.{ext}")
-        if os.path.exists(path):
-            os.remove(path)
-            deleted = True
-    return jsonify({"ok": deleted}), 200
+    existed = product_ctrl.find_product_image(barcode) is not None
+    product_ctrl.delete_product_image(barcode)
+    return jsonify({"ok": existed}), 200
 
 
 @app.route("/api/v1/pos/sale", methods=["POST"])
@@ -366,115 +359,61 @@ def record_pos_sale():
       ]
     }
     """
-    data = request.get_json(force=True) or {}
+    if not _sale_rate_ok():
+        logging.warning("API /pos/sale rate limit exceeded [req=%s]", getattr(g, 'request_id', '?'))
+        return jsonify({"error": "Rate limit exceeded — slow down and retry"}), 429
+
+    data      = request.get_json(force=True) or {}
     reference = str(data.get("reference", "")).strip()
-    sale_date  = str(data.get("sale_date",  "")).strip()
-    operator   = str(data.get("operator",   "POS")).strip()
-    items      = data.get("items", [])
+    sale_date = str(data.get("sale_date",  "")).strip()
+    operator  = str(data.get("operator",   "POS")).strip()
+    items     = data.get("items", [])
 
     if not reference or not sale_date or not items:
         return jsonify({"error": "reference, sale_date, and items are required"}), 400
 
-    conn = get_connection()
     try:
-        for item in items:
-            barcode     = str(item.get("barcode",     "")).strip()
-            qty         = float(item.get("qty",        0))
-            line_total  = float(item.get("line_total", 0))
-            description = str(item.get("description", "")).strip()
-
-            if not barcode or qty <= 0:
-                continue
-
-            barcode = resolve_alias(barcode)
-
-            # Selling unit? deduct qty×unit_qty from master barcode
-            su = conn.execute(
-                "SELECT master_barcode, unit_qty FROM product_selling_units "
-                "WHERE barcode = ? AND active = 1",
-                (barcode,)
-            ).fetchone()
-            if su:
-                stock_barcode = su['master_barcode']
-                stock_qty     = qty * (su['unit_qty'] or 1)
-            else:
-                stock_barcode = barcode
-                stock_qty     = qty
-
-            # Reduce stock on hand
-            conn.execute("""
-                INSERT INTO stock_on_hand (barcode, quantity)
-                VALUES (?, ?)
-                ON CONFLICT(barcode) DO UPDATE SET
-                    quantity = quantity + excluded.quantity,
-                    last_updated = CURRENT_TIMESTAMP
-            """, (stock_barcode, -stock_qty))
-
-            # Record stock movement
-            conn.execute("""
-                INSERT INTO stock_movements
-                    (barcode, movement_type, quantity, reference, notes, created_by)
-                VALUES (?, 'SALE', ?, ?, ?, ?)
-            """, (stock_barcode, -stock_qty, reference, description, operator))
-
-            # Write to sales_daily (aggregate by PLU per day)
-            plu_row = conn.execute(
-                "SELECT plu FROM products WHERE barcode = ?", (stock_barcode,)
-            ).fetchone()
-            plu = (plu_row["plu"] or stock_barcode) if plu_row and plu_row["plu"] else stock_barcode
-
-            conn.execute("""
-                INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(sale_date, plu) DO UPDATE SET
-                    quantity     = quantity     + excluded.quantity,
-                    sales_dollars = sales_dollars + excluded.sales_dollars
-            """, (sale_date, plu, description, qty, line_total))
-
-        conn.commit()
-        return jsonify({"ok": True, "reference": reference}), 200
-
-    except Exception as e:
-        conn.rollback()
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
+        is_new = sales_ctrl.record_pos_sale(reference, sale_date, operator, items)
+        return jsonify({"ok": True, "reference": reference, "duplicate": not is_new}), 200
+    except Exception:
+        logging.exception("POST /pos/sale failed [ref=%s req=%s]",
+                          reference, getattr(g, 'request_id', '?'))
+        return jsonify({"error": "Sale could not be recorded — try again"}), 500
 
 
 @app.route("/api/v1/bundles")
 def list_bundles():
     """Return all active bundles with their eligible item barcodes — consumed by RetailPOSPro."""
-    conn = get_connection()
-    try:
-        bundles = conn.execute(
-            "SELECT id, name, description, required_qty, price FROM bundles WHERE active=1 ORDER BY name"
-        ).fetchall()
-        result = []
-        for b in bundles:
-            eligible = conn.execute(
-                "SELECT barcode, description, unit_qty FROM bundle_eligible WHERE bundle_id=?",
-                (b['id'],)
-            ).fetchall()
-            result.append({
-                'id':           b['id'],
-                'name':         b['name'],
-                'description':  b['description'] or '',
-                'required_qty': b['required_qty'],
-                'price':        b['price'],
-                'eligible':     [{'barcode': e['barcode'], 'description': e['description'], 'unit_qty': int(e['unit_qty'] or 1)} for e in eligible],
-            })
-        return jsonify(result)
-    finally:
-        conn.close()
+    bundles = bundle_ctrl.get_all(active_only=True)
+    result  = []
+    for b in bundles:
+        eligible = bundle_ctrl.get_eligible(b['id'])
+        result.append({
+            'id':           b['id'],
+            'name':         b['name'],
+            'description':  b['description'] or '',
+            'required_qty': b['required_qty'],
+            'price':        b['price'],
+            'eligible':     [
+                {'barcode': e['barcode'], 'description': e['description'],
+                 'unit_qty': int(e['unit_qty'] or 1)}
+                for e in eligible
+            ],
+        })
+    return jsonify(result)
 
 
 if __name__ == "__main__":
+    from waitress import serve
+
     parser = argparse.ArgumentParser(description="BackOfficePro API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default 0.0.0.0)")
     parser.add_argument("--port", type=int, default=5050, help="Port (default 5050)")
+    parser.add_argument("--threads", type=int, default=4,
+                        help="Waitress worker threads (default 4)")
     args = parser.parse_args()
     api_key = _get_api_key()
     print(f"BackOfficePro API → http://{args.host}:{args.port}")
     print(f"API key           → {api_key}")
     print("Pass as header:   X-API-Key: <key>")
-    app.run(host=args.host, port=args.port, debug=False)
+    serve(app, host=args.host, port=args.port, threads=args.threads)

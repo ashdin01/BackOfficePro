@@ -14,7 +14,7 @@ import models.supplier as supplier_model
 @pytest.fixture()
 def supplier_with_bank(db_conn):
     """Supplier that has all three bank fields populated."""
-    supplier_model.add(
+    supplier_model.create(
         'BNK', 'Bank Supplier',
         bank_account_name='Harcourt Apples Pty Ltd',
         bank_bsb='063-000',
@@ -35,7 +35,7 @@ def po_with_bank(supplier_with_bank):
 @pytest.fixture()
 def supplier_no_bank(db_conn):
     """Supplier with no bank details at all."""
-    supplier_model.add('NBK', 'No Bank Supplier')
+    supplier_model.create('NBK', 'No Bank Supplier')
     row = db_conn.execute("SELECT id FROM suppliers WHERE code='NBK'").fetchone()
     return row['id']
 

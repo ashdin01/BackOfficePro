@@ -14,13 +14,36 @@ import threading
 from datetime import datetime
 
 class MainWindow(QMainWindow):
-    def __init__(self, current_user=None):
+    def __init__(self, current_user=None, api_thread=None):
         super().__init__()
         self.current_user = current_user or {"username": "admin", "role": "ADMIN", "full_name": "Administrator"}
+        self._api_thread = api_thread
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1400, 850)
         self._build_ui()
+        if api_thread is not None:
+            self._start_api_watchdog()
         self._run_auto_plu_map()
+
+    def _start_api_watchdog(self):
+        """Poll the API server thread every 15 s and update the sidebar badge."""
+        self._api_watchdog = QTimer(self)
+        self._api_watchdog.timeout.connect(self._update_api_status)
+        self._api_watchdog.start(15_000)
+
+    def _update_api_status(self):
+        if not hasattr(self, '_api_status_label') or self._api_thread is None:
+            return
+        if self._api_thread.is_alive():
+            self._api_status_label.setText("POS API: online")
+            self._api_status_label.setStyleSheet(
+                f"color: {styles.CLR_SUCCESS}; font-size: 9px;"
+            )
+        else:
+            self._api_status_label.setText("POS API: offline")
+            self._api_status_label.setStyleSheet(
+                f"color: {styles.CLR_DANGER}; font-size: 9px;"
+            )
 
     def _run_auto_plu_map(self):
         """Silently auto-map any PLUs that exist in products but are missing from plu_barcode_map."""
@@ -34,7 +57,7 @@ class MainWindow(QMainWindow):
                 try:
                     self.screens[0]._refresh()
                 except Exception:
-                    pass
+                    logging.exception("[startup] screen refresh after PLU auto-map failed")
         except Exception as e:
             logging.warning(f"[startup] auto_plu_map failed: {e}")
 
@@ -150,6 +173,13 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.last_backup_label)
         self._refresh_last_backup_label()
 
+        self._api_status_label = QLabel("")
+        self._api_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._api_status_label.setStyleSheet("color: grey; font-size: 9px;")
+        sidebar_layout.addWidget(self._api_status_label)
+        if getattr(self, '_api_thread', None) is not None:
+            self._update_api_status()
+
         sidebar_layout.addSpacing(8)
         hint = QLabel("Hotkeys (outside text fields):\nH·P·S·D·O·V·R·K·A·L·B")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -233,7 +263,7 @@ class MainWindow(QMainWindow):
         self._switch(0)
 
     def _open_settings(self):
-        from settings_screen import SettingsScreen
+        from views.settings.settings_screen import SettingsScreen
         self._settings_win = SettingsScreen()
         self._settings_win.show()
 
@@ -243,6 +273,8 @@ class MainWindow(QMainWindow):
         self.hide()
 
         def on_relogin(user):
+            from database.audit_context import set_context
+            set_context(user.get('username', ''), 'UI')
             login_win.hide()
             self.current_user = user
             # Stop timers on the HomeScreen before the widget is replaced,
@@ -376,6 +408,7 @@ class MainWindow(QMainWindow):
         try:
             valid, missing = backup_ctrl.validate_backup_file(src_path)
         except RuntimeError as e:
+            logging.warning("Backup file validation failed: %s", e)
             QMessageBox.critical(self, "Invalid File", str(e))
             return
         if not valid:
@@ -416,6 +449,7 @@ class MainWindow(QMainWindow):
         try:
             backup_ctrl.restore_backup(src_path)
         except Exception as e:
+            logging.exception("Database restore failed")
             QMessageBox.critical(self, "Restore Failed", f"Could not restore backup:\n{e}")
             return
         QMessageBox.information(

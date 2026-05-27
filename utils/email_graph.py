@@ -26,7 +26,7 @@ def _load_graph_settings() -> dict:
         "SELECT key, value FROM settings WHERE key IN "
         "('graph_client_id','graph_tenant_id','graph_from_address')"
     ).fetchall()
-    conn.close()
+    conn.release()
     settings = {r[0]: (r[1] or "").strip() for r in rows}
     settings["graph_client_secret"] = get_secret("graph_client_secret")
     return settings
@@ -55,8 +55,8 @@ def send_email(
     to_address: str,
     subject: str,
     body: str,
-    attachment_path: str = None,
-    cc_address: str = None,
+    attachment_path: str | None = None,
+    cc_address: str | None = None,
     body_type: str = "Text",
 ) -> bool:
     """
@@ -171,7 +171,7 @@ def send_purchase_order(po_id: int, to_address: str, pdf_path: str) -> bool:
     settings_rows = conn.execute(
         "SELECT key, value FROM settings WHERE key IN ('store_name', 'store_manager')"
     ).fetchall()
-    conn.close()
+    conn.release()
     settings = {r[0]: (r[1] or "").strip() for r in settings_rows}
 
     po_number     = po["po_number"] if po else f"PO-{po_id}"
@@ -214,7 +214,7 @@ def send_backup(backup_path: str, to_address: str) -> bool:
     from datetime import datetime as _dt
     conn = get_connection()
     store = conn.execute("SELECT value FROM settings WHERE key='store_name'").fetchone()
-    conn.close()
+    conn.release()
 
     store_name = store["value"] if store else "BackOfficePro"
     ts = _dt.now().strftime("%d/%m/%Y %H:%M")

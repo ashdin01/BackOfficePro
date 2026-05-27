@@ -11,7 +11,7 @@ def get_all_profiles():
             "SELECT * FROM bank_csv_profiles ORDER BY name COLLATE NOCASE"
         ).fetchall()]
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_profile(profile_id):
@@ -22,7 +22,7 @@ def get_profile(profile_id):
         ).fetchone()
         return dict(row) if row else None
     finally:
-        conn.close()
+        conn.release()
 
 
 def save_profile(name, delimiter, has_header, skip_rows, date_format, amount_type,
@@ -60,8 +60,11 @@ def save_profile(name, delimiter, has_header, skip_rows, date_format, amount_typ
             ).fetchone()['id']
         conn.commit()
         return pid
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def delete_profile(profile_id):
@@ -69,8 +72,11 @@ def delete_profile(profile_id):
     try:
         conn.execute("DELETE FROM bank_csv_profiles WHERE id=?", (profile_id,))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────
@@ -88,8 +94,11 @@ def insert_transactions(profile_id, batch, rows):
                   r['txn_date'], r['amount'], r['description'],
                   r.get('reference') or '', r.get('balance')))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_transactions(batch):
@@ -101,7 +110,7 @@ def get_transactions(batch):
             ORDER BY txn_date, id
         """, (batch,)).fetchall()]
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_all_batches():
@@ -120,40 +129,72 @@ def get_all_batches():
             ORDER BY import_batch DESC
         """).fetchall()]
     finally:
-        conn.close()
+        conn.release()
 
 
 def set_matched(txn_id, invoice_id, payment_id):
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
     conn = get_connection()
     try:
+        old = conn.execute(
+            "SELECT status, invoice_id, payment_id FROM bank_transactions WHERE id=?",
+            (txn_id,)
+        ).fetchone()
         conn.execute("""
             UPDATE bank_transactions
             SET status='MATCHED', invoice_id=?, payment_id=?
             WHERE id=?
         """, (invoice_id, payment_id, txn_id))
+        if old:
+            record_changes(conn, 'bank_transaction', str(txn_id),
+                           {'status': old['status'], 'invoice_id': old['invoice_id'],
+                            'payment_id': old['payment_id']},
+                           {'status': 'MATCHED', 'invoice_id': invoice_id,
+                            'payment_id': payment_id},
+                           get_user())
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def set_ignored(txn_id):
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
     conn = get_connection()
     try:
+        old = conn.execute(
+            "SELECT status FROM bank_transactions WHERE id=?", (txn_id,)
+        ).fetchone()
         conn.execute(
             "UPDATE bank_transactions SET status='IGNORED' WHERE id=?",
             (txn_id,)
         )
+        if old:
+            record_changes(conn, 'bank_transaction', str(txn_id),
+                           {'status': old['status']}, {'status': 'IGNORED'}, get_user())
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def unmatch_transaction(txn_id):
-    """Delete the linked payment and reset the transaction to UNMATCHED."""
+    """Delete the linked payment, reset the transaction to UNMATCHED, and
+    recalculate the invoice balance — all in one atomic transaction."""
+    from datetime import date
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
+
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT invoice_id, payment_id FROM bank_transactions WHERE id=?",
+            "SELECT status, invoice_id, payment_id FROM bank_transactions WHERE id=?",
             (txn_id,)
         ).fetchone()
         if not row:
@@ -166,45 +207,48 @@ def unmatch_transaction(txn_id):
             SET status='UNMATCHED', invoice_id=NULL, payment_id=NULL
             WHERE id=?
         """, (txn_id,))
+        record_changes(conn, 'bank_transaction', str(txn_id),
+                       {'status': row['status'], 'invoice_id': invoice_id,
+                        'payment_id': payment_id},
+                       {'status': 'UNMATCHED', 'invoice_id': None, 'payment_id': None},
+                       get_user())
 
         if payment_id:
             conn.execute("DELETE FROM ar_payments WHERE id=?", (payment_id,))
 
-        conn.commit()
-    finally:
-        conn.close()
-
-    if not invoice_id:
-        return
-
-    # Recalculate invoice amount_paid and status
-    conn2 = get_connection()
-    try:
-        total_paid = conn2.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM ar_payments WHERE invoice_id=?",
-            (invoice_id,)
-        ).fetchone()[0]
-        conn2.execute(
-            "UPDATE ar_invoices SET amount_paid=?, updated_at=datetime('now','localtime') WHERE id=?",
-            (total_paid, invoice_id)
-        )
-        inv = conn2.execute(
-            "SELECT total, due_date FROM ar_invoices WHERE id=?",
-            (invoice_id,)
-        ).fetchone()
-        if inv:
-            from datetime import date
-            overdue = date.today().isoformat() > inv['due_date']
-            if total_paid <= 0:
-                new_status = 'OVERDUE' if overdue else 'SENT'
-            elif total_paid < float(inv['total']):
-                new_status = 'PARTIAL'
-            else:
-                new_status = 'PAID'
-            conn2.execute(
-                "UPDATE ar_invoices SET status=? WHERE id=?",
-                (new_status, invoice_id)
+        if invoice_id:
+            # Recompute from remaining payments (deleted payment already excluded
+            # because the DELETE above runs in the same transaction).
+            total_paid = conn.execute(
+                "SELECT COALESCE(SUM(amount),0) FROM ar_payments WHERE invoice_id=?",
+                (invoice_id,)
+            ).fetchone()[0]
+            conn.execute(
+                "UPDATE ar_invoices"
+                " SET amount_paid=?, updated_at=datetime('now','localtime')"
+                " WHERE id=?",
+                (total_paid, invoice_id)
             )
-        conn2.commit()
+            inv = conn.execute(
+                "SELECT total, due_date FROM ar_invoices WHERE id=?",
+                (invoice_id,)
+            ).fetchone()
+            if inv:
+                overdue = date.today().isoformat() > inv['due_date']
+                if total_paid <= 0:
+                    new_status = 'OVERDUE' if overdue else 'SENT'
+                elif total_paid < float(inv['total']):
+                    new_status = 'PARTIAL'
+                else:
+                    new_status = 'PAID'
+                conn.execute(
+                    "UPDATE ar_invoices SET status=? WHERE id=?",
+                    (new_status, invoice_id)
+                )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn2.close()
+        conn.release()

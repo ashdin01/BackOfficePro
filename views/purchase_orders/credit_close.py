@@ -12,9 +12,12 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 import controllers.purchase_order_controller as po_ctrl
 import config.styles as styles
+from utils.po_type_helpers import po_unit_mode
+from utils.error_dialog import show_error
+from views.base_view import BaseView
 
 
-class CreditClose(QWidget):
+class CreditClose(BaseView):
     def __init__(self, po_id, on_save=None):
         super().__init__()
         self.po_id   = po_id
@@ -22,7 +25,7 @@ class CreditClose(QWidget):
         self._inputs = []   # (line_row, qty_spinbox)
         self.setMinimumSize(820, 500)
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -125,7 +128,7 @@ class CreditClose(QWidget):
         self.table.setRowCount(0)
 
         # RO and IO store ordered_qty in units already; PO/CN store in cartons
-        unit_mode = (po.get('po_type') or 'PO') in ('RO', 'IO')
+        unit_mode = po_unit_mode(po['po_type'] or 'PO')
 
         for line in lines:
             ordered_qty   = int(line['ordered_qty'] or 0)
@@ -229,10 +232,7 @@ class CreditClose(QWidget):
         try:
             po_ctrl.close_credit_atomic(self.po_id, self._po_number, line_receipts)
         except Exception as exc:
-            QMessageBox.critical(
-                self, "Close Failed",
-                f"An error occurred — no changes were saved.\n\n{exc}"
-            )
+            show_error(self, "Close failed — no changes were saved.", exc, title="Close Failed")
             return
 
         if self.on_save:

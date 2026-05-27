@@ -1,4 +1,3 @@
-from models.barcode_alias import resolve as resolve_barcode
 from database.connection import get_connection
 
 
@@ -41,11 +40,10 @@ def get_all(active_only=True, include_nonzero_inactive=False):
             """
         return conn.execute(query).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_barcode(barcode):
-    barcode = resolve_barcode(barcode)
     conn = get_connection()
     try:
         return conn.execute("""
@@ -55,10 +53,13 @@ def get_by_barcode(barcode):
             LEFT JOIN departments d    ON p.department_id = d.id
             LEFT JOIN suppliers s      ON p.supplier_id   = s.id
             LEFT JOIN product_groups g ON p.group_id      = g.id
-            WHERE p.barcode = ?
-        """, (barcode,)).fetchone()
+            WHERE p.barcode = COALESCE(
+                (SELECT master_barcode FROM barcode_aliases WHERE alias_barcode = ?),
+                ?
+            )
+        """, (barcode, barcode)).fetchone()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_barcodes(barcodes):
@@ -79,7 +80,7 @@ def get_by_barcodes(barcodes):
         """, barcodes).fetchall()
         return {r['barcode']: r for r in rows}
     finally:
-        conn.close()
+        conn.release()
 
 
 def search(term, active_only=True, limit=None, offset=0):
@@ -126,10 +127,10 @@ def search(term, active_only=True, limit=None, offset=0):
             {limit_clause}
         """, params).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
-def add(barcode, description, department_id, supplier_id=None, unit='EA',
+def create(barcode, description, department_id, supplier_id=None, unit='EA',
         sell_price=0, cost_price=0, tax_rate=0, reorder_point=0,
         reorder_max=0, variable_weight=0, expected=1, brand='',
         plu='', supplier_sku='', base_sku='', pack_qty=1, pack_unit='EA', group_id=None):
@@ -147,16 +148,22 @@ def add(barcode, description, department_id, supplier_id=None, unit='EA',
               sell_price, cost_price, tax_rate, reorder_point, reorder_max,
               variable_weight, expected))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
            group_id, department_id, supplier_id, unit,
            sell_price, cost_price, tax_rate, reorder_point, reorder_max=0,
            variable_weight=0, expected=1, active=1, auto_reorder=0):
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
     conn = get_connection()
     try:
+        old = conn.execute("SELECT * FROM products WHERE barcode=?", (barcode,)).fetchone()
         conn.execute("""
             UPDATE products
             SET description=?, brand=?, plu=?, supplier_sku=?, pack_qty=?, pack_unit=?,
@@ -169,15 +176,137 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
               group_id, department_id, supplier_id, unit, sell_price,
               cost_price, tax_rate, reorder_point, reorder_max,
               variable_weight, expected, active, auto_reorder, barcode))
+        new = dict(description=description, brand=brand, plu=plu, supplier_sku=supplier_sku,
+                   pack_qty=pack_qty, pack_unit=pack_unit, group_id=group_id,
+                   department_id=department_id, supplier_id=supplier_id, unit=unit,
+                   sell_price=sell_price, cost_price=cost_price, tax_rate=tax_rate,
+                   reorder_point=reorder_point, reorder_max=reorder_max,
+                   variable_weight=variable_weight, expected=expected,
+                   active=active, auto_reorder=auto_reorder)
+        record_changes(conn, 'product', barcode, dict(old) if old else {}, new, get_user())
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def deactivate(barcode):
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
     conn = get_connection()
     try:
+        old = conn.execute("SELECT active FROM products WHERE barcode=?", (barcode,)).fetchone()
         conn.execute("UPDATE products SET active = 0 WHERE barcode = ?", (barcode,))
+        record_changes(conn, 'product', barcode,
+                       {'active': old['active']} if old else {},
+                       {'active': 0}, get_user())
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
+
+
+def update_cost_price(barcode, cost):
+    """Update the cost_price on the product master record."""
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
+    conn = get_connection()
+    try:
+        old = conn.execute("SELECT cost_price FROM products WHERE barcode=?", (barcode,)).fetchone()
+        conn.execute(
+            "UPDATE products SET cost_price=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
+            (cost, barcode)
+        )
+        record_changes(conn, 'product', barcode,
+                       {'cost_price': old['cost_price'] if old else None},
+                       {'cost_price': cost}, get_user())
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.release()
+
+
+def check_barcode_available(barcode):
+    """Returns the description of the product using this barcode, or None if free."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT description FROM products WHERE barcode=?", (barcode,)
+        ).fetchone()
+        return row['description'] if row else None
+    finally:
+        conn.release()
+
+
+def rename_barcode(old_bc, new_bc):
+    """
+    Rename a barcode across all referencing tables atomically.
+    Raises ValueError if new_bc is already in use.
+    Raises on DB error after rolling back.
+    """
+    import logging
+    owner = check_barcode_available(new_bc)
+    if owner is not None:
+        raise ValueError(f"Barcode {new_bc!r} already belongs to: {owner}")
+
+    conn = get_connection()
+    try:
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        conn.execute("UPDATE products SET barcode=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
+                     (new_bc, old_bc))
+        conn.execute("UPDATE stock_movements SET barcode=? WHERE barcode=?", (new_bc, old_bc))
+        conn.execute("UPDATE stock_on_hand SET barcode=? WHERE barcode=?", (new_bc, old_bc))
+        conn.execute("UPDATE po_lines SET barcode=? WHERE barcode=?", (new_bc, old_bc))
+        conn.execute("UPDATE product_suppliers SET barcode=? WHERE barcode=?", (new_bc, old_bc))
+        conn.execute("UPDATE barcode_aliases SET master_barcode=? WHERE master_barcode=?", (new_bc, old_bc))
+        conn.execute("UPDATE barcode_aliases SET alias_barcode=? WHERE alias_barcode=?", (new_bc, old_bc))
+        conn.execute("UPDATE plu_barcode_map SET barcode=? WHERE barcode=?", (new_bc, old_bc))
+        conn.execute("UPDATE stocktake_counts SET barcode=? WHERE barcode=?", (new_bc, old_bc))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Barcode rename failed {old_bc!r} → {new_bc!r}: {e}", exc_info=True)
+        raise
+    finally:
+        conn.release()
+
+
+def barcode_exists(barcode: str) -> bool:
+    """Return True if the barcode exists in the products table."""
+    conn = get_connection()
+    try:
+        return conn.execute(
+            "SELECT 1 FROM products WHERE barcode=?", (barcode,)
+        ).fetchone() is not None
+    finally:
+        conn.release()
+
+
+def get_all_with_stock() -> list:
+    """All active products joined with dept, supplier, and stock on hand."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT p.barcode, p.plu, p.description, p.brand,
+                   d.name  AS dept_name,
+                   s.name  AS supplier_name,
+                   p.unit, p.sell_price, p.cost_price,
+                   COALESCE(soh.quantity, 0) AS on_hand
+            FROM products p
+            LEFT JOIN departments   d   ON p.department_id = d.id
+            LEFT JOIN suppliers     s   ON p.supplier_id   = s.id
+            LEFT JOIN stock_on_hand soh ON soh.barcode     = p.barcode
+            WHERE p.active = 1
+        """).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.release()
+
+
+

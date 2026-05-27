@@ -13,8 +13,11 @@ def save_charges(po_id: int, charges: list):
                 (po_id, c['description'], c['tax_rate'], c['amount_inc_tax'])
             )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_po(po_id: int) -> list:
@@ -24,4 +27,4 @@ def get_by_po(po_id: int) -> list:
             "SELECT * FROM po_charges WHERE po_id=? ORDER BY id", (po_id,)
         ).fetchall()]
     finally:
-        conn.close()
+        conn.release()

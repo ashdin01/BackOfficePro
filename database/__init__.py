@@ -8,4 +8,4 @@ def init_db():
     try:
         conn.executescript(SCHEMA)
     finally:
-        conn.close()
+        conn.release()

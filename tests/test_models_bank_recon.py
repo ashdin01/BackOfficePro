@@ -159,7 +159,7 @@ class TestSetStatus:
         )
         invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=10.0)
         invoice_model.update_status(inv_id, "SENT")
-        pay_id = payment_model.add(inv_id, customer_id, "2026-05-01", 110.00)
+        pay_id = payment_model.create(inv_id, customer_id, "2026-05-01", 110.00)
         recon_model.set_matched(txn_id, inv_id, pay_id)
         from database.connection import get_connection
         conn = get_connection()
@@ -204,9 +204,7 @@ class TestUnmatchTransaction:
         )
         invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=10.0)
         invoice_model.update_status(inv_id, "SENT")
-        pay_id = payment_model.add(inv_id, customer_id, "2026-05-01", 110.00)
-        invoice_model.update_amount_paid(inv_id, 110.00)
-        invoice_model.update_status(inv_id, "PAID")
+        pay_id, _, _ = invoice_model.apply_payment(inv_id, customer_id, "2026-05-01", 110.00)
         recon_model.set_matched(txn_id, inv_id, pay_id)
         return txn_id, inv_id, pay_id
 
@@ -260,10 +258,8 @@ class TestUnmatchTransaction:
         invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=10.0)
         invoice_model.update_status(inv_id, "SENT")
 
-        pay1 = payment_model.add(inv_id, customer_id, "2026-05-01", 60.00)
-        pay2 = payment_model.add(inv_id, customer_id, "2026-05-02", 50.00)
-        invoice_model.update_amount_paid(inv_id, 110.00)
-        invoice_model.update_status(inv_id, "PAID")
+        pay1, _, _ = invoice_model.apply_payment(inv_id, customer_id, "2026-05-01", 60.00)
+        pay2, _, _ = invoice_model.apply_payment(inv_id, customer_id, "2026-05-02", 50.00)
         recon_model.set_matched(txns[0]["id"], inv_id, pay1)
         recon_model.set_matched(txns[1]["id"], inv_id, pay2)
 

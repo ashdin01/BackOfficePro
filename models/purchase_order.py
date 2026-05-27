@@ -5,15 +5,17 @@ from datetime import datetime, timedelta
 
 
 def _next_po_number(conn):
-    # The counter UPDATE and the PO INSERT share the same connection and are
-    # committed together in create().  If the INSERT fails the whole transaction
-    # rolls back, so the counter is never actually advanced — no gap occurs.
-    row    = conn.execute("SELECT value FROM settings WHERE key = 'po_next_number'").fetchone()
+    # Atomic UPDATE+RETURNING increments the counter and returns the old value
+    # in one statement — safe when the GUI and Flask API processes run concurrently.
+    # The UPDATE and the PO INSERT share the same connection and commit together,
+    # so a failed INSERT rolls back the counter increment and no gap occurs.
     prefix = conn.execute("SELECT value FROM settings WHERE key = 'po_prefix'").fetchone()
-    number = int(row['value'])
-    po_number = f"{prefix['value']}-{number:05d}"
-    conn.execute("UPDATE settings SET value = ? WHERE key = 'po_next_number'", (number + 1,))
-    return po_number
+    row    = conn.execute(
+        "UPDATE settings SET value = CAST(value AS INTEGER) + 1"
+        " WHERE key = 'po_next_number' RETURNING CAST(value AS INTEGER) - 1",
+    ).fetchone()
+    number = int(row[0]) if row else 1
+    return f"{prefix['value']}-{number:05d}"
 
 
 def get_all(status=None, archived=False):
@@ -52,7 +54,7 @@ def get_all(status=None, archived=False):
             """
             return conn.execute(query).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_id(po_id):
@@ -65,7 +67,7 @@ def get_by_id(po_id):
             WHERE po.id = ?
         """, (po_id,)).fetchone()
     finally:
-        conn.close()
+        conn.release()
 
 
 def create(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO'):
@@ -79,20 +81,34 @@ def create(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO
         """, (po_number, supplier_id, delivery_date, notes, created_by, po_type))
         conn.commit()
         return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def update_status(po_id, status):
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
     conn = get_connection()
     try:
+        old = conn.execute(
+            "SELECT po_number, status FROM purchase_orders WHERE id=?", (po_id,)
+        ).fetchone()
         conn.execute(
             "UPDATE purchase_orders SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (status, po_id)
         )
+        if old:
+            record_changes(conn, 'purchase_order', old['po_number'],
+                           {'status': old['status']}, {'status': status}, get_user())
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def cancel(po_id):
@@ -101,13 +117,17 @@ def cancel(po_id):
 
 def reverse(po_id, reversed_by=''):
     """
-    Reverse a RECEIVED or PARTIAL PO:
+    Reverse a RECEIVED or PARTIAL PO atomically.
     - Reduces SOH for each received line
     - Records REVERSAL stock movements
     - Sets PO status to REVERSED
+
+    All writes share one connection and commit together.  If any step fails
+    the entire reversal rolls back, leaving stock and PO status unchanged.
     """
-    from models.stock_on_hand import adjust
     from config.constants import MOVE_REVERSAL
+    from database.audit_context import get_source, get_user
+    from models.audit_log import record_changes
 
     conn = get_connection()
     try:
@@ -120,27 +140,200 @@ def reverse(po_id, reversed_by=''):
             raise ValueError(f'PO {po_id} not found')
         if po['status'] not in ('RECEIVED', 'PARTIAL'):
             raise ValueError('Only RECEIVED or PARTIAL POs can be reversed')
+
         lines = conn.execute(
             "SELECT * FROM po_lines WHERE po_id = ?", (po_id,)
         ).fetchall()
-    finally:
-        conn.close()
 
-    for line in lines:
-        received = int(line['received_qty'] or 0)
-        if received <= 0:
-            continue
-        pack_qty = int(line['pack_qty']) if line['pack_qty'] else 1
-        adjust(
-            barcode=line['barcode'],
-            quantity=-(received * pack_qty),
-            movement_type=MOVE_REVERSAL,
-            reference=po['po_number'],
-            notes=f"Reversal of {po['po_number']} — {line['description']}",
-            created_by=reversed_by,
+        src = get_source()
+        for line in lines:
+            received = int(line['received_qty'] or 0)
+            if received <= 0:
+                continue
+            pack_qty = int(line['pack_qty']) if line['pack_qty'] else 1
+            qty = -(received * pack_qty)
+            conn.execute("""
+                INSERT INTO stock_on_hand (barcode, quantity)
+                VALUES (?, ?)
+                ON CONFLICT(barcode) DO UPDATE SET
+                    quantity = quantity + excluded.quantity,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (line['barcode'], qty))
+            conn.execute("""
+                INSERT INTO stock_movements
+                    (barcode, movement_type, quantity, reference, notes, created_by, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                line['barcode'], MOVE_REVERSAL, qty,
+                po['po_number'],
+                f"Reversal of {po['po_number']} — {line['description']}",
+                reversed_by, src,
+            ))
+
+        conn.execute(
+            "UPDATE purchase_orders SET status='REVERSED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (po_id,)
         )
+        record_changes(conn, 'purchase_order', po['po_number'],
+                       {'status': po['status']}, {'status': 'REVERSED'},
+                       reversed_by or get_user())
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.release()
 
-    update_status(po_id, 'REVERSED')
+
+def get_with_supplier(po_id):
+    """Return the PO row joined with supplier name as a dict, or None."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT po.*, s.name AS supplier_name "
+            "FROM purchase_orders po "
+            "JOIN suppliers s ON s.id = po.supplier_id "
+            "WHERE po.id=?",
+            (po_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.release()
+
+
+def close_force(po_id, unreceived_line_ids, reason):
+    """Mark listed lines NOT SUPPLIED and set PO status to RECEIVED atomically."""
+    conn = get_connection()
+    try:
+        note = f"NOT SUPPLIED: {reason}"
+        for line_id in unreceived_line_ids:
+            conn.execute("UPDATE po_lines SET notes=? WHERE id=?", (note, line_id))
+        conn.execute(
+            "UPDATE purchase_orders SET status='RECEIVED', "
+            "received_at=CURRENT_TIMESTAMP WHERE id=?",
+            (po_id,)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.release()
+
+
+def close_credit_atomic(po_id, po_number, line_receipts):
+    """
+    Close a Credit/Return PO atomically.
+    line_receipts: list of dicts with line_id, barcode, return_cartons, qty_units.
+    SOH is reduced by qty_units for each line; movements are RETURN type.
+    """
+    from database.audit_context import get_user, get_source
+    who = get_user()
+    src = get_source()
+    conn = get_connection()
+    try:
+        for r in line_receipts:
+            conn.execute(
+                "UPDATE po_lines SET received_qty=? WHERE id=?",
+                (r['return_cartons'], r['line_id'])
+            )
+            conn.execute("""
+                INSERT INTO stock_on_hand (barcode, quantity)
+                VALUES (?, ?)
+                ON CONFLICT(barcode) DO UPDATE SET
+                    quantity = quantity + excluded.quantity,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (r['barcode'], -r['qty_units']))
+            conn.execute("""
+                INSERT INTO stock_movements
+                    (barcode, movement_type, quantity, reference, notes, created_by, source)
+                VALUES (?, 'RETURN', ?, ?, '', ?, ?)
+            """, (r['barcode'], -r['qty_units'], po_number, who, src))
+        conn.execute(
+            "UPDATE purchase_orders SET status='CLOSED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (po_id,)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.release()
+
+
+def receive_atomic(po_id, po_number, line_receipts, final_status,
+                   supplier_invoice_number='', charges=None):
+    """
+    Apply a full PO receipt in one atomic transaction.
+
+    line_receipts is a list of dicts:
+        line_id, barcode, new_received_qty,
+        actual_cost, unit_cost, is_promo,
+        qty_units   (number of individual units being received, for SOH)
+
+    Raises on any error; the caller must not catch silently.
+    """
+    from config.constants import MOVE_RECEIPT
+    from database.audit_context import get_user, get_source
+    who = get_user()
+    src = get_source()
+    conn = get_connection()
+    try:
+        for r in line_receipts:
+            fields = ["received_qty=?"]
+            params = [r['new_received_qty']]
+            if r['actual_cost'] is not None:
+                fields.append("actual_cost=?")
+                params.append(r['actual_cost'])
+            if r['unit_cost'] is not None:
+                fields.append("unit_cost=?")
+                params.append(r['unit_cost'])
+            fields.append("is_promo=?")
+            params.append(1 if r['is_promo'] else 0)
+            params.append(r['line_id'])
+            conn.execute(
+                f"UPDATE po_lines SET {', '.join(fields)} WHERE id=?", params
+            )
+
+            conn.execute("""
+                INSERT INTO stock_on_hand (barcode, quantity)
+                VALUES (?, ?)
+                ON CONFLICT(barcode) DO UPDATE SET
+                    quantity = quantity + excluded.quantity,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (r['barcode'], r['qty_units']))
+            conn.execute("""
+                INSERT INTO stock_movements
+                    (barcode, movement_type, quantity, reference, notes, created_by, source)
+                VALUES (?, ?, ?, ?, '', ?, ?)
+            """, (r['barcode'], MOVE_RECEIPT, r['qty_units'], po_number, who, src))
+
+            if r['unit_cost'] and r['unit_cost'] > 0 and not r['is_promo']:
+                conn.execute(
+                    "UPDATE products SET cost_price=?, updated_at=CURRENT_TIMESTAMP"
+                    " WHERE barcode=?",
+                    (r['unit_cost'], r['barcode'])
+                )
+
+        conn.execute(
+            "UPDATE purchase_orders SET status=?, supplier_invoice_number=?,"
+            " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (final_status, supplier_invoice_number, po_id)
+        )
+        if charges:
+            conn.execute("DELETE FROM po_charges WHERE po_id=?", (po_id,))
+            for c in charges:
+                conn.execute(
+                    "INSERT INTO po_charges (po_id, description, tax_rate, amount_inc_tax)"
+                    " VALUES (?,?,?,?)",
+                    (po_id, c['description'], c['tax_rate'], c['amount_inc_tax'])
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.release()
 
 
 def cleanup_old_pos():
@@ -172,4 +365,4 @@ def cleanup_old_pos():
         logging.error(f"PO cleanup error: {e}", exc_info=True)
         return 0
     finally:
-        conn.close()
+        conn.release()

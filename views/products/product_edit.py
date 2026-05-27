@@ -217,7 +217,19 @@ class ProductEdit(KeyboardMixin, QWidget):
         on_order_color = styles.CLR_BLUE if on_order > 0 else styles.CLR_MUTED
         self.lbl_on_order = QLabel(f'<span style="color:{on_order_color};font-weight:bold;">{on_order}</span>')
         self.lbl_on_order.setTextFormat(Qt.TextFormat.RichText)
-        right_col.addLayout(info_row("Stock on Order", self.lbl_on_order))
+        oo_row = QHBoxLayout()
+        btn_oo = QPushButton("📋")
+        btn_oo.setFixedSize(28, 28)
+        btn_oo.setToolTip("Show on-order breakdown by PO")
+        btn_oo.clicked.connect(self._show_on_order_detail)
+        oo_key = QLabel("Stock on Order")
+        oo_key.setMinimumWidth(130)
+        oo_key.setStyleSheet(f"color: {styles.CLR_MUTED};")
+        oo_row.addWidget(btn_oo)
+        oo_row.addWidget(oo_key)
+        oo_row.addWidget(self.lbl_on_order)
+        oo_row.addStretch()
+        right_col.addLayout(oo_row)
 
         right_col.addStretch()
 
@@ -704,9 +716,16 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _refresh_gp(self):
         import controllers.product_controller as product_ctrl
-        self.lbl_gp.setText(
-            product_ctrl.calculate_gross_profit(self._sell_price, self._cost_price, self._tax_rate)
-        )
+        import config.styles as styles
+        from config.constants import GP_WARN_THRESHOLD, GP_BAD_THRESHOLD
+        gp = product_ctrl.calculate_gross_profit(self._sell_price, self._cost_price, self._tax_rate)
+        if gp is None:
+            self.lbl_gp.setText(f"<b style='color:{styles.CLR_GP_NONE}'>--</b>")
+        else:
+            color = (styles.CLR_GP_OK   if gp >= GP_WARN_THRESHOLD else
+                     styles.CLR_GP_WARN if gp >= GP_BAD_THRESHOLD  else
+                     styles.CLR_GP_BAD)
+            self.lbl_gp.setText(f"<b style='color:{color}'>{gp:.1f}%</b>")
 
     # ── Image helpers ─────────────────────────────────────────────────
 
@@ -1052,6 +1071,54 @@ class ProductEdit(KeyboardMixin, QWidget):
             return
         product_controller.delete_selling_unit(su_id)
         self._load_selling_units()
+
+    def _show_on_order_detail(self):
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        rows = product_controller.get_stock_on_order_detail(self.barcode)
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Stock on Order — {self.product['description']}")
+        dlg.setMinimumSize(560, 300)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(10)
+        if not rows:
+            lay.addWidget(QLabel("No open purchase orders for this product."))
+        else:
+            tbl = QTableWidget()
+            tbl.setColumnCount(4)
+            tbl.setHorizontalHeaderLabels(["PO Number", "Supplier", "Qty (units)", "Status"])
+            hdr = tbl.horizontalHeader()
+            hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            tbl.setColumnWidth(0, 130)
+            tbl.setColumnWidth(2, 100)
+            tbl.setColumnWidth(3, 90)
+            tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+            tbl.verticalHeader().setVisible(False)
+            for row in rows:
+                r = tbl.rowCount()
+                tbl.insertRow(r)
+                tbl.setItem(r, 0, QTableWidgetItem(row['po_number']))
+                tbl.setItem(r, 1, QTableWidgetItem(row['supplier_name']))
+                qty_item = QTableWidgetItem(str(row['qty_units']))
+                qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                tbl.setItem(r, 2, qty_item)
+                status_item = QTableWidgetItem(row['status'])
+                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                tbl.setItem(r, 3, status_item)
+            lay.addWidget(tbl)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("Close  [Esc]")
+        close_btn.setFixedHeight(32)
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+        QShortcut(QKeySequence("Escape"), dlg, dlg.accept)
+        dlg.exec()
 
     def _view_history(self):
         from PyQt6.QtWidgets import (
@@ -1407,4 +1474,4 @@ class AddAliasDialog(QDialog):
             product_controller.add_alias(barcode, self.master_barcode, self.desc.text().strip())
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not add barcode: {e}")
+            show_error(self, "Could not add barcode alias.", e)

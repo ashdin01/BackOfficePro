@@ -7,30 +7,15 @@ from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
 import config.styles as styles
 import controllers.report_controller as report_ctrl
+from views.base_view import BaseView
 from datetime import date, timedelta
+from utils.calculations import week_bounds, fy_bounds
 
 RIGHT  = Qt.AlignmentFlag.AlignRight  | Qt.AlignmentFlag.AlignVCenter
 CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
 LEFT   = Qt.AlignmentFlag.AlignLeft   | Qt.AlignmentFlag.AlignVCenter
 
 BARCODE_ROLE = Qt.ItemDataRole.UserRole
-
-
-def _week_bounds(offset=0):
-    """
-    offset=0 → last week (Mon-Sun)
-    offset=1 → two weeks ago (Mon-Sun)
-    """
-    today = date.today()
-    mon   = today - timedelta(days=today.weekday())
-    start = mon - timedelta(weeks=(1 + offset))
-    return start, start + timedelta(days=6)
-
-def _fy_bounds(year=None):
-    today = date.today()
-    if year is None:
-        year = today.year if today.month >= 7 else today.year - 1
-    return date(year, 7, 1), date(year + 1, 6, 30)
 
 
 class _NumItem(QTableWidgetItem):
@@ -64,17 +49,17 @@ def _num_item(value: int, align=RIGHT, bold=False, color=None):
     return i
 
 
-class SupplierSalesReport(QWidget):
+class SupplierSalesReport(BaseView):
     def __init__(self):
         super().__init__()
         self._edit_wins = []
         self._build_ui()
         self._load_suppliers()
-        self._load()
+        self.load()
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._load()
+        self.load()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -119,7 +104,7 @@ class SupplierSalesReport(QWidget):
             f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
             "border-radius:4px;padding:0 16px;font-weight:bold;}"
             f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
-        apply_btn.clicked.connect(self._load)
+        apply_btn.clicked.connect(self.load)
         filter_row.addWidget(apply_btn)
         root.addLayout(filter_row)
 
@@ -208,22 +193,22 @@ class SupplierSalesReport(QWidget):
         self.date_to.setDate(QDate(d_to.year, d_to.month, d_to.day))
 
     def _set_this_week(self):
-        t = date.today(); self._set_dates(t - timedelta(days=t.weekday()), t); self._load()
+        t = date.today(); self._set_dates(t - timedelta(days=t.weekday()), t); self.load()
     def _set_last_week(self):
-        s, e = _week_bounds(0); self._set_dates(s, e); self._load()
+        s, e = week_bounds(0); self._set_dates(s, e); self.load()
     def _set_this_month(self):
-        t = date.today(); self._set_dates(t.replace(day=1), t); self._load()
+        t = date.today(); self._set_dates(t.replace(day=1), t); self.load()
     def _set_last_month(self):
         t = date.today(); fe = t.replace(day=1) - timedelta(days=1)
-        self._set_dates(fe.replace(day=1), fe); self._load()
+        self._set_dates(fe.replace(day=1), fe); self.load()
     def _set_this_fy(self):
-        s, e = _fy_bounds(); self._set_dates(s, min(e, date.today())); self._load()
+        s, e = fy_bounds(); self._set_dates(s, min(e, date.today())); self.load()
     def _set_last_fy(self):
         t = date.today()
         y = t.year if t.month >= 7 else t.year - 1
-        s, e = _fy_bounds(y - 1); self._set_dates(s, e); self._load()
+        s, e = fy_bounds(y - 1); self._set_dates(s, e); self.load()
     def _set_all_time(self):
-        self._set_dates(date(2000, 1, 1), date.today()); self._load()
+        self._set_dates(date(2000, 1, 1), date.today()); self.load()
 
     def _load(self):
         supplier_id       = self.supplier_combo.currentData()

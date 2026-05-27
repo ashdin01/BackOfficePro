@@ -9,7 +9,7 @@ def get_all(active_only=True):
         query += " ORDER BY name"
         return conn.execute(query).fetchall()
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_by_id(supplier_id):
@@ -19,10 +19,10 @@ def get_by_id(supplier_id):
             "SELECT * FROM suppliers WHERE id = ?", (supplier_id,)
         ).fetchone()
     finally:
-        conn.close()
+        conn.release()
 
 
-def add(code, name, contact_name='', phone='', account_number='',
+def create(code, name, contact_name='', phone='', account_number='',
         payment_terms='', address='', notes='', abn='', rep_name='', rep_phone='',
         order_minimum=0, email_orders='', email_admin='', email_accounts='', email_rep='',
         online_order=0, online_order_note='', order_days='',
@@ -47,8 +47,11 @@ def add(code, name, contact_name='', phone='', account_number='',
               order_first_monday, order_fortnightly_start, delivery_days,
               bank_account_name, bank_bsb, bank_account_number))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def update(supplier_id, code, name, contact_name, phone, account_number,
@@ -57,8 +60,11 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
            online_order=0, online_order_note='', order_days='',
            order_first_monday=0, order_fortnightly_start='', delivery_days='',
            bank_account_name='', bank_bsb='', bank_account_number=''):
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
     conn = get_connection()
     try:
+        old = conn.execute("SELECT * FROM suppliers WHERE id=?", (supplier_id,)).fetchone()
         conn.execute("""
             UPDATE suppliers
             SET code=?, name=?, contact_name=?, phone=?,
@@ -76,9 +82,25 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
               order_first_monday, order_fortnightly_start, delivery_days,
               bank_account_name, bank_bsb, bank_account_number,
               supplier_id))
+        new = dict(code=code.upper(), name=name, contact_name=contact_name, phone=phone,
+                   account_number=account_number, payment_terms=payment_terms,
+                   address=address, notes=notes, active=active, abn=abn,
+                   rep_name=rep_name, rep_phone=rep_phone, order_minimum=order_minimum,
+                   email_orders=email_orders, email_admin=email_admin,
+                   email_accounts=email_accounts, email_rep=email_rep,
+                   online_order=online_order, online_order_note=online_order_note,
+                   order_days=order_days, order_first_monday=order_first_monday,
+                   order_fortnightly_start=order_fortnightly_start,
+                   delivery_days=delivery_days, bank_account_name=bank_account_name,
+                   bank_bsb=bank_bsb, bank_account_number=bank_account_number)
+        record_changes(conn, 'supplier', name,
+                       dict(old) if old else {}, new, get_user())
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
 
 
 def get_order_due_today():
@@ -138,13 +160,37 @@ def get_order_due_today():
         }
         return [r for r in due if r['id'] not in done_ids]
     finally:
-        conn.close()
+        conn.release()
 
 
 def deactivate(supplier_id):
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
     conn = get_connection()
     try:
+        old = conn.execute("SELECT name, active FROM suppliers WHERE id=?", (supplier_id,)).fetchone()
         conn.execute("UPDATE suppliers SET active = 0 WHERE id = ?", (supplier_id,))
+        key = old['name'] if old else str(supplier_id)
+        record_changes(conn, 'supplier', key,
+                       {'active': old['active']} if old else {},
+                       {'active': 0}, get_user())
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        conn.release()
+
+
+def get_delivery_days(supplier_id) -> str | None:
+    """Return the delivery_days string for a supplier, or None if not set / not found."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT delivery_days FROM suppliers WHERE id=?", (supplier_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return (row['delivery_days'] or '').strip() or None
+    finally:
+        conn.release()

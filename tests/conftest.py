@@ -18,9 +18,7 @@ def test_db(tmp_path, monkeypatch):
     db_path = str(tmp_path / "test.db")
 
     import database.connection as conn_module
-    import models.po_lines as po_lines_module
     monkeypatch.setattr(conn_module, "DATABASE_PATH", db_path)
-    monkeypatch.setattr(po_lines_module, "DATABASE_PATH", db_path)
 
     # Apply schema (creates tables + inserts default departments, settings, admin user)
     conn = sqlite3.connect(db_path)

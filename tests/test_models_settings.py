@@ -1,4 +1,5 @@
 """Tests for models/settings.py."""
+import threading
 import pytest
 import models.settings as settings_model
 
@@ -32,3 +33,32 @@ def test_set_and_get_empty_string(test_db):
     row = conn.execute("SELECT value FROM settings WHERE key='empty_key'").fetchone()
     conn.close()
     assert row is not None
+
+
+def test_next_sequence_increments(test_db):
+    a = settings_model.next_sequence('test_seq', 'TST')
+    b = settings_model.next_sequence('test_seq', 'TST')
+    assert a == 'TST-00001'
+    assert b == 'TST-00002'
+
+
+def test_next_sequence_concurrent_no_duplicates(test_db):
+    """Concurrent callers must each get a unique sequence number."""
+    results = []
+    errors = []
+
+    def worker():
+        try:
+            results.append(settings_model.next_sequence('inv_seq', 'INV'))
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors
+    assert len(results) == 20
+    assert len(set(results)) == 20, f"Duplicate sequence numbers: {sorted(results)}"

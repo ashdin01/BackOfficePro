@@ -1,19 +1,21 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableWidget, QTableWidgetItem, QLabel, QHeaderView, QLineEdit
+    QTableWidget, QTableWidgetItem, QLabel, QHeaderView
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from utils.keyboard_mixin import KeyboardMixin
+from views.widgets.search_bar import SearchBar
 import controllers.bundle_controller as bundle_ctrl
 import config.styles as styles
+from views.base_view import BaseView
 
 
-class BundleList(KeyboardMixin, QWidget):
+class BundleList(KeyboardMixin, BaseView):
     def __init__(self):
         super().__init__()
         self._open_wins = []
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -37,13 +39,8 @@ class BundleList(KeyboardMixin, QWidget):
         note.setWordWrap(True)
         layout.addWidget(note)
 
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search bundles...")
-        self._timer = QTimer()
-        self._timer.setSingleShot(True)
-        self._timer.setInterval(300)
-        self._timer.timeout.connect(lambda: self._load(self.search.text()))
-        self.search.textChanged.connect(lambda _: self._timer.start())
+        self.search = SearchBar("Search bundles…", interval=300)
+        self.search.search_changed.connect(lambda: self._load(self.search.text()))
         layout.addWidget(self.search)
 
         self.table = QTableWidget()

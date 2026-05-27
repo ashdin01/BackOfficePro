@@ -7,43 +7,23 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
+from views.base_view import BaseView
+from views.widgets.table_items import right_item as _right
+from views.widgets.table_utils import make_table as _make_table_base
 import csv, os
 
 
-class NumItem(QTableWidgetItem):
-    """Sorts numerically, stripping $ and commas."""
-    def __lt__(self, other):
-        try:
-            return float(self.text().replace('$','').replace(',','')) < \
-                   float(other.text().replace('$','').replace(',',''))
-        except ValueError:
-            return self.text() < other.text()
-
-
-def _right(text, numeric=False):
-    item = NumItem(str(text)) if numeric else QTableWidgetItem(str(text))
-    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-    return item
-
-
 def _make_table(headers, stretch_col=1):
-    t = QTableWidget()
-    t.setColumnCount(len(headers))
-    t.setHorizontalHeaderLabels(headers)
-    t.horizontalHeader().setSectionResizeMode(stretch_col, QHeaderView.ResizeMode.Stretch)
-    t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-    t.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-    t.setAlternatingRowColors(True)
-    t.setSortingEnabled(True)
+    t = _make_table_base(headers, stretch_col)
     t.horizontalHeader().setSectionsClickable(True)
     return t
 
 
-class StockValuationReport(QWidget):
+class StockValuationReport(BaseView):
     def __init__(self):
         super().__init__()
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -104,10 +84,10 @@ class StockValuationReport(QWidget):
                 r = self.summary_table.rowCount()
                 self.summary_table.insertRow(r)
                 self.summary_table.setItem(r, 0, QTableWidgetItem(row['dept_name'] or 'Unknown'))
-                self.summary_table.setItem(r, 1, _right(str(row['product_count']), numeric=True))
-                self.summary_table.setItem(r, 2, _right(f"{row['total_units']:.0f}", numeric=True))
-                self.summary_table.setItem(r, 3, _right(f"${row['cost_value']:.2f}", numeric=True))
-                self.summary_table.setItem(r, 4, _right(f"${row['sell_value']:.2f}", numeric=True))
+                self.summary_table.setItem(r, 1, _right(\1))
+                self.summary_table.setItem(r, 2, _right(\1))
+                self.summary_table.setItem(r, 3, _right(\1))
+                self.summary_table.setItem(r, 4, _right(\1))
                 total_cost += row['cost_value'] or 0
                 total_sell += row['sell_value'] or 0
             self.summary_table.setSortingEnabled(True)
@@ -129,9 +109,9 @@ class StockValuationReport(QWidget):
                 self.detail_table.setItem(r, 1, QTableWidgetItem(row['description']))
                 self.detail_table.setItem(r, 2, QTableWidgetItem(row['dept_name'] or ''))
                 self.detail_table.setItem(r, 3, QTableWidgetItem(row['unit'] or ''))
-                self.detail_table.setItem(r, 4, _right(f"{row['quantity']:.0f}", numeric=True))
-                self.detail_table.setItem(r, 5, _right(f"${row['cost_value']:.2f}", numeric=True))
-                self.detail_table.setItem(r, 6, _right(f"${row['sell_value']:.2f}", numeric=True))
+                self.detail_table.setItem(r, 4, _right(\1))
+                self.detail_table.setItem(r, 5, _right(\1))
+                self.detail_table.setItem(r, 6, _right(\1))
                 total_cost += row['cost_value'] or 0
                 total_sell += row['sell_value'] or 0
             self.detail_table.setSortingEnabled(True)

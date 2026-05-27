@@ -1,3 +1,4 @@
+from views.base_view import BaseView
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QDialog, QFormLayout,
     QLineEdit, QComboBox, QTextEdit, QMessageBox, QLabel,
@@ -134,7 +135,7 @@ class ItemLookupDialog(QDialog):
         self._on_accept()
 
 
-class POView(QWidget):
+class POView(BaseView):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -155,7 +156,7 @@ class POView(QWidget):
         filter_row.addWidget(QLabel("Filter:"))
         self.status_filter = QComboBox()
         self.status_filter.addItems(["ALL", "DRAFT", "SENT", "PARTIAL", "RECEIVED", "CANCELLED"])
-        self.status_filter.currentIndexChanged.connect(self.load)
+        self.status_filter.currentIndexChanged.connect(lambda _: self.load())
         filter_row.addWidget(self.status_filter)
         filter_row.addStretch()
         layout.addLayout(filter_row)
@@ -178,7 +179,7 @@ class POView(QWidget):
         self._po_list = []
         self.load()
 
-    def load(self):
+    def _load(self):
         status = self.status_filter.currentText()
         self._po_list = po_model.get_all(status if status != "ALL" else None)
         self.table.setRowCount(len(self._po_list))

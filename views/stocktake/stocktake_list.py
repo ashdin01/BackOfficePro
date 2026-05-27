@@ -6,15 +6,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
+from views.base_view import BaseView
 import controllers.stocktake_controller as stocktake_ctrl
 import controllers.department_controller as dept_ctrl
 
 
-class StocktakeList(QWidget):
+class StocktakeList(BaseView):
     def __init__(self):
         super().__init__()
         self._build_ui()
-        self._load()
+        self.load()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -49,7 +50,7 @@ class StocktakeList(QWidget):
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(10000)
-        self._refresh_timer.timeout.connect(self._load)
+        self._refresh_timer.timeout.connect(self.load)
         self._refresh_timer.start()
 
     def _load(self):
@@ -76,7 +77,7 @@ class StocktakeList(QWidget):
     def _new_session(self):
         dlg = NewSessionDialog(parent=self)
         if dlg.exec():
-            self._load()
+            self.load()
             # Auto-open the new session
             session_id = dlg.created_id
             if session_id:
@@ -91,7 +92,7 @@ class StocktakeList(QWidget):
 
     def _open_by_id(self, session_id):
         from views.stocktake.stocktake_session import StocktakeSession
-        self.session_win = StocktakeSession(session_id=session_id, on_close=self._load)
+        self.session_win = StocktakeSession(session_id=session_id, on_close=self.load)
         self.session_win.show()
 
 
