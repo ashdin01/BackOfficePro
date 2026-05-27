@@ -89,9 +89,9 @@ class TestCreate:
 # ── TestLines ─────────────────────────────────────────────────────────────────
 
 class TestLines:
-    def test_add_line_inserts_correct_fields(self, test_db, invoice_id):
+    def test_add_line_inserts_correct_fields(self, test_db, invoice_id, product_barcode):
         invoice_model.add_line(
-            invoice_id, "Widget", 2, 5.00, barcode="9300000000001"
+            invoice_id, "Widget", 2, 5.00, barcode=product_barcode
         )
         lines = invoice_model.get_lines(invoice_id)
         assert len(lines) == 1

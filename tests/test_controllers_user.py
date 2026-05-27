@@ -13,19 +13,19 @@ class TestUserCRUD:
         assert any(u['username'] == 'admin' for u in active)
 
     def test_create_new_user(self, test_db):
-        user_ctrl.create('cashier1', 'Jane Smith', 'CASHIER', '1234')
+        user_ctrl.create('cashier1', 'Jane Smith', 'STAFF', '1234')
         users = user_ctrl.get_all()
         assert any(u['username'] == 'cashier1' for u in users)
 
     def test_update_user_changes_full_name(self, test_db):
-        user_ctrl.create('op1', 'Old Name', 'CASHIER', '0000')
+        user_ctrl.create('op1', 'Old Name', 'STAFF', '0000')
         uid = next(u['id'] for u in user_ctrl.get_all() if u['username'] == 'op1')
-        user_ctrl.update(uid, 'op1', 'New Name', 'CASHIER')
+        user_ctrl.update(uid, 'op1', 'New Name', 'STAFF')
         updated = next(u for u in user_ctrl.get_all() if u['id'] == uid)
         assert updated['full_name'] == 'New Name'
 
     def test_set_active_false_removes_from_active_list(self, test_db):
-        user_ctrl.create('inactive1', 'Inactive User', 'CASHIER', '9999')
+        user_ctrl.create('inactive1', 'Inactive User', 'STAFF', '9999')
         uid = next(u['id'] for u in user_ctrl.get_all() if u['username'] == 'inactive1')
         user_ctrl.set_active(uid, 0)
         active_names = {u['username'] for u in user_ctrl.get_all_active()}

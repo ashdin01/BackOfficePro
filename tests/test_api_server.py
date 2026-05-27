@@ -53,7 +53,7 @@ def test_health_returns_503_when_db_unavailable(api_client, monkeypatch):
     assert r.status_code == 503
     data = r.get_json()
     assert data["status"] == "error"
-    assert "detail" in data
+    assert "detail" not in data
 
 
 # ── Auth guard ────────────────────────────────────────────────────────────────
