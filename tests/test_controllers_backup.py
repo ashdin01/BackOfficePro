@@ -193,7 +193,12 @@ class TestRestoreBackup:
         conn.commit()
         conn.close()
 
+    def _patch_migrations(self, monkeypatch):
+        import database.migrations as mig
+        monkeypatch.setattr(mig, "apply_migrations", lambda: None)
+
     def test_restore_raises_on_missing_tables(self, tmp_path, monkeypatch):
+        self._patch_migrations(monkeypatch)
         src = str(tmp_path / "bad_src.db")
         conn = sqlite3.connect(src)
         conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY)")
@@ -205,6 +210,7 @@ class TestRestoreBackup:
             backup_ctrl.restore_backup(src)
 
     def test_restore_succeeds_with_valid_source(self, tmp_path, monkeypatch):
+        self._patch_migrations(monkeypatch)
         src = str(tmp_path / "valid_src.db")
         self._make_full_db(src)
         dest = str(tmp_path / "dest.db")
@@ -217,3 +223,14 @@ class TestRestoreBackup:
         ).fetchall()}
         conn.close()
         assert backup_ctrl._REQUIRED_TABLES.issubset(tables)
+
+    def test_restore_runs_migrations_after_copy(self, tmp_path, monkeypatch):
+        import database.migrations as mig
+        calls = []
+        monkeypatch.setattr(mig, "apply_migrations", lambda: calls.append(1))
+        src = str(tmp_path / "valid_src.db")
+        self._make_full_db(src)
+        dest = str(tmp_path / "dest.db")
+        monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", dest)
+        backup_ctrl.restore_backup(src)
+        assert calls, "apply_migrations() was not called after restore"

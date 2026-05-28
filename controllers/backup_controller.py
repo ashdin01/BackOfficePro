@@ -141,3 +141,7 @@ def restore_backup(src_path) -> None:
     invalidate_all_connections()
 
     logging.warning("Database restore complete: %s", src_path)
+
+    # Bring a potentially older backup up to the current schema.
+    from database.migrations import apply_migrations
+    apply_migrations()

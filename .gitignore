@@ -36,6 +36,13 @@ env/
 .idea/
 *.swp
 
+# Claude Code
+.claude/
+
+# Coverage
+.coverage
+.coveragerc
+
 # OS
 .DS_Store
 Thumbs.db
