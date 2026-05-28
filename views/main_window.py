@@ -8,6 +8,7 @@ from PyQt6.QtGui import QKeySequence, QIcon, QPixmap, QColor
 from config.settings import APP_NAME, APP_VERSION
 import controllers.backup_controller as backup_ctrl
 import config.styles as styles
+from utils.role_access import user_can_access_screen, staff_allowed_screens
 import logging
 import os
 import threading
@@ -97,9 +98,7 @@ class MainWindow(QMainWindow):
             ("&Sales",             8),
             ("Bun&dles",           9),
         ]
-        is_admin = self.current_user.get("role") in ("ADMIN", "MANAGER")
-        # STAFF can only see: Home, Products, Reports, Sales
-        staff_allowed = {0, 1, 5, 8}
+        _role = self.current_user.get("role", "STAFF")
 
         from PyQt6.QtWidgets import QScrollArea
         nav_widget = QWidget()
@@ -111,7 +110,7 @@ class MainWindow(QMainWindow):
         for label, index in nav_items:
             btn = QPushButton(label)
             btn.setCheckable(True)
-            if not is_admin and index not in staff_allowed:
+            if not user_can_access_screen(_role, index):
                 btn.setEnabled(False)
                 btn.setToolTip("Admin access required")
                 btn.setStyleSheet(f"color: #444; border-color: {styles.CLR_BORDER};")
@@ -133,7 +132,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(nav_scroll, 1)
 
         # ── Settings button (admin only) ──────────────────────────────
-        if is_admin:
+        if _role in ("ADMIN", "MANAGER"):
             settings_btn = QPushButton("⚙  Settings")
             settings_btn.setFixedHeight(34)
             settings_btn.setStyleSheet(
@@ -307,7 +306,13 @@ class MainWindow(QMainWindow):
             logging.warning(f"ProductList refresh failed: {e}")
         # ReportsHub (index 5) — reports open as separate windows, nothing to refresh here
 
+    def _can_access(self, index: int) -> bool:
+        role = self.current_user.get("role", "STAFF")
+        return user_can_access_screen(role, index)
+
     def _switch(self, index):
+        if not self._can_access(index):
+            return
         self.stack.setCurrentIndex(index)
         for btn, screen_idx in zip(self.nav_buttons, self._nav_indices):
             btn.setChecked(screen_idx == index)

@@ -2023,6 +2023,42 @@ def migrate_v51(conn):
     conn.commit()
 
 
+def migrate_v52(conn):
+    """Drop unused password_hash column from users.
+
+    password_hash was never populated by the application; all authentication
+    uses the pin column (now PBKDF2-SHA256).  The column is removed by the
+    standard SQLite rename-create-copy-drop pattern.
+    """
+    conn.executescript("""
+        PRAGMA foreign_keys       = OFF;
+        PRAGMA legacy_alter_table = ON;
+        BEGIN TRANSACTION;
+
+        ALTER TABLE users RENAME TO users_tmp;
+        CREATE TABLE users (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            username        TEXT    NOT NULL UNIQUE,
+            full_name       TEXT,
+            pin             TEXT,
+            role            TEXT    NOT NULL DEFAULT 'STAFF'
+                                CHECK (role IN ('ADMIN','MANAGER','STAFF')),
+            active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+            created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO users
+            SELECT id, username, full_name, pin, role, active, created_at
+            FROM users_tmp;
+        DROP TABLE users_tmp;
+
+        COMMIT;
+        PRAGMA legacy_alter_table = OFF;
+        PRAGMA foreign_keys      = ON;
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '52')")
+    conn.commit()
+
+
 def migrate_v49(conn):
     """Add ON DELETE CASCADE FK on bundle_eligible.barcode → products(barcode).
 
@@ -2360,4 +2396,5 @@ _MIGRATIONS: dict[int, tuple] = {
     49: (migrate_v49, "ON DELETE CASCADE FK on bundle_eligible.barcode → products"),
     50: (migrate_v50, "CHECK (barcode IS NULL OR barcode != '') on ar_invoice_lines"),
     51: (migrate_v51, "po_lines.barcode nullable + CHECK, removes PRAGMA FK workaround in add_note()"),
+    52: (migrate_v52, "drop unused password_hash column from users"),
 }

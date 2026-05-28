@@ -286,7 +286,6 @@ CREATE TABLE IF NOT EXISTS users (
     username        TEXT    NOT NULL UNIQUE,
     full_name       TEXT,
     pin             TEXT,
-    password_hash   TEXT,
     role            TEXT    NOT NULL DEFAULT 'STAFF'
                         CHECK (role IN ('ADMIN','MANAGER','STAFF')),
     active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
