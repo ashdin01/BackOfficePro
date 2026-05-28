@@ -159,8 +159,9 @@ def _start_api_server():
         while True:
             try:
                 from api_server import app as flask_app
+                from waitress import serve
                 logging.info("API server starting on 0.0.0.0:5050")
-                flask_app.run(host='0.0.0.0', port=5050, debug=False, use_reloader=False)
+                serve(flask_app, host='0.0.0.0', port=5050, threads=4)
                 logging.warning("API server stopped normally — not restarting")
                 return
             except OSError as e:

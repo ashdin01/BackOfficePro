@@ -16,19 +16,15 @@ def get_by_po(po_id):
 def add_note(po_id: int, text: str) -> int:
     """Insert a note line (no barcode, no qty).
 
-    Note lines store an empty-string barcode, which would normally violate the
-    FK constraint on products(barcode).  We bracket the insert with
-    PRAGMA foreign_keys = OFF/ON so the thread-local connection is used for
-    all WAL/synchronous/timeout benefits without a second raw connection.
-    FK enforcement is restored in the finally block regardless of outcome.
+    barcode is NULL — SQLite FK checks are skipped for NULL by design,
+    so no PRAGMA workaround is required.
     """
     conn = get_connection()
     try:
-        conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("""
             INSERT INTO po_lines
                 (po_id, barcode, description, ordered_qty, unit_cost, pack_qty, is_note)
-            VALUES (?, '', ?, 0, 0, 1, 1)
+            VALUES (?, NULL, ?, 0, 0, 1, 1)
         """, (po_id, text))
         note_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.commit()
@@ -37,7 +33,6 @@ def add_note(po_id: int, text: str) -> int:
         conn.rollback()
         raise
     finally:
-        conn.execute("PRAGMA foreign_keys = ON")
         conn.release()
 
 

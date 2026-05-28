@@ -1,18 +1,33 @@
 import hashlib
 import hmac
+import os
 from database.connection import get_connection
+
+_PBKDF2_ITERS  = 260_000
+_PBKDF2_PREFIX = "pbkdf2:"
 
 
 def _hash_pin(pin: str) -> str:
-    """SHA-256 hash of a PIN string."""
-    return hashlib.sha256(pin.encode()).hexdigest()
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac('sha256', pin.encode(), salt, _PBKDF2_ITERS)
+    return f"pbkdf2:{salt.hex()}:{dk.hex()}"
+
+
+def _verify_pbkdf2(pin: str, stored: str) -> bool:
+    try:
+        _, salt_hex, hash_hex = stored.split(':')
+        salt = bytes.fromhex(salt_hex)
+        dk = hashlib.pbkdf2_hmac('sha256', pin.encode(), salt, _PBKDF2_ITERS)
+        return hmac.compare_digest(dk.hex(), hash_hex)
+    except Exception:
+        return False
 
 
 def get_all_active():
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, username, full_name, role, pin FROM users WHERE active=1 ORDER BY full_name"
+            "SELECT id, username, full_name, role FROM users WHERE active=1 ORDER BY full_name"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -39,14 +54,16 @@ def verify_pin(username: str, pin: str) -> bool:
     if not stored:
         return False
 
-    hashed = _hash_pin(pin)
+    # Current path: PBKDF2-SHA256 with per-user salt.
+    if stored.startswith(_PBKDF2_PREFIX):
+        return _verify_pbkdf2(pin, stored)
 
-    # Normal path: stored value is already a SHA-256 hash.
-    if hmac.compare_digest(stored, hashed):
+    # Legacy: unsalted SHA-256 — auto-migrate to PBKDF2 on success.
+    if hmac.compare_digest(stored, hashlib.sha256(pin.encode()).hexdigest()):
+        set_pin(username, pin)
         return True
 
-    # Legacy path: stored value is a plain-text PIN (pre-hash era).
-    # Migrate to hashed on first successful login.
+    # Legacy: plaintext PIN — auto-migrate to PBKDF2 on success.
     if hmac.compare_digest(stored, pin):
         set_pin(username, pin)
         return True

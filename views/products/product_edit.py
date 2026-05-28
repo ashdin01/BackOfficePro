@@ -9,6 +9,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
+from views.widgets.text_popup import (
+    text_popup, text_popup_optional, price_popup, number_popup, choice_popup,
+)
 import config.styles as styles
 import os, shutil
 import controllers.product_controller as product_controller
@@ -342,7 +345,7 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _edit_barcode(self):
         if self._selling_unit_guard(): return
-        new_bc = _text_popup("Edit Barcode", "Barcode", self.product['barcode'], self)
+        new_bc = text_popup("Edit Barcode", "Barcode", self.product['barcode'], self)
         if new_bc is None or new_bc == self.product['barcode']:
             return
         try:
@@ -357,20 +360,20 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _edit_description(self):
         if self._selling_unit_guard(): return
-        val = _text_popup("Edit Description", "Description", self._description, self)
+        val = text_popup("Edit Description", "Description", self._description, self)
         if val is not None:
             self._description = val
             self.lbl_desc.setText(val)
 
     def _edit_brand(self):
-        val = _text_popup_optional("Edit Brand", "Brand", self._brand, self)
+        val = text_popup_optional("Edit Brand", "Brand", self._brand, self)
         if val is not None:
             self._brand = val
             self.lbl_brand.setText(val or "—")
 
     def _edit_plu(self):
         if self._selling_unit_guard(): return
-        val = _text_popup_optional("Edit PLU", "PLU", self._plu, self)
+        val = text_popup_optional("Edit PLU", "PLU", self._plu, self)
         if val is not None:
             self._plu = val
             self.lbl_plu.setText(val or "—")
@@ -391,7 +394,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         names = ["— No Group —"] + [g['name'] for g in dept_groups]
         ids   = [None]           + [g['id']   for g in dept_groups]
         current_name = self._group_name()
-        val = _choice_popup("Edit Group", "Group", names, current_name, self)
+        val = choice_popup("Edit Group", "Group", names, current_name, self)
         if val is not None:
             self._group_id = ids[names.index(val)]
             self.lbl_group.setText(val)
@@ -400,7 +403,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         names = [d['name'] for d in self._depts]
         ids   = [d['id']   for d in self._depts]
         current = names[ids.index(self._dept_id)] if self._dept_id in ids else names[0]
-        val = _choice_popup("Edit Department", "Department", names, current, self)
+        val = choice_popup("Edit Department", "Department", names, current, self)
         if val is not None:
             self._dept_id = ids[names.index(val)]
             self.lbl_dept.setText(val)
@@ -628,21 +631,21 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _edit_unit(self):
         units = ['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML']
-        val = _choice_popup("Edit Unit", "Unit", units, self._unit, self)
+        val = choice_popup("Edit Unit", "Unit", units, self._unit, self)
         if val is not None:
             self._unit = val
             self.lbl_unit.setText(val)
 
     def _edit_sell(self):
         if self._selling_unit_guard(): return
-        val = _price_popup("Edit Sell Price", "Sell Price", self._sell_price, self)
+        val = price_popup("Edit Sell Price", "Sell Price", self._sell_price, self)
         if val is not None:
             self._sell_price = val
             self.lbl_sell.setText(f"${val:.2f}")
             self._refresh_gp()
 
     def _edit_cost(self):
-        val = _price_popup("Edit Cost Price", "Cost Price", self._cost_price, self)
+        val = price_popup("Edit Cost Price", "Cost Price", self._cost_price, self)
         if val is not None:
             self._cost_price = val
             self.lbl_cost.setText(f"${val:.4f}")
@@ -650,47 +653,47 @@ class ProductEdit(KeyboardMixin, QWidget):
 
     def _edit_tax(self):
         options = ["GST Free (0%)", "GST (10%)"]
-        val = _choice_popup("Edit Tax Rate", "Tax Rate", options, self._tax_label(), self)
+        val = choice_popup("Edit Tax Rate", "Tax Rate", options, self._tax_label(), self)
         if val is not None:
             self._tax_rate = 10.0 if "10%" in val else 0.0
             self.lbl_tax.setText(val)
 
     def _edit_reorder_point(self):
-        val = _number_popup("Edit Reorder Point", "Reorder Point", self._reorder_point, self)
+        val = number_popup("Edit Reorder Point", "Reorder Point", self._reorder_point, self)
         if val is not None:
             self._reorder_point = val
             self.lbl_reorder_pt.setText(str(int(val)))
 
 
     def _edit_reorder_max(self):
-        val = _number_popup("Edit Reorder Max", "Reorder Max (0 = use Reorder Qty)", self._reorder_max, self)
+        val = number_popup("Edit Reorder Max", "Reorder Max (0 = use Reorder Qty)", self._reorder_max, self)
         if val is not None:
             self._reorder_max = val
             self.lbl_reorder_max.setText(str(int(val)))
 
     def _edit_variable_wt(self):
-        val = _choice_popup("Variable Weight", "Variable weight item?", ["No", "Yes"],
+        val = choice_popup("Variable Weight", "Variable weight item?", ["No", "Yes"],
                             "Yes" if self._variable_wt else "No", self)
         if val is not None:
             self._variable_wt = (val == "Yes")
             self.lbl_vw.setText(val)
 
     def _edit_stocktake(self):
-        val = _choice_popup("Include in Stocktake", "Include in stocktake?", ["Yes", "No"],
+        val = choice_popup("Include in Stocktake", "Include in stocktake?", ["Yes", "No"],
                             "Yes" if self._in_stocktake else "No", self)
         if val is not None:
             self._in_stocktake = (val == "Yes")
             self.lbl_stocktake.setText(val)
 
     def _edit_active(self):
-        val = _choice_popup("Active Status", "Active?", ["Yes", "No"],
+        val = choice_popup("Active Status", "Active?", ["Yes", "No"],
                             "Yes" if self._active else "No", self)
         if val is not None:
             self._active = (val == "Yes")
             self.lbl_active.setText(val)
 
     def _edit_auto_reorder(self):
-        val = _choice_popup("On Reorder", "Always include on next PO for this supplier?",
+        val = choice_popup("On Reorder", "Always include on next PO for this supplier?",
                             ["No", "Yes"],
                             "Yes" if self._auto_reorder else "No", self)
         if val is not None:
@@ -1254,180 +1257,6 @@ class ProductEdit(KeyboardMixin, QWidget):
             QMessageBox.warning(self, "Validation", str(e))
         except Exception as e:
             show_error(self, "Could not save product.", e)
-
-
-# ── Reusable popup dialogs ────────────────────────────────────────────
-
-def _text_popup(title, label, current, parent=None):
-    dlg = QDialog(parent)
-    dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(340)
-    layout = QVBoxLayout(dlg)
-    form = QFormLayout()
-    inp = QLineEdit(current)
-    inp.selectAll()
-    form.addRow(label, inp)
-    layout.addLayout(form)
-    btns = QHBoxLayout()
-    ok = QPushButton("Save  [Ctrl+S]")
-    ok.setFixedHeight(32)
-    cancel = QPushButton("Cancel  [Esc]")
-    cancel.setFixedHeight(32)
-    btns.addWidget(ok)
-    btns.addWidget(cancel)
-    layout.addLayout(btns)
-    from PyQt6.QtGui import QShortcut, QKeySequence
-    result = [None]
-    def confirm():
-        v = inp.text().strip()
-        if not v:
-            QMessageBox.warning(dlg, "Validation", f"{label} cannot be empty.")
-            return
-        result[0] = v
-        dlg.accept()
-    ok.clicked.connect(confirm)
-    cancel.clicked.connect(dlg.reject)
-    QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-    QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-    inp.setFocus()
-    dlg.exec()
-    return result[0]
-
-
-def _text_popup_optional(title, label, current, parent=None):
-    dlg = QDialog(parent)
-    dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(340)
-    layout = QVBoxLayout(dlg)
-    form = QFormLayout()
-    inp = QLineEdit(current or "")
-    inp.selectAll()
-    form.addRow(label, inp)
-    layout.addLayout(form)
-    btns = QHBoxLayout()
-    ok = QPushButton("Save  [Ctrl+S]")
-    ok.setFixedHeight(32)
-    cancel = QPushButton("Cancel  [Esc]")
-    cancel.setFixedHeight(32)
-    btns.addWidget(ok)
-    btns.addWidget(cancel)
-    layout.addLayout(btns)
-    from PyQt6.QtGui import QShortcut, QKeySequence
-    result = [None]
-    def confirm():
-        result[0] = inp.text().strip()
-        dlg.accept()
-    ok.clicked.connect(confirm)
-    cancel.clicked.connect(dlg.reject)
-    QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-    QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-    inp.setFocus()
-    dlg.exec()
-    return result[0]
-
-
-def _price_popup(title, label, current, parent=None):
-    dlg = QDialog(parent)
-    dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(280)
-    layout = QVBoxLayout(dlg)
-    form = QFormLayout()
-    inp = QDoubleSpinBox()
-    inp.setMaximum(99999)
-    inp.setDecimals(4)
-    inp.setValue(float(current))
-    price_row = QHBoxLayout()
-    price_row.addWidget(QLabel("$"))
-    price_row.addWidget(inp)
-    form.addRow(label, price_row)
-    layout.addLayout(form)
-    btns = QHBoxLayout()
-    ok = QPushButton("Save  [Ctrl+S]")
-    ok.setFixedHeight(32)
-    cancel = QPushButton("Cancel  [Esc]")
-    cancel.setFixedHeight(32)
-    btns.addWidget(ok)
-    btns.addWidget(cancel)
-    layout.addLayout(btns)
-    from PyQt6.QtGui import QShortcut, QKeySequence
-    result = [None]
-    def confirm():
-        result[0] = inp.value()
-        dlg.accept()
-    ok.clicked.connect(confirm)
-    cancel.clicked.connect(dlg.reject)
-    QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-    QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-    inp.setFocus()
-    dlg.exec()
-    return result[0]
-
-
-def _number_popup(title, label, current, parent=None):
-    dlg = QDialog(parent)
-    dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(260)
-    layout = QVBoxLayout(dlg)
-    form = QFormLayout()
-    inp = QDoubleSpinBox()
-    inp.setMaximum(99999)
-    inp.setDecimals(0)
-    inp.setValue(float(current))
-    form.addRow(label, inp)
-    layout.addLayout(form)
-    btns = QHBoxLayout()
-    ok = QPushButton("Save  [Ctrl+S]")
-    ok.setFixedHeight(32)
-    cancel = QPushButton("Cancel  [Esc]")
-    cancel.setFixedHeight(32)
-    btns.addWidget(ok)
-    btns.addWidget(cancel)
-    layout.addLayout(btns)
-    from PyQt6.QtGui import QShortcut, QKeySequence
-    result = [None]
-    def confirm():
-        result[0] = inp.value()
-        dlg.accept()
-    ok.clicked.connect(confirm)
-    cancel.clicked.connect(dlg.reject)
-    QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-    QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-    inp.setFocus()
-    dlg.exec()
-    return result[0]
-
-
-def _choice_popup(title, label, options, current, parent=None):
-    dlg = QDialog(parent)
-    dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(280)
-    layout = QVBoxLayout(dlg)
-    form = QFormLayout()
-    inp = QComboBox()
-    inp.addItems(options)
-    if current in options:
-        inp.setCurrentText(current)
-    form.addRow(label, inp)
-    layout.addLayout(form)
-    btns = QHBoxLayout()
-    ok = QPushButton("Save  [Ctrl+S]")
-    ok.setFixedHeight(32)
-    cancel = QPushButton("Cancel  [Esc]")
-    cancel.setFixedHeight(32)
-    btns.addWidget(ok)
-    btns.addWidget(cancel)
-    layout.addLayout(btns)
-    from PyQt6.QtGui import QShortcut, QKeySequence
-    result = [None]
-    def confirm():
-        result[0] = inp.currentText()
-        dlg.accept()
-    ok.clicked.connect(confirm)
-    cancel.clicked.connect(dlg.reject)
-    QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-    QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-    dlg.exec()
-    return result[0]
 
 
 class AddAliasDialog(QDialog):

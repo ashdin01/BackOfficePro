@@ -1,5 +1,4 @@
 """Tests for models/user.py — authentication and user management."""
-import hashlib
 import pytest
 from database.connection import get_connection
 import models.user as user_model
@@ -14,17 +13,16 @@ class TestCreate:
         assert user["role"] == "STAFF"
         assert user["active"] == 1
 
-    def test_pin_stored_as_sha256_hash_not_plaintext(self, test_db):
+    def test_pin_stored_as_pbkdf2_not_plaintext(self, test_db):
         user_model.create("jdoe", "John Doe", "STAFF", "1234")
         user = user_model.get_by_username("jdoe")
         assert user["pin"] != "1234"
-        assert len(user["pin"]) == 64  # SHA-256 hex digest
+        assert user["pin"].startswith("pbkdf2:")
 
-    def test_pin_hash_matches_expected(self, test_db):
+    def test_pin_verifiable_after_create(self, test_db):
         user_model.create("jdoe", "John Doe", "STAFF", "1234")
-        user = user_model.get_by_username("jdoe")
-        expected = hashlib.sha256("1234".encode()).hexdigest()
-        assert user["pin"] == expected
+        assert user_model.verify_pin("jdoe", "1234") is True
+        assert user_model.verify_pin("jdoe", "9999") is False
 
     def test_duplicate_username_raises(self, test_db):
         user_model.create("jdoe", "John Doe", "STAFF", "1234")
@@ -61,8 +59,8 @@ class TestVerifyPin:
         conn.close()
         assert user_model.verify_pin("legacy", "5678") is True
 
-    def test_legacy_plaintext_pin_migrated_to_hash_after_login(self, test_db):
-        """After authenticating with a plaintext PIN it should be auto-migrated."""
+    def test_legacy_plaintext_pin_migrated_to_pbkdf2_after_login(self, test_db):
+        """After authenticating with a plaintext PIN it should be auto-migrated to PBKDF2."""
         conn = get_connection()
         conn.execute(
             "INSERT INTO users (username, full_name, role, pin, active) "
@@ -72,8 +70,25 @@ class TestVerifyPin:
         conn.close()
         user_model.verify_pin("legacy", "5678")
         user = user_model.get_by_username("legacy")
-        expected_hash = hashlib.sha256("5678".encode()).hexdigest()
-        assert user["pin"] == expected_hash
+        assert user["pin"].startswith("pbkdf2:")
+        assert user_model.verify_pin("legacy", "5678") is True
+
+    def test_legacy_sha256_pin_migrated_to_pbkdf2_after_login(self, test_db):
+        """After authenticating with a legacy SHA-256 PIN it should be auto-migrated to PBKDF2."""
+        import hashlib as _hl
+        old_hash = _hl.sha256("7777".encode()).hexdigest()
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO users (username, full_name, role, pin, active) "
+            "VALUES ('sha2user', 'SHA2 User', 'STAFF', ?, 1)",
+            (old_hash,)
+        )
+        conn.commit()
+        conn.close()
+        assert user_model.verify_pin("sha2user", "7777") is True
+        user = user_model.get_by_username("sha2user")
+        assert user["pin"].startswith("pbkdf2:")
+        assert user_model.verify_pin("sha2user", "7777") is True
 
 
 class TestSetPin:

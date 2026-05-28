@@ -162,7 +162,8 @@ CREATE INDEX IF NOT EXISTS idx_po_status   ON purchase_orders(status);
 CREATE TABLE IF NOT EXISTS po_lines (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     po_id           INTEGER NOT NULL,
-    barcode         TEXT    NOT NULL,
+    barcode         TEXT    DEFAULT NULL
+                        CHECK (barcode IS NULL OR barcode != ''),
     description     TEXT    NOT NULL,
     ordered_qty     REAL    NOT NULL,
     received_qty    REAL    NOT NULL DEFAULT 0,

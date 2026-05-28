@@ -81,7 +81,8 @@ def get_last_backup_time() -> datetime | None:
 
 def validate_backup_file(path) -> tuple[bool, set]:
     """
-    Check that path is a readable SQLite file with the required tables.
+    Check that path is a readable SQLite file with the required tables and
+    a schema_version entry in settings, confirming it is a BackOfficePro database.
     Returns (valid: bool, missing_tables: set).
     """
     try:
@@ -89,8 +90,14 @@ def validate_backup_file(path) -> tuple[bool, set]:
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
-        conn.close()
         missing = _REQUIRED_TABLES - tables
+        if not missing and 'settings' in tables:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key='schema_version'"
+            ).fetchone()
+            if not row:
+                missing.add('schema_version (settings)')
+        conn.close()
         return (len(missing) == 0), missing
     except Exception as e:
         raise RuntimeError(f"Could not read file: {e}") from e

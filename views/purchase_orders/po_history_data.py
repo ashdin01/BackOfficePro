@@ -72,6 +72,8 @@ def compute_po_history_data(po_id: int, po=None) -> POHistoryData:
     total_ex = total_gst = 0.0
 
     for line in lines:
+        if line['is_note']:
+            continue
         product   = product_ctrl.get_product_by_barcode(line['barcode'])
         pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
         pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'

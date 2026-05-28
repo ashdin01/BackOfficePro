@@ -33,11 +33,11 @@ class TestPoNoteLines:
         assert lines[0]["ordered_qty"] == 0
         assert float(lines[0]["unit_cost"]) == pytest.approx(0.0)
 
-    def test_note_line_has_empty_barcode(self, test_db, supplier_id):
+    def test_note_line_has_null_barcode(self, test_db, supplier_id):
         po_id = po_model.create(supplier_id, "2026-06-01", "", "admin")
         lines_model.add_note(po_id, "Note text")
         lines = lines_model.get_by_po(po_id)
-        assert lines[0]["barcode"] == ""
+        assert lines[0]["barcode"] is None
 
     def test_multiple_notes_added(self, test_db, supplier_id):
         po_id = po_model.create(supplier_id, "2026-06-01", "", "admin")

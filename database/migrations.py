@@ -1968,6 +1968,61 @@ def migrate_v50(conn):
     conn.commit()
 
 
+def migrate_v51(conn):
+    """Remove PRAGMA foreign_keys workaround from po_lines note-line inserts.
+
+    po_lines.barcode was TEXT NOT NULL, forcing add_note() to disable FK
+    enforcement via PRAGMA foreign_keys = OFF in order to insert '' as a
+    sentinel for description-only lines.  This migration:
+      - Makes barcode nullable (TEXT DEFAULT NULL)
+      - Adds CHECK (barcode IS NULL OR barcode != '') to close the empty-string
+        bypass that previously required the PRAGMA workaround
+      - Converts existing '' sentinel values to NULL
+    After this migration, add_note() inserts NULL and the PRAGMA is no longer
+    needed.  SQLite FK checks are skipped for NULL by design.
+    """
+    conn.executescript("""
+        PRAGMA foreign_keys       = OFF;
+        PRAGMA legacy_alter_table = ON;
+        BEGIN TRANSACTION;
+
+        ALTER TABLE po_lines RENAME TO po_lines_tmp;
+        CREATE TABLE po_lines (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id           INTEGER NOT NULL,
+            barcode         TEXT    DEFAULT NULL
+                                CHECK (barcode IS NULL OR barcode != ''),
+            description     TEXT    NOT NULL,
+            ordered_qty     REAL    NOT NULL,
+            received_qty    REAL    NOT NULL DEFAULT 0,
+            pack_qty        INTEGER NOT NULL DEFAULT 1,
+            unit_cost       REAL    NOT NULL DEFAULT 0,
+            notes           TEXT,
+            actual_cost     REAL    DEFAULT 0,
+            is_promo        INTEGER NOT NULL DEFAULT 0,
+            is_note         INTEGER NOT NULL DEFAULT 0,
+            sort_order      INTEGER,
+            FOREIGN KEY (po_id)   REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (barcode) REFERENCES products(barcode)   ON DELETE RESTRICT
+        );
+        INSERT INTO po_lines
+            SELECT id, po_id, NULLIF(barcode, ''), description,
+                   ordered_qty, received_qty, pack_qty, unit_cost,
+                   notes, actual_cost, is_promo, is_note, sort_order
+            FROM po_lines_tmp;
+        DROP TABLE po_lines_tmp;
+
+        CREATE INDEX IF NOT EXISTS idx_po_lines_po_id   ON po_lines(po_id);
+        CREATE INDEX IF NOT EXISTS idx_po_lines_barcode ON po_lines(barcode);
+
+        COMMIT;
+        PRAGMA legacy_alter_table = OFF;
+        PRAGMA foreign_keys      = ON;
+    """)
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '51')")
+    conn.commit()
+
+
 def migrate_v49(conn):
     """Add ON DELETE CASCADE FK on bundle_eligible.barcode → products(barcode).
 
@@ -2304,4 +2359,5 @@ _MIGRATIONS: dict[int, tuple] = {
     48: (migrate_v48, "CHECK constraints on users.role/active, ar_credit_notes.status, bank_transactions.status"),
     49: (migrate_v49, "ON DELETE CASCADE FK on bundle_eligible.barcode → products"),
     50: (migrate_v50, "CHECK (barcode IS NULL OR barcode != '') on ar_invoice_lines"),
+    51: (migrate_v51, "po_lines.barcode nullable + CHECK, removes PRAGMA FK workaround in add_note()"),
 }

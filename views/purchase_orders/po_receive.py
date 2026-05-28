@@ -452,6 +452,8 @@ class POReceive(BaseView):
         self._inputs = []
 
         for line in self.lines:
+            if line['is_note']:
+                continue
             r = self.table.rowCount()
             self.table.insertRow(r)
 

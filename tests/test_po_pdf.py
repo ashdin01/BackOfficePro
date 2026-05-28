@@ -79,16 +79,14 @@ def test_pdf_generated_with_note_line(tmp_path, test_db, db_conn, supplier_id, p
     )
     db_conn.commit()
 
-    # Note line — empty barcode violates FK; use a direct connection without FK enforcement
-    raw = sqlite3.connect(test_db)
-    raw.execute(
+    # Note line — barcode is NULL (no FK check for NULL, no workaround needed)
+    db_conn.execute(
         "INSERT INTO po_lines"
         " (po_id, barcode, description, ordered_qty, unit_cost, is_note, sort_order)"
-        " VALUES (?, '', 'Handle with care', 0, 0, 1, 999)",
+        " VALUES (?, NULL, 'Handle with care', 0, 0, 1, 999)",
         (po_id,),
     )
-    raw.commit()
-    raw.close()
+    db_conn.commit()
 
     out = str(tmp_path / "smoke_note.pdf")
     result = generate_po_pdf(po_id, out)
