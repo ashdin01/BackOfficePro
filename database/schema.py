@@ -412,7 +412,7 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('ar_next_invoice_number', '1',           'Next AR invoice sequence number'),
     ('ar_next_credit_number',  '1',           'Next AR credit note sequence number'),
     ('ar_invoice_pdf_path', '',               'Folder path for exported invoice PDFs'),
-    ('schema_version',      '50',             'Database schema version');
+    ('schema_version',      '52',             'Database schema version');
 
 CREATE TABLE IF NOT EXISTS bank_csv_profiles (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

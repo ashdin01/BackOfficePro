@@ -1,8 +1,10 @@
 import hashlib
 import inspect
 import logging
+import marshal
 import re
 import sqlite3
+import sys
 
 from database.connection import get_connection
 
@@ -22,14 +24,20 @@ def _add_column(conn, sql):
 
 
 def _fn_checksum(fn) -> str:
-    """SHA-256 of a migration function's whitespace-normalised source.
+    """SHA-256 fingerprint of a migration function.
 
-    Whitespace is collapsed so that reformatting alone does not trigger a
-    mismatch — only genuine edits to SQL or logic do.
+    Development (source available): hashes whitespace-normalised source so
+    reformatting alone does not trigger a mismatch.
+
+    PyInstaller / frozen builds (source unavailable): hashes the marshalled
+    code object, which includes all SQL string constants and bytecode.
     """
-    src = inspect.getsource(fn)
-    normalised = re.sub(r'\s+', ' ', src).strip()
-    return hashlib.sha256(normalised.encode()).hexdigest()
+    try:
+        src = inspect.getsource(fn)
+        normalised = re.sub(r'\s+', ' ', src).strip()
+        return hashlib.sha256(normalised.encode()).hexdigest()
+    except OSError:
+        return hashlib.sha256(marshal.dumps(fn.__code__)).hexdigest()
 
 
 def _ensure_migration_log(conn):
@@ -87,7 +95,13 @@ def _check_integrity(conn):
             "The migration may have been skipped or the log was manually altered."
         )
 
-    # Drift check — block startup on any mismatch
+    # Drift check — block startup on any mismatch.
+    # Skipped in frozen (PyInstaller) builds: the bundle is immutable so
+    # migration source cannot change between runs, and bytecode-based checksums
+    # would not match source-based checksums stored by a prior dev-mode run.
+    if getattr(sys, 'frozen', False):
+        return
+
     drifted = []
     for v, stored in logged.items():
         entry = _MIGRATIONS.get(v)
