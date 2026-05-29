@@ -117,7 +117,7 @@ class ReorderReport(BaseView):
             w.writerow(["Barcode", "Description", "Department", "Supplier",
                         "On Hand", "Reorder Point", "Order Qty", "Unit Cost", "Order Cost"])
             for row in rows:
-                w.writerow([f'="{row["barcode"]}"', row['description'], row['dept_name'],
+                w.writerow([row['barcode'], row['description'], row['dept_name'],
                              row['supplier_name'], row['on_hand'], row['reorder_point'],
                              row['cost_price'], row['order_cost']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

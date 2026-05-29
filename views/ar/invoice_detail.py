@@ -1,4 +1,5 @@
 import os
+import subprocess
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
@@ -355,7 +356,7 @@ class InvoiceDetail(BaseView):
         try:
             path = ar_ctrl.generate_invoice_pdf(self._id)
             QMessageBox.information(self, "PDF Saved", f"Saved to:\n{path}")
-            os.startfile(path) if os.name == 'nt' else os.system(f'xdg-open "{path}"')
+            os.startfile(path) if os.name == 'nt' else subprocess.Popen(['xdg-open', path])
         except Exception as e:
             show_error(self, "Could not generate PDF.", e, title="PDF Error")
 

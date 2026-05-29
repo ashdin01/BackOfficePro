@@ -1,6 +1,5 @@
 import sys
 import os
-import traceback
 import logging
 import glob
 from datetime import datetime, timedelta
@@ -15,9 +14,10 @@ LOG_DIR  = os.path.join(os.path.expanduser("~"), "BackOfficeLogs")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, f"backoffice_{datetime.now().strftime('%Y%m%d')}.log")
 
+_log_level = logging.DEBUG if os.environ.get("BACKOFFICE_DEBUG") else logging.INFO
 logging.basicConfig(
     filename=LOG_FILE,
-    level=logging.DEBUG,
+    level=_log_level,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -45,10 +45,7 @@ def _handle_exception(exc_type, exc_value, exc_tb):
             msg.setIcon(QMessageBox.Icon.Critical)
             msg.setWindowTitle("BackOfficePro — Unexpected Error")
             msg.setText("An unexpected error occurred and the app needs to close.")
-            msg.setDetailedText(
-                "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            )
-            msg.setInformativeText(f"Log saved to:\n{LOG_FILE}")
+            msg.setInformativeText(f"Error details have been saved to the log file:\n{LOG_FILE}")
             msg.exec()
     except Exception:
         pass

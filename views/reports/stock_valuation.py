@@ -130,6 +130,6 @@ class StockValuationReport(BaseView):
             w = csv.writer(f)
             w.writerow(["Barcode", "Description", "Department", "Unit", "Qty", "Cost Value", "Sell Value"])
             for row in rows:
-                w.writerow([f'="{row["barcode"]}"', row['description'], row['dept_name'],
+                w.writerow([row['barcode'], row['description'], row['dept_name'],
                              row['unit'], row['quantity'], row['cost_value'], row['sell_value']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

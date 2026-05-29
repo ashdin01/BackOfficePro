@@ -1,4 +1,5 @@
 import os
+import subprocess
 from PyQt6.QtWidgets import (
     QDialog, QFormLayout, QComboBox, QDialogButtonBox,
     QDateEdit, QMessageBox, QLabel
@@ -57,7 +58,7 @@ class StatementDialog(QDialog):
         try:
             path = ar_ctrl.generate_statement_pdf(cid, date_from, date_to)
             QMessageBox.information(self, "Statement Saved", f"Saved to:\n{path}")
-            os.startfile(path) if os.name == 'nt' else os.system(f'xdg-open "{path}"')
+            os.startfile(path) if os.name == 'nt' else subprocess.Popen(['xdg-open', path])
             self.accept()
         except Exception as e:
             show_error(self, "Could not generate statement PDF.", e)

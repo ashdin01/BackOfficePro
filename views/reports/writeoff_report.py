@@ -316,7 +316,7 @@ class WriteOffReport(BaseView):
                     units = abs(int(row['quantity']))
                     cost  = float(row['cost_price']) if row['cost_price'] else 0.0
                     value = units * cost
-                    w.writerow([str(row['created_at'])[:16], f'="{row["barcode"]}"',
+                    w.writerow([str(row['created_at'])[:16], row['barcode'],
                                 row['description'] or '', row['dept_name'] or '',
                                 row['supplier_name'] or '', row['movement_type'],
                                 _category(row['movement_type']), units, f"${value:.2f}"])

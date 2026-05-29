@@ -105,12 +105,17 @@ def _get_api_key():
                 set_secret("api_key", key)
                 if get_secret("api_key"):
                     settings_ctrl.set_setting("api_key", "")  # clear plaintext copy
+                else:
+                    logging.warning("Keyring unavailable — API key migrated from DB but could not be stored securely")
             else:
                 key = secrets.token_hex(32)
                 set_secret("api_key", key)
                 if not get_secret("api_key"):
-                    # Keyring unavailable — persist in DB so the key survives restart.
-                    settings_ctrl.set_setting("api_key", key)
+                    # Keyring unavailable — log prominently; do not persist in DB.
+                    logging.error(
+                        "Keyring unavailable: API key could not be stored and will reset on restart. "
+                        "Install a keyring backend (e.g. python-keyring with SecretService)."
+                    )
 
         _api_key_cache = key
         return key
@@ -279,11 +284,18 @@ def add_count(session_id):
     if not barcode or qty is None:
         return jsonify({"error": "barcode and qty required"}), 400
 
+    try:
+        qty = float(qty)
+    except (TypeError, ValueError):
+        return jsonify({"error": "qty must be a number"}), 400
+    if qty < 0 or qty > 99_999:
+        return jsonify({"error": "qty must be between 0 and 99999"}), 400
+
     product = product_ctrl.get_product_by_barcode(barcode)
     if not product or not product['active']:
         return jsonify({"error": "Product not found"}), 404
 
-    stocktake_ctrl.upsert_count(session_id, product['barcode'], float(qty))
+    stocktake_ctrl.upsert_count(session_id, product['barcode'], qty)
     return jsonify({"ok": True, "barcode": product['barcode']}), 200
 
 
@@ -366,7 +378,7 @@ def record_pos_sale():
     data      = request.get_json(force=True) or {}
     reference = str(data.get("reference", "")).strip()
     sale_date = str(data.get("sale_date",  "")).strip()
-    operator  = str(data.get("operator",   "POS")).strip()
+    operator  = str(data.get("operator",   "POS")).strip()[:64]
     items     = data.get("items", [])
 
     if not reference or not sale_date or not items:
@@ -412,8 +424,7 @@ if __name__ == "__main__":
     parser.add_argument("--threads", type=int, default=4,
                         help="Waitress worker threads (default 4)")
     args = parser.parse_args()
-    api_key = _get_api_key()
+    _get_api_key()
     print(f"BackOfficePro API → http://{args.host}:{args.port}")
-    print(f"API key           → {api_key}")
-    print("Pass as header:   X-API-Key: <key>")
+    print("API key loaded from keyring. Pass as header: X-API-Key: <key>")
     serve(app, host=args.host, port=args.port, threads=args.threads)

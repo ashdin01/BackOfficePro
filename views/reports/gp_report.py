@@ -179,6 +179,6 @@ class GPReport(BaseView):
             w = csv.writer(f)
             w.writerow(["Barcode", "Description", "Department", "Sell Price", "Cost Price", "GP %"])
             for row in rows:
-                w.writerow([f'="{row["barcode"]}"', row['description'], row['dept_name'],
+                w.writerow([row['barcode'], row['description'], row['dept_name'],
                              row['sell_price'], row['cost_price'], row['gp_pct']])
         QMessageBox.information(self, "Export", f"Exported to {path}")

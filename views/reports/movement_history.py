@@ -159,6 +159,6 @@ class MovementHistoryReport(BaseView):
             w = csv.writer(f)
             w.writerow(["Date/Time", "Barcode", "Description", "Type", "Qty", "Reference", "Notes"])
             for row in rows:
-                w.writerow([row['created_at'], f'="{row["barcode"]}"', row['description'],
+                w.writerow([row['created_at'], row['barcode'], row['description'],
                              row['movement_type'], row['quantity'], row['reference'], row['notes']])
         QMessageBox.information(self, "Export", f"Exported to {path}")
