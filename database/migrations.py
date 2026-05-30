@@ -741,6 +741,30 @@ def migrate_v37(conn):
       product_suppliers (both FKs), stock_on_hand.barcode,
       barcode_aliases.master_barcode, product_selling_units.master_barcode.
     """
+    # product_selling_units was present in schema.py from the start but was
+    # never created by a migration.  Databases initialised from a schema that
+    # predates the table will not have it, causing the RENAME below to fail.
+    # Create it empty here so the rename-create-copy-drop pattern can proceed
+    # (the INSERT will simply copy zero rows from the empty backup table).
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    if 'product_selling_units' not in tables:
+        conn.execute("""
+            CREATE TABLE product_selling_units (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                master_barcode TEXT    NOT NULL,
+                barcode        TEXT    UNIQUE,
+                plu            TEXT,
+                label          TEXT    NOT NULL DEFAULT '',
+                unit_qty       REAL    NOT NULL DEFAULT 1,
+                sell_price     REAL    NOT NULL DEFAULT 0,
+                active         INTEGER NOT NULL DEFAULT 1,
+                created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+
     conn.executescript("""
         PRAGMA foreign_keys = OFF;
         BEGIN TRANSACTION;

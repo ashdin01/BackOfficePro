@@ -234,3 +234,61 @@ class TestRestoreBackup:
         monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", dest)
         backup_ctrl.restore_backup(src)
         assert calls, "apply_migrations() was not called after restore"
+
+
+# ── migrate_v37 product_selling_units guard ───────────────────────────────────
+
+class TestMigrateV37SellingUnitsGuard:
+    """Regression: migrate_v37 must not crash when product_selling_units is absent.
+
+    Databases created before the table was added to schema.py hit
+    'no such table: product_selling_units' on restore because migrate_v37
+    assumed the table already existed and tried to RENAME it immediately.
+    """
+
+    def test_migrate_v37_creates_selling_units_when_absent(self, tmp_path, monkeypatch):
+        """migrate_v37 must not crash when product_selling_units is absent.
+
+        Uses the current full schema, drops product_selling_units to simulate
+        the pre-introduction state, then runs migrate_v37 directly and asserts
+        the table is recreated correctly.
+        """
+        import database.connection as conn_mod
+        from database.schema import SCHEMA
+        from database.migrations import migrate_v37
+
+        db_path = str(tmp_path / "no_selling_units.db")
+        monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
+
+        # Fresh DB with full current schema
+        c = sqlite3.connect(db_path)
+        c.executescript(SCHEMA)
+        # Drop the table to simulate the missing-table condition
+        c.execute("DROP TABLE IF EXISTS product_selling_units")
+        c.execute("DROP INDEX IF EXISTS idx_selling_units_master")
+        c.execute("DROP INDEX IF EXISTS idx_selling_units_barcode")
+        c.commit()
+        c.close()
+
+        # Confirm the table is absent
+        c = sqlite3.connect(db_path)
+        tables = {r[0] for r in c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        c.close()
+        assert 'product_selling_units' not in tables
+
+        # Run migrate_v37 directly — must not raise
+        conn = conn_mod.get_connection()
+        try:
+            migrate_v37(conn)
+        finally:
+            conn.release()
+
+        # Table must exist after the migration
+        c = sqlite3.connect(db_path)
+        tables_after = {r[0] for r in c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        c.close()
+        assert 'product_selling_units' in tables_after
