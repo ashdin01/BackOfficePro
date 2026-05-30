@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime
 
@@ -9,6 +10,7 @@ import models.settings as settings_model
 _BACKUP_DIR = os.path.join(os.path.expanduser("~"), "BackOfficeBackups")
 _KEEP_COUNT = 30
 _REQUIRED_TABLES = {"products", "suppliers", "departments", "purchase_orders"}
+_BACKUP_RE = re.compile(r'^supermarket_(\d{8}_\d{6})\.db$')
 
 
 def get_backup_dir() -> str:
@@ -64,16 +66,17 @@ def get_backup_email() -> str:
 
 def get_last_backup_time() -> datetime | None:
     """
-    Return the datetime of the most recent .db file in the backup dir, or None.
+    Return the datetime of the most recent standard backup in the backup dir,
+    or None. PRE_RESTORE_ and other non-standard filenames are ignored.
     """
     try:
-        files = sorted(
-            [f for f in os.listdir(_BACKUP_DIR) if f.endswith(".db")],
-            reverse=True
-        )
-        if files:
-            ts = files[0].replace("supermarket_", "").replace(".db", "")
-            return datetime.strptime(ts, "%Y%m%d_%H%M%S")
+        timestamps = [
+            m.group(1)
+            for f in os.listdir(_BACKUP_DIR)
+            if (m := _BACKUP_RE.match(f))
+        ]
+        if timestamps:
+            return datetime.strptime(max(timestamps), "%Y%m%d_%H%M%S")
     except Exception:
         logging.exception("get_last_backup_time failed")
     return None
@@ -91,12 +94,19 @@ def validate_backup_file(path) -> tuple[bool, set]:
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
         missing = _REQUIRED_TABLES - tables
-        if not missing and 'settings' in tables:
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key='schema_version'"
-            ).fetchone()
-            if not row:
-                missing.add('schema_version (settings)')
+        if not missing:
+            # v54+: version lives in db_meta; pre-v54: it lives in settings.
+            has_version = (
+                ('db_meta' in tables and
+                 conn.execute("SELECT version FROM db_meta").fetchone() is not None)
+                or
+                ('settings' in tables and
+                 conn.execute(
+                     "SELECT value FROM settings WHERE key='schema_version'"
+                 ).fetchone() is not None)
+            )
+            if not has_version:
+                missing.add('schema version marker')
         conn.close()
         return (len(missing) == 0), missing
     except Exception as e:

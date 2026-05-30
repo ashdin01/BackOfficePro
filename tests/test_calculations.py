@@ -6,7 +6,7 @@ found in the PO draft screen: unit_cost is stored ex-GST, so GST must be calcula
 forward (amount_ex × rate/100), never back-calculated from an inc-GST assumption.
 """
 import pytest
-from utils.calculations import gst_on_ex, po_order_totals
+from utils.calculations import gst_on_ex, po_order_totals, amount_inc_from_ex, gst_from_inclusive
 
 
 class TestGstOnEx:
@@ -102,3 +102,51 @@ class TestPoOrderTotals:
         r = po_order_totals(lines)
         assert r["subtotal"] == round(4.002, 2)
         assert r["gst"] == round(0.4002, 2)
+
+
+class TestAmountIncFromEx:
+    """amount_inc_from_ex: forward-calculate the GST-inclusive price."""
+
+    def test_10_percent(self):
+        assert amount_inc_from_ex(100.0, 10.0) == pytest.approx(110.0)
+
+    def test_zero_rate_unchanged(self):
+        assert amount_inc_from_ex(50.0, 0.0) == pytest.approx(50.0)
+
+    def test_fractional_amount(self):
+        assert amount_inc_from_ex(3.50, 10.0) == pytest.approx(3.85)
+
+    def test_inverse_of_gst_from_inclusive(self):
+        """amount_inc_from_ex and gst_from_inclusive must be consistent."""
+        ex = 80.0
+        inc = amount_inc_from_ex(ex, 10.0)
+        assert gst_from_inclusive(inc, 10.0) == pytest.approx(inc - ex)
+
+
+class TestGstFromInclusive:
+    """gst_from_inclusive: extract the GST component from an inc-GST amount.
+
+    This formula is used for freight/charge lines where a supplier quotes the
+    total including GST and we need to split out the tax portion.
+    """
+
+    def test_10_percent_on_110(self):
+        # $110 inc — $10 GST, $100 ex
+        assert gst_from_inclusive(110.0, 10.0) == pytest.approx(10.0)
+
+    def test_zero_rate_returns_zero(self):
+        assert gst_from_inclusive(110.0, 0.0) == pytest.approx(0.0)
+
+    def test_not_same_as_forward_calculation(self):
+        """gst_from_inclusive(110, 10) != gst_on_ex(110, 10): they work on different bases."""
+        assert gst_from_inclusive(110.0, 10.0) != pytest.approx(gst_on_ex(110.0, 10.0))
+
+    def test_ex_plus_gst_equals_inc(self):
+        inc = 55.0
+        gst = gst_from_inclusive(inc, 10.0)
+        ex = inc - gst
+        assert amount_inc_from_ex(ex, 10.0) == pytest.approx(inc)
+
+    def test_fractional_result(self):
+        # $33 inc at 10%: GST = 33 - 33/1.1 = 33 - 30.0̄ = 3.0̄
+        assert gst_from_inclusive(33.0, 10.0) == pytest.approx(3.0, rel=1e-5)

@@ -8,11 +8,13 @@ import hmac
 import logging
 import re
 import secrets
+import sqlite3
 import sys
 import os
 import threading
 import time
 from collections import deque
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,43 +31,41 @@ app = Flask(__name__)
 # Routes that do not require authentication (liveness check only)
 _AUTH_EXEMPT = {"/api/v1/health"}
 
-# ── Rate limiters (sliding window) ───────────────────────────────────────────
+# ── Rate limiters (sliding window, per client IP) ────────────────────────────
 
 # /pos/sale — tight limit to prevent runaway POS retries
-_SALE_WINDOW   = 1.0   # seconds
-_SALE_MAX      = 10    # max requests per window
-_sale_lock     = threading.Lock()
-_sale_times: deque = deque()
+_SALE_WINDOW = 1.0   # seconds
+_SALE_MAX    = 10    # max requests per window
+_sale_lock   = threading.Lock()
+_sale_clients: dict[str, deque] = {}
 
 # All other authenticated endpoints — permissive, guards against runaway clients
-_READ_WINDOW   = 10.0  # seconds
-_READ_MAX      = 60    # max requests per window
-_read_lock     = threading.Lock()
-_read_times: deque = deque()
+_READ_WINDOW = 10.0  # seconds
+_READ_MAX    = 60    # max requests per window
+_read_lock   = threading.Lock()
+_read_clients: dict[str, deque] = {}
 
 
-def _sale_rate_ok() -> bool:
-    """Return True if the /pos/sale request is within the allowed rate."""
+def _rate_ok(clients: dict, lock: threading.Lock, window: float, max_calls: int,
+             client_ip: str) -> bool:
+    """Sliding-window rate check for a single client IP. Thread-safe."""
     now = time.monotonic()
-    with _sale_lock:
-        while _sale_times and _sale_times[0] < now - _SALE_WINDOW:
-            _sale_times.popleft()
-        if len(_sale_times) >= _SALE_MAX:
+    with lock:
+        times = clients.setdefault(client_ip, deque())
+        while times and times[0] < now - window:
+            times.popleft()
+        if len(times) >= max_calls:
             return False
-        _sale_times.append(now)
+        times.append(now)
         return True
 
 
-def _read_rate_ok() -> bool:
-    """Return True if the read request is within the allowed rate."""
-    now = time.monotonic()
-    with _read_lock:
-        while _read_times and _read_times[0] < now - _READ_WINDOW:
-            _read_times.popleft()
-        if len(_read_times) >= _READ_MAX:
-            return False
-        _read_times.append(now)
-        return True
+def _sale_rate_ok(client_ip: str) -> bool:
+    return _rate_ok(_sale_clients, _sale_lock, _SALE_WINDOW, _SALE_MAX, client_ip)
+
+
+def _read_rate_ok(client_ip: str) -> bool:
+    return _rate_ok(_read_clients, _read_lock, _READ_WINDOW, _READ_MAX, client_ip)
 
 
 _api_key_cache: str = ""
@@ -111,10 +111,13 @@ def _get_api_key():
                 key = secrets.token_hex(32)
                 set_secret("api_key", key)
                 if not get_secret("api_key"):
-                    # Keyring unavailable — log prominently; do not persist in DB.
-                    logging.error(
-                        "Keyring unavailable: API key could not be stored and will reset on restart. "
-                        "Install a keyring backend (e.g. python-keyring with SecretService)."
+                    # Keyring unavailable — fall back to plaintext settings table so the
+                    # key survives process restarts (better than silently going ephemeral).
+                    settings_ctrl.set_setting("api_key", key)
+                    logging.warning(
+                        "Keyring unavailable: API key stored in plaintext settings table. "
+                        "Install a keyring backend (e.g. python-keyring with SecretService) "
+                        "for better security."
                     )
 
         _api_key_cache = key
@@ -149,17 +152,19 @@ def _log_response(response):
     return response
 
 
+def _err(code: str, message: str, status: int):
+    """Return a structured JSON error response with a machine code and human message."""
+    return jsonify({"error": code, "message": message}), status
+
+
 @app.before_request
 def _require_api_key():
     if request.path in _AUTH_EXEMPT:
         return
-    provided = (
-        request.headers.get("X-API-Key", "")
-        or request.args.get("api_key", "")
-    )
+    provided = request.headers.get("X-API-Key", "")
     expected = _get_api_key()
     if not provided or not hmac.compare_digest(provided, expected):
-        return jsonify({"error": "Unauthorized"}), 401
+        return _err("UNAUTHORIZED", "Missing or invalid API key", 401)
 
 
 @app.before_request
@@ -178,9 +183,10 @@ def _rate_limit_reads():
         return
     if request.endpoint == 'record_pos_sale':
         return
-    if not _read_rate_ok():
-        logging.warning("API read rate limit exceeded [req=%s]", getattr(g, 'request_id', '?'))
-        return jsonify({"error": "Rate limit exceeded — slow down and retry"}), 429
+    if not _read_rate_ok(request.remote_addr or ""):
+        logging.warning("API read rate limit exceeded [client=%s req=%s]",
+                        request.remote_addr, getattr(g, 'request_id', '?'))
+        return _err("RATE_LIMIT", "Rate limit exceeded — slow down and retry", 429)
 
 
 @app.route("/api/v1/health")
@@ -219,7 +225,7 @@ def list_products():
         limit  = min(int(request.args.get("limit",  200)), 2000)
         offset = int(request.args.get("offset", 0))
     except (TypeError, ValueError):
-        return jsonify({"error": "limit and offset must be integers"}), 400
+        return _err("INVALID_PARAM", "limit and offset must be integers", 400)
 
     if search:
         rows = product_ctrl.search_products(search, active_only=True)
@@ -233,7 +239,7 @@ def get_product_by_plu(plu):
     """Look up a product by its PLU number."""
     result = product_ctrl.get_product_by_plu(plu)
     if not result:
-        return jsonify({"error": "Product not found"}), 404
+        return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
     return jsonify(result)
 
 
@@ -241,7 +247,7 @@ def get_product_by_plu(plu):
 def get_product(barcode):
     result = product_ctrl.get_product_for_pos(barcode)
     if not result:
-        return jsonify({"error": "Product not found"}), 404
+        return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
     return jsonify(result)
 
 
@@ -255,7 +261,7 @@ def create_session():
     data = request.get_json(force=True) or {}
     label = str(data.get("label", "")).strip()
     if not label:
-        return jsonify({"error": "label required"}), 400
+        return _err("MISSING_FIELD", "label required", 400)
     dept_id    = data.get("department_id")
     notes      = data.get("notes", "")
     created_by = data.get("created_by", "Android")
@@ -267,7 +273,7 @@ def create_session():
 def get_session(session_id):
     row = stocktake_ctrl.get_session(session_id)
     if not row:
-        return jsonify({"error": "Session not found"}), 404
+        return _err("SESSION_NOT_FOUND", "Session not found", 404)
     return jsonify(dict(row))
 
 
@@ -282,18 +288,18 @@ def add_count(session_id):
     barcode = str(data.get("barcode", "")).strip()
     qty     = data.get("qty")
     if not barcode or qty is None:
-        return jsonify({"error": "barcode and qty required"}), 400
+        return _err("MISSING_FIELD", "barcode and qty required", 400)
 
     try:
         qty = float(qty)
     except (TypeError, ValueError):
-        return jsonify({"error": "qty must be a number"}), 400
+        return _err("INVALID_PARAM", "qty must be a number", 400)
     if qty < 0 or qty > 99_999:
-        return jsonify({"error": "qty must be between 0 and 99999"}), 400
+        return _err("INVALID_PARAM", "qty must be between 0 and 99999", 400)
 
     product = product_ctrl.get_product_by_barcode(barcode)
     if not product or not product['active']:
-        return jsonify({"error": "Product not found"}), 404
+        return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
 
     stocktake_ctrl.upsert_count(session_id, product['barcode'], qty)
     return jsonify({"ok": True, "barcode": product['barcode']}), 200
@@ -324,10 +330,10 @@ def get_product_image(barcode):
     """Serve the product image file. Returns 404 if no image exists."""
     barcode = _safe_barcode(barcode)
     if not barcode:
-        return jsonify({"error": "Invalid barcode"}), 400
+        return _err("INVALID_BARCODE", "Invalid barcode", 400)
     path = product_ctrl.find_product_image(barcode)
     if not path:
-        return jsonify({"error": "No image"}), 404
+        return _err("NO_IMAGE", "No image for this product", 404)
     ext  = path.rsplit('.', 1)[-1].lower()
     mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext}'
     return send_file(path, mimetype=mime)
@@ -338,7 +344,7 @@ def delete_product_image_route(barcode):
     """Remove a product image (used by BackOfficePro desktop — not RetailPOSPro)."""
     barcode = _safe_barcode(barcode)
     if not barcode:
-        return jsonify({"error": "Invalid barcode"}), 400
+        return _err("INVALID_BARCODE", "Invalid barcode", 400)
     existed = product_ctrl.find_product_image(barcode) is not None
     product_ctrl.delete_product_image(barcode)
     return jsonify({"ok": existed}), 200
@@ -371,9 +377,10 @@ def record_pos_sale():
       ]
     }
     """
-    if not _sale_rate_ok():
-        logging.warning("API /pos/sale rate limit exceeded [req=%s]", getattr(g, 'request_id', '?'))
-        return jsonify({"error": "Rate limit exceeded — slow down and retry"}), 429
+    if not _sale_rate_ok(request.remote_addr or ""):
+        logging.warning("API /pos/sale rate limit exceeded [client=%s req=%s]",
+                        request.remote_addr, getattr(g, 'request_id', '?'))
+        return _err("RATE_LIMIT", "Rate limit exceeded — slow down and retry", 429)
 
     data      = request.get_json(force=True) or {}
     reference = str(data.get("reference", "")).strip()
@@ -382,15 +389,28 @@ def record_pos_sale():
     items     = data.get("items", [])
 
     if not reference or not sale_date or not items:
-        return jsonify({"error": "reference, sale_date, and items are required"}), 400
+        return _err("MISSING_FIELD", "reference, sale_date, and items are required", 400)
+
+    try:
+        datetime.strptime(sale_date, "%Y-%m-%d")
+    except ValueError:
+        return _err("INVALID_DATE", "sale_date must be YYYY-MM-DD", 400)
 
     try:
         is_new = sales_ctrl.record_pos_sale(reference, sale_date, operator, items)
         return jsonify({"ok": True, "reference": reference, "duplicate": not is_new}), 200
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e).lower():
+            logging.warning("POST /pos/sale DB locked [ref=%s req=%s]: %s",
+                            reference, getattr(g, 'request_id', '?'), e)
+            return _err("DB_LOCKED", "Database busy — retry shortly", 503)
+        logging.exception("POST /pos/sale DB error [ref=%s req=%s]",
+                          reference, getattr(g, 'request_id', '?'))
+        return _err("SALE_ERROR", "Sale could not be recorded", 500)
     except Exception:
         logging.exception("POST /pos/sale failed [ref=%s req=%s]",
                           reference, getattr(g, 'request_id', '?'))
-        return jsonify({"error": "Sale could not be recorded — try again"}), 500
+        return _err("SALE_ERROR", "Sale could not be recorded — try again", 500)
 
 
 @app.route("/api/v1/bundles")
@@ -416,15 +436,20 @@ def list_bundles():
 
 
 if __name__ == "__main__":
-    from waitress import serve
-
     parser = argparse.ArgumentParser(description="BackOfficePro API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default 0.0.0.0)")
     parser.add_argument("--port", type=int, default=5050, help="Port (default 5050)")
     parser.add_argument("--threads", type=int, default=4,
                         help="Waitress worker threads (default 4)")
+    parser.add_argument("--no-tls", action="store_true",
+                        help="Serve plain HTTP instead of HTTPS (not recommended)")
     args = parser.parse_args()
     _get_api_key()
-    print(f"BackOfficePro API → http://{args.host}:{args.port}")
-    print("API key loaded from keyring. Pass as header: X-API-Key: <key>")
-    serve(app, host=args.host, port=args.port, threads=args.threads)
+    if args.no_tls:
+        from waitress import serve as _waitress_serve
+        print(f"BackOfficePro API → http://{args.host}:{args.port}  (TLS disabled)")
+        print("API key loaded from keyring/DB. Pass as header: X-API-Key: <key>")
+        _waitress_serve(app, host=args.host, port=args.port, threads=args.threads)
+    else:
+        from utils.tls import serve_tls
+        serve_tls(app, host=args.host, port=args.port, threads=args.threads)

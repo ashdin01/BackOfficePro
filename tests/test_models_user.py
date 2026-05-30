@@ -160,3 +160,102 @@ class TestUpdate:
         updated = user_model.get_by_username("jdoe")
         assert updated["full_name"] == "Jane Doe"
         assert updated["role"] == "MANAGER"
+
+
+# ── PIN validation ────────────────────────────────────────────────────────────
+
+class TestPinValidation:
+    def test_create_rejects_short_pin(self, test_db):
+        with pytest.raises(ValueError, match="PIN"):
+            user_model.create("jdoe", "John Doe", "STAFF", "12")
+
+    def test_create_rejects_non_digit_pin(self, test_db):
+        with pytest.raises(ValueError, match="PIN"):
+            user_model.create("jdoe", "John Doe", "STAFF", "abcd")
+
+    def test_create_rejects_empty_pin(self, test_db):
+        with pytest.raises(ValueError, match="PIN"):
+            user_model.create("jdoe", "John Doe", "STAFF", "")
+
+    def test_create_rejects_too_long_pin(self, test_db):
+        with pytest.raises(ValueError, match="PIN"):
+            user_model.create("jdoe", "John Doe", "STAFF", "123456789")
+
+    def test_create_accepts_4_digit_pin(self, test_db):
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        assert user_model.get_by_username("jdoe") is not None
+
+    def test_create_accepts_8_digit_pin(self, test_db):
+        user_model.create("jdoe", "John Doe", "STAFF", "12345678")
+        assert user_model.get_by_username("jdoe") is not None
+
+    def test_set_pin_rejects_short_pin(self, test_db):
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        with pytest.raises(ValueError, match="PIN"):
+            user_model.set_pin("jdoe", "12")
+
+    def test_set_pin_by_id_rejects_non_digit(self, test_db):
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        with pytest.raises(ValueError, match="PIN"):
+            user_model.set_pin_by_id(user["id"], "abcd")
+
+
+# ── Audit log for user events ─────────────────────────────────────────────────
+
+class TestUserAuditLog:
+    def test_create_writes_audit_entry(self, test_db):
+        from models.audit_log import get_for_entity
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        entries = get_for_entity("user", "jdoe")
+        assert len(entries) > 0
+
+    def test_update_writes_audit_on_role_change(self, test_db):
+        from models.audit_log import get_for_entity
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        user_model.update(user["id"], "jdoe", "John Doe", "MANAGER")
+        entries = get_for_entity("user", "jdoe")
+        role_changes = [e for e in entries if e["field"] == "role"]
+        assert role_changes, "Expected a role change audit entry"
+        assert role_changes[0]["new_value"] == "MANAGER"
+        assert role_changes[0]["old_value"] == "STAFF"
+
+    def test_set_active_writes_audit_entry(self, test_db):
+        from models.audit_log import get_for_entity
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        user_model.set_active(user["id"], False)
+        entries = get_for_entity("user", "jdoe")
+        active_changes = [e for e in entries if e["field"] == "active"]
+        assert active_changes
+        assert active_changes[0]["new_value"] == "0"
+
+    def test_set_pin_writes_audit_entry(self, test_db):
+        from models.audit_log import get_for_entity
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user_model.set_pin("jdoe", "5678")
+        entries = get_for_entity("user", "jdoe")
+        pin_changes = [e for e in entries if e["field"] == "pin"]
+        assert pin_changes
+
+    def test_set_pin_audit_does_not_store_hash(self, test_db):
+        from models.audit_log import get_for_entity
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user_model.set_pin("jdoe", "5678")
+        entries = get_for_entity("user", "jdoe")
+        for e in entries:
+            assert "pbkdf2:" not in (e.get("old_value") or "")
+            assert "pbkdf2:" not in (e.get("new_value") or "")
+
+    def test_update_no_audit_when_nothing_changes(self, test_db):
+        from models.audit_log import get_for_entity
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        # Update with same values — no fields changed
+        user_model.update(user["id"], "jdoe", "John Doe", "STAFF")
+        entries = get_for_entity("user", "jdoe")
+        # Only the create entry should exist
+        non_create = [e for e in entries if e["field"] != "role" or e["old_value"] != ""]
+        role_changes = [e for e in entries if e["field"] == "role" and e["old_value"] == "STAFF"]
+        assert not role_changes, "No role-change entry expected when role did not change"

@@ -31,6 +31,29 @@ for old_log in glob.glob(os.path.join(LOG_DIR, "backoffice_*.log")):
     except Exception:
         pass
 
+# ── API subprocess entry-point (frozen builds) ────────────────────────
+# In a frozen (PyInstaller) build there is only one executable, so we
+# re-invoke it with --api-server-mode to get a separate process for
+# Waitress.  Must be checked before any Qt import.
+if '--api-server-mode' in sys.argv:
+    _api_log = os.path.join(LOG_DIR, f"backoffice_api_{datetime.now().strftime('%Y%m%d')}.log")
+    logging.basicConfig(
+        filename=_api_log, level=_log_level,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
+    )
+    logging.info("API server process starting (--api-server-mode)")
+    from api_server import app as _flask_app, _get_api_key as _init_key
+    _init_key()
+    if '--no-tls' in sys.argv:
+        from waitress import serve as _waitress_serve
+        _waitress_serve(_flask_app, host='0.0.0.0', port=5050, threads=4)
+    else:
+        from utils.tls import serve_tls as _serve_tls
+        _serve_tls(_flask_app, host='0.0.0.0', port=5050, threads=4)
+    sys.exit(0)
+
 # ── Global exception handler — catches ALL unhandled crashes ─────────
 def _handle_exception(exc_type, exc_value, exc_tb):
     if issubclass(exc_type, KeyboardInterrupt):
@@ -139,49 +162,77 @@ def _init_db_with_lock_recovery(app):
 
 
 def _start_api_server():
-    """Start the Flask REST API in a background daemon thread.
+    """Start the Flask REST API as a child process.
 
-    Restarts automatically on unexpected crashes (up to _MAX_RESTARTS times)
-    with exponential back-off.  Returns the thread so the UI can monitor its
-    liveness via thread.is_alive().
+    Running Waitress in a subprocess rather than a thread means a C-level
+    crash or segfault in Waitress cannot kill the Qt UI.  A supervisor
+    daemon-thread watches the child and restarts it (up to _MAX_RESTARTS
+    times) with exponential back-off.
+
+    Returns the supervisor thread; callers can check is_alive() to see
+    whether the API is still managed.  The thread also exposes proc_ref[0]
+    so the Qt aboutToQuit hook can send SIGTERM to the child on clean exit.
     """
+    import subprocess
     import threading
     import time
 
     _MAX_RESTARTS = 5
     _BACKOFF_BASE = 5   # seconds; doubles each attempt, capped at 60
 
-    def _run():
+    if getattr(sys, 'frozen', False):
+        # Single frozen executable — re-invoke with a mode flag
+        cmd = [sys.executable, '--api-server-mode']
+    else:
+        cmd = [sys.executable, os.path.join(BASE_DIR, 'api_server.py')]
+
+    _proc_ref = [None]   # mutable ref so the Qt cleanup hook can terminate the child
+
+    def _supervisor():
         failures = 0
         while True:
             try:
-                from api_server import app as flask_app
-                from waitress import serve
-                logging.info("API server starting on 0.0.0.0:5050")
-                serve(flask_app, host='0.0.0.0', port=5050, threads=4)
-                logging.warning("API server stopped normally — not restarting")
-                return
-            except OSError as e:
-                # Port conflict won't resolve on its own — don't retry
-                logging.error(f"API server could not bind (port in use?): {e}")
-                return
-            except Exception as e:
+                logging.info("API server subprocess starting: %s", cmd[0])
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                _proc_ref[0] = proc
+                _, stderr = proc.communicate()   # blocks until child exits
+                _proc_ref[0] = None
+                rc = proc.returncode
+
+                if rc == 0:
+                    logging.warning("API server exited normally — not restarting")
+                    return
+
                 failures += 1
-                delay = min(_BACKOFF_BASE * (2 ** (failures - 1)), 60)
+                if stderr:
+                    logging.error("API server stderr: %s", stderr[-2000:])
                 logging.error(
-                    f"API server crashed (attempt {failures}/{_MAX_RESTARTS}): {e}",
-                    exc_info=True,
+                    "API server crashed (rc=%d, attempt %d/%d)",
+                    rc, failures, _MAX_RESTARTS,
                 )
                 if failures >= _MAX_RESTARTS:
                     logging.critical(
-                        f"API server failed {_MAX_RESTARTS} consecutive times — giving up. "
-                        "POS and Android clients will not be able to connect."
+                        "API server failed %d consecutive times — giving up. "
+                        "POS and Android clients will not be able to connect.",
+                        _MAX_RESTARTS,
                     )
                     return
-                logging.info(f"API server restarting in {delay}s…")
+
+                delay = min(_BACKOFF_BASE * (2 ** (failures - 1)), 60)
+                logging.info("API server restarting in %ds…", delay)
                 time.sleep(delay)
 
-    t = threading.Thread(target=_run, daemon=True, name="api-server")
+            except Exception:
+                logging.error("API supervisor error", exc_info=True)
+                return
+
+    t = threading.Thread(target=_supervisor, daemon=True, name="api-supervisor")
+    t.proc_ref = _proc_ref
     t.start()
     return t
 
@@ -192,6 +243,19 @@ def main():
     app = QApplication(sys.argv)
     _init_db_with_lock_recovery(app)
     api_thread = _start_api_server()
+
+    def _stop_api():
+        import subprocess
+        proc = api_thread.proc_ref[0]
+        if proc and proc.poll() is None:
+            logging.info("Terminating API server subprocess (pid=%d)", proc.pid)
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    app.aboutToQuit.connect(_stop_api)
 
     import models.user as user_model
     from views.login_screen import LoginScreen, _SetupPinDialog

@@ -84,3 +84,76 @@ def test_no_raw_palette_hex_in_views():
         "Raw palette hex literals found in views — use styles.CLR_* instead:\n"
         + "\n".join(leaks)
     )
+
+
+# ── STYLE_* constant content ──────────────────────────────────────────────────
+
+STYLE_CONSTANTS = [n for n in REQUIRED_CONSTANTS if n.startswith("STYLE_")]
+
+
+def test_style_constants_are_strings():
+    """STYLE_* values must be non-empty strings (not colour codes)."""
+    for name in STYLE_CONSTANTS:
+        val = getattr(styles, name)
+        assert isinstance(val, str), f"styles.{name} is not a string"
+        assert val.strip(), f"styles.{name} is blank"
+
+
+def test_style_constants_contain_css_property():
+    """Every STYLE_* constant must contain at least one CSS property (a colon)."""
+    for name in STYLE_CONSTANTS:
+        val = getattr(styles, name)
+        assert ":" in val, (
+            f"styles.{name} = {val!r} contains no CSS property (expected a colon)"
+        )
+
+
+def test_no_raw_palette_hex_in_styles_module():
+    """styles.py itself must not contain raw hex literals for its own CLR_* values.
+
+    All CLR_* constants should be defined once; STYLE_* should reference CLR_* by
+    name via f-strings or string concatenation, not by re-inlining the hex code.
+    """
+    styles_file = Path(__file__).parent.parent / "config" / "styles.py"
+    src = styles_file.read_text()
+    lines = src.splitlines()
+
+    # Build a set of hex values from CLR_* definitions
+    # (the line that *defines* a CLR_* constant is allowed to contain that hex)
+    clr_definition_lines = set()
+    for i, line in enumerate(lines):
+        if re.match(r'\s*CLR_\w+\s*=', line):
+            clr_definition_lines.add(i)
+
+    leaks = []
+    for i, line in enumerate(lines):
+        if i in clr_definition_lines:
+            continue
+        for match in _HEX_RE.finditer(line):
+            found = match.group().lower()
+            if found in PALETTE_HEX:
+                leaks.append(f"styles.py:{i + 1}  {match.group()}")
+
+    assert not leaks, (
+        "Raw palette hex in styles.py outside CLR_* definitions — use CLR_* names:\n"
+        + "\n".join(leaks)
+    )
+
+
+def test_clr_constants_are_unique():
+    """No two CLR_* constants should share the same hex value (avoids palette confusion)."""
+    seen: dict[str, str] = {}
+    duplicates = []
+    for name in REQUIRED_CONSTANTS:
+        if not name.startswith("CLR_"):
+            continue
+        val = getattr(styles, name).lower()
+        if not val.startswith("#"):
+            continue
+        if val in seen:
+            duplicates.append(f"{name} == {seen[val]} ({val})")
+        else:
+            seen[val] = name
+    assert not duplicates, (
+        "Duplicate CLR_* hex values found:\n" + "\n".join(duplicates)
+    )

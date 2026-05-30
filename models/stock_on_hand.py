@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime
 
 from database.connection import get_connection
 
@@ -100,7 +101,14 @@ def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items:
 
     Returns True if the sale was newly recorded, False if this reference was
     already processed (idempotent — caller should respond 200, not 4xx/5xx).
+
+    Raises ValueError if sale_date is not a valid YYYY-MM-DD date.
     """
+    try:
+        datetime.strptime(sale_date, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        raise ValueError(f"sale_date must be YYYY-MM-DD, got: {sale_date!r}")
+
     from database.audit_context import get_source
     src = get_source()
     conn = get_connection()

@@ -50,6 +50,22 @@ def gross_profit_pct(sell_price: float, cost_price: float, tax_rate: float) -> f
     return None
 
 
+def amount_inc_from_ex(amount_ex: float, tax_rate: float) -> float:
+    """Return the inclusive amount given an ex-GST amount and tax rate percentage."""
+    return amount_ex * (1 + tax_rate / 100.0)
+
+
+def gst_from_inclusive(amount_inc: float, tax_rate: float) -> float:
+    """Extract the GST component from an amount that already includes GST.
+
+    Used when a supplier charges an inclusive amount (e.g. freight) and we need
+    to split out the GST. Complements gst_on_ex() which works from an ex amount.
+    """
+    if tax_rate == 0.0:
+        return 0.0
+    return amount_inc - (amount_inc / (1 + tax_rate / 100.0))
+
+
 def po_order_totals(lines: list) -> dict:
     """
     Calculate PO subtotal (ex GST), GST, and order total (inc GST).

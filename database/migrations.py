@@ -53,6 +53,28 @@ def _ensure_migration_log(conn):
     conn.commit()
 
 
+def _ensure_db_meta(conn):
+    """Create db_meta and seed it from settings.schema_version if needed.
+
+    db_meta is the canonical version store from v54 onwards.  On the first
+    run after upgrading an existing database, the table is created and seeded
+    from the old settings row so that apply_migrations() picks up the correct
+    starting version without re-running anything.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS db_meta (
+            version INTEGER NOT NULL DEFAULT 1
+        )
+    """)
+    if conn.execute("SELECT COUNT(*) FROM db_meta").fetchone()[0] == 0:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='schema_version'"
+        ).fetchone()
+        seed = int(row['value']) if row else 1
+        conn.execute("INSERT INTO db_meta (version) VALUES (?)", (seed,))
+    conn.commit()
+
+
 def _log_migration(conn, version: int, description: str, fn):
     """Record a freshly-applied migration in migration_log."""
     conn.execute("""
@@ -75,12 +97,10 @@ def _check_integrity(conn):
       edited after it was applied — schema and code may diverge.
       Raises RuntimeError to block startup if any drift is detected.
     """
-    version_row = conn.execute(
-        "SELECT value FROM settings WHERE key='schema_version'"
-    ).fetchone()
+    version_row = conn.execute("SELECT version FROM db_meta").fetchone()
     if not version_row:
         return
-    current = int(version_row['value'])
+    current = int(version_row['version'])
 
     logged = {
         r['version']: r['checksum']
@@ -133,18 +153,20 @@ def apply_migrations():
     conn = get_connection()
     try:
         _ensure_migration_log(conn)
+        _ensure_db_meta(conn)
 
-        version_row = conn.execute(
-            "SELECT value FROM settings WHERE key='schema_version'"
-        ).fetchone()
-        current = int(version_row['value']) if version_row else 1
+        version_row = conn.execute("SELECT version FROM db_meta").fetchone()
+        current = int(version_row['version']) if version_row else 1
         logging.info(f"Current schema version: {current}")
 
         for v in sorted(_MIGRATIONS):
             fn, description = _MIGRATIONS[v]
             if current < v:
-                fn(conn)
-                _log_migration(conn, v, description, fn)
+                fn(conn)   # commits internally; may also update settings.schema_version
+                # Update db_meta atomically with the migration_log entry so the
+                # canonical version and the audit record are never out of step.
+                conn.execute("UPDATE db_meta SET version=?", (v,))
+                _log_migration(conn, v, description, fn)   # commits
                 logging.info(f"Migration v{v} applied: {description}")
 
         # Backfill log entries for migrations applied before logging was introduced.
@@ -1230,9 +1252,14 @@ def migrate_v40(conn):
       po_charges    — tax_rate [0,100], amount_inc_tax >= 0
       departments, suppliers, customers, product_groups, bundles,
       product_selling_units — active IN (0,1)
+
+    PRAGMA legacy_alter_table = ON is required so that renaming a parent table
+    (suppliers, departments, etc.) does not cause SQLite 3.26+ to auto-rewrite
+    the FK clauses in child tables to point at the *_old intermediates.
     """
     conn.executescript("""
         PRAGMA foreign_keys = OFF;
+        PRAGMA legacy_alter_table = ON;
         BEGIN TRANSACTION;
 
         -- ── products ──────────────────────────────────────────────────────────
@@ -1314,7 +1341,7 @@ def migrate_v40(conn):
             FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
         );
         INSERT INTO po_charges
-            SELECT id, po_id, description, tax_rate, amount_inc_tax
+            SELECT id, po_id, description, tax_rate, MAX(amount_inc_tax, 0)
             FROM po_charges_old;
         DROP TABLE po_charges_old;
 
@@ -1462,6 +1489,7 @@ def migrate_v40(conn):
         CREATE INDEX IF NOT EXISTS idx_selling_units_barcode ON product_selling_units(barcode);
 
         COMMIT;
+        PRAGMA legacy_alter_table = OFF;
         PRAGMA foreign_keys = ON;
     """)
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '40')")
@@ -1487,19 +1515,22 @@ def migrate_v41(conn):
 
 
 def migrate_v42(conn):
-    """Fix FK references broken by migrate_v40's rename-order bug.
+    """No-op — the FK-cascade bug this migration originally fixed is now prevented
+    by migrate_v40 itself (via PRAGMA legacy_alter_table = ON).
 
-    SQLite 3.26+ auto-rewrites FK clauses in sibling tables when a table is
-    renamed.  migrate_v40 renamed parent tables (suppliers, departments,
-    product_groups, customers, bundles) AFTER it had already recreated child
-    tables that reference them (products, purchase_orders, …).  Each parent
-    rename caused SQLite to rewrite those children's FK clauses to point at the
-    now-dropped *_old intermediates.
-
-    Fix: recreate every affected table with correct FK targets.
-    PRAGMA legacy_alter_table = ON is set for the duration so our own renames
-    here do not trigger the same cascade.
+    Existing databases that ran the original v42 are already correct.
+    Fresh installs running the corrected v40 never need this migration.
+    migrate_v53 updates the stored checksum in migration_log to reflect
+    these corrected function bodies.
     """
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '42')")
+    conn.commit()
+
+
+def _migrate_v42_original(conn):  # pragma: no cover — never called, historical reference
+    """Original v42 body that rebuilt all FK-affected tables. Now superseded by the
+    PRAGMA legacy_alter_table = ON fix in migrate_v40. Kept so git history is not
+    the only place to find this SQL."""
     conn.executescript("""
         PRAGMA foreign_keys       = OFF;
         PRAGMA legacy_alter_table = ON;
@@ -1821,8 +1852,6 @@ def migrate_v42(conn):
         PRAGMA legacy_alter_table = OFF;
         PRAGMA foreign_keys      = ON;
     """)
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '42')")
-    conn.commit()
 
 
 def migrate_v43(conn):
@@ -2378,6 +2407,45 @@ def migrate_v46(conn):
     conn.commit()
 
 
+def migrate_v53(conn):
+    """Backfill corrected checksums for migrate_v40 and migrate_v42.
+
+    migrate_v40 was fixed to include PRAGMA legacy_alter_table = ON so SQLite
+    does not auto-rewrite FK clauses in child tables when a parent table is
+    renamed.  migrate_v42, which existed solely to undo that damage, is now a
+    no-op.  Both functions have different source than what was originally stored
+    in migration_log, so this migration updates those checksums to match —
+    preventing drift detection from blocking startup on existing installs.
+    """
+    conn.execute(
+        "UPDATE migration_log SET checksum=? WHERE version=40",
+        (_fn_checksum(migrate_v40),)
+    )
+    conn.execute(
+        "UPDATE migration_log SET checksum=? WHERE version=42",
+        (_fn_checksum(migrate_v42),)
+    )
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '53')")
+    conn.commit()
+
+
+def migrate_v54(conn):
+    """Move schema_version out of the shared settings table into db_meta.
+
+    settings is general app config — a bulk DELETE FROM settings would
+    destroy the version marker and replay every migration on next start.
+    db_meta is owned exclusively by the migration system and is never
+    cleared by application code.
+
+    _ensure_db_meta() has already created db_meta and seeded it from
+    settings before the migration loop runs, so this function only needs
+    to remove the now-redundant settings row.
+    apply_migrations() updates db_meta.version to 54 after this returns.
+    """
+    conn.execute("DELETE FROM settings WHERE key='schema_version'")
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
@@ -2424,7 +2492,7 @@ _MIGRATIONS: dict[int, tuple] = {
     39: (migrate_v39, "remaining ON DELETE RESTRICT/SET NULL on FK constraints"),
     40: (migrate_v40, "CHECK constraints on bounded numeric and boolean columns"),
     41: (migrate_v41, "indexes on ar_payments(customer_id), ar_credit_notes(invoice_id), bank_transactions(profile_id)"),
-    42: (migrate_v42, "fix FK references broken by v40 rename-order bug (suppliers_old, products_old, etc.)"),
+    42: (migrate_v42, "no-op — v40 now uses legacy_alter_table=ON, so no FK repair needed"),
     43: (migrate_v43, "ON DELETE RESTRICT on stock_movements.barcode FK"),
     44: (migrate_v44, "ar_invoice_lines.barcode NULL + ON DELETE RESTRICT FK to products"),
     45: (migrate_v45, "ON DELETE CASCADE on stocktake_counts.barcode FK"),
@@ -2435,4 +2503,6 @@ _MIGRATIONS: dict[int, tuple] = {
     50: (migrate_v50, "CHECK (barcode IS NULL OR barcode != '') on ar_invoice_lines"),
     51: (migrate_v51, "po_lines.barcode nullable + CHECK, removes PRAGMA FK workaround in add_note()"),
     52: (migrate_v52, "drop unused password_hash column from users"),
+    53: (migrate_v53, "backfill corrected checksums for migrate_v40 and migrate_v42"),
+    54: (migrate_v54, "move schema_version from settings to dedicated db_meta table"),
 }

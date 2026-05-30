@@ -20,9 +20,13 @@ class POList(BaseView):
 
     def _startup_cleanup(self):
         """Delete old cancelled POs silently on startup."""
-        deleted = po_ctrl.cleanup_old_pos()
-        if deleted:
-            print(f"[PO Cleanup] Removed {deleted} old cancelled PO(s)")
+        try:
+            deleted = po_ctrl.cleanup_old_pos()
+            if deleted:
+                print(f"[PO Cleanup] Removed {deleted} old cancelled PO(s)")
+        except Exception:
+            import logging
+            logging.warning("PO startup cleanup failed — continuing", exc_info=True)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)

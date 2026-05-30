@@ -24,9 +24,10 @@ class TestGetAllSettings:
         result = settings_ctrl.get_all_settings()
         assert isinstance(result, dict)
 
-    def test_contains_schema_version(self, test_db):
+    def test_schema_version_not_in_settings(self, test_db):
+        # schema_version was moved to db_meta (v54); it must not appear in settings
         result = settings_ctrl.get_all_settings()
-        assert 'schema_version' in result
+        assert 'schema_version' not in result
 
 
 class TestGetStoreSettings:

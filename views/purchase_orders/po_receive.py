@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QObject, QEvent
 from PyQt6.QtGui import QColor
 import math
-from utils.calculations import round_half_up
+from utils.calculations import round_half_up, amount_inc_from_ex, gst_from_inclusive
 import controllers.product_controller as product_ctrl
 import controllers.purchase_order_controller as po_ctrl
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
@@ -629,11 +629,11 @@ class POReceive(BaseView):
             line_total = qty * cost
 
         lt_item.setText(f"${round_half_up(line_total):.2f}")
-        line_total_inc = line_total * (1 + tax_rate / 100)
+        line_total_inc = amount_inc_from_ex(line_total, tax_rate)
         lt_inc_item.setText(f"${round_half_up(line_total_inc):.2f}")
         from PyQt6.QtGui import QColor
         lt_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
-        cost_inc = cost * (1 + tax_rate / 100)
+        cost_inc = amount_inc_from_ex(cost, tax_rate)
         cost_inc_item = self.table.item(row, 8)
         if cost_inc_item:
             cost_inc_item.setText(f"${cost_inc:.4f}")
@@ -670,7 +670,7 @@ class POReceive(BaseView):
                     charge_tax = tax_combo.currentData() if tax_combo else 0.0
                     total_inc += amt
                     if charge_tax > 0:
-                        gst_total += amt - (amt / (1 + charge_tax / 100))
+                        gst_total += gst_from_inclusive(amt, charge_tax)
                 except (ValueError, AttributeError):
                     pass
         subtotal = round_half_up(total_inc - gst_total)

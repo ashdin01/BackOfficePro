@@ -151,6 +151,92 @@ class TestReceiveAtomic:
         assert rows == []
 
 
+# ── TestValidateCharges ───────────────────────────────────────────────────────
+
+class TestValidateCharges:
+    """_validate_charges must reject malformed dicts before any DB write."""
+
+    def _good(self):
+        return {"description": "Freight", "tax_rate": 10.0, "amount_inc_tax": 11.00}
+
+    @pytest.mark.parametrize("bad_desc", ["", "   ", None])
+    def test_rejects_bad_description(self, bad_desc):
+        c = self._good()
+        c['description'] = bad_desc
+        with pytest.raises(ValueError, match="description"):
+            po_model._validate_charges([c])
+
+    @pytest.mark.parametrize("bad_rate", [-0.01, 100.01, "ten", None])
+    def test_rejects_bad_tax_rate(self, bad_rate):
+        c = self._good()
+        c['tax_rate'] = bad_rate
+        with pytest.raises(ValueError, match="tax_rate"):
+            po_model._validate_charges([c])
+
+    @pytest.mark.parametrize("bad_amt", [-0.01, -100.0, "abc", None])
+    def test_rejects_bad_amount(self, bad_amt):
+        c = self._good()
+        c['amount_inc_tax'] = bad_amt
+        with pytest.raises(ValueError, match="amount_inc_tax"):
+            po_model._validate_charges([c])
+
+    def test_rejects_missing_keys(self):
+        with pytest.raises((ValueError, KeyError)):
+            po_model._validate_charges([{"description": "Freight"}])
+
+    def test_accepts_zero_amounts(self):
+        po_model._validate_charges([
+            {"description": "Freight", "tax_rate": 0.0, "amount_inc_tax": 0.0}
+        ])
+
+    def test_accepts_boundary_tax_rate(self):
+        po_model._validate_charges([
+            {"description": "Freight", "tax_rate": 100.0, "amount_inc_tax": 5.0}
+        ])
+
+    def test_receive_atomic_raises_before_db_write(
+        self, test_db, po_id, product_barcode
+    ):
+        """Invalid charge must raise ValueError with no SOH change."""
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        receipt = self._make_receipt(line["id"], product_barcode, qty_units=6)
+        bad_charges = [{"description": "Freight", "tax_rate": 10.0, "amount_inc_tax": -5.0}]
+
+        import models.stock_on_hand as soh_model
+        soh_before = soh_model.get_by_barcode(product_barcode)
+
+        with pytest.raises(ValueError, match="amount_inc_tax"):
+            po_model.receive_atomic(
+                po_id, po["po_number"], [receipt], "RECEIVED", charges=bad_charges
+            )
+
+        # SOH must be unchanged — validation raised before any DB write
+        soh_after = soh_model.get_by_barcode(product_barcode)
+        qty_before = soh_before["quantity"] if soh_before else 0
+        qty_after  = soh_after["quantity"]  if soh_after  else 0
+        assert qty_before == qty_after
+
+    # reuse helpers from TestReceiveAtomic
+    def _setup_line(self, po_id, product_barcode, ordered_qty=10, pack_qty=6):
+        lines_model.add(po_id, product_barcode, "Test Product",
+                        ordered_qty, 2.00, "", pack_qty)
+        return lines_model.get_by_po(po_id)[0]
+
+    def _make_receipt(self, line_id, barcode, new_received_qty=10,
+                      actual_cost=20.00, unit_cost=2.00,
+                      is_promo=False, qty_units=60):
+        return {
+            "line_id":          line_id,
+            "barcode":          barcode,
+            "new_received_qty": new_received_qty,
+            "actual_cost":      actual_cost,
+            "unit_cost":        unit_cost,
+            "is_promo":         is_promo,
+            "qty_units":        qty_units,
+        }
+
+
 # ── TestCloseForce ────────────────────────────────────────────────────────────
 
 class TestCloseForce:
@@ -400,3 +486,38 @@ class TestGetOnOrderTotal:
         po_model.update_status(po_id, "RECEIVED")
         total = lines_model.get_on_order_total(product_barcode)
         assert total == 0
+
+
+# ── TestCleanupOldPos ─────────────────────────────────────────────────────────
+
+class TestCleanupOldPos:
+    def test_returns_count_of_deleted_pos(self, test_db, supplier_id):
+        from datetime import datetime, timedelta
+        old_ts = (datetime.now() - timedelta(hours=25)).strftime("%Y-%m-%d %H:%M:%S")
+        conn = get_connection()
+        po_id = po_model.create(supplier_id, None, "", "admin")
+        conn.execute(
+            "UPDATE purchase_orders SET status='CANCELLED', updated_at=? WHERE id=?",
+            (old_ts, po_id)
+        )
+        conn.commit()
+        assert po_model.cleanup_old_pos() == 1
+
+    def test_recent_cancelled_po_is_not_deleted(self, test_db, supplier_id):
+        po_id = po_model.create(supplier_id, None, "", "admin")
+        po_model.cancel(po_id)
+        assert po_model.cleanup_old_pos() == 0
+        assert po_model.get_by_id(po_id) is not None
+
+    def test_raises_on_db_error(self, test_db, monkeypatch):
+        """cleanup_old_pos must re-raise so callers can detect failure."""
+        import sqlite3
+        from unittest.mock import MagicMock
+
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = sqlite3.OperationalError("simulated error")
+        # Patch at the import site inside purchase_order, not in database.connection
+        monkeypatch.setattr(po_model, "get_connection", lambda: mock_conn)
+
+        with pytest.raises(sqlite3.OperationalError):
+            po_model.cleanup_old_pos()

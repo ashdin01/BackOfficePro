@@ -4,6 +4,33 @@ from database.connection import get_connection
 import models.stock_on_hand as soh_model
 
 
+class TestRecordPosSaleAtomicDateValidation:
+    """record_pos_sale_atomic must reject non-YYYY-MM-DD dates before any DB write."""
+
+    @pytest.mark.parametrize("bad_date", [
+        "not-a-date",
+        "29-01-2026",
+        "2026/01/01",
+        "2026-13-01",   # month 13
+        "2026-01-32",   # day 32
+        "",
+        None,
+    ])
+    def test_rejects_invalid_date(self, test_db, product_barcode, bad_date):
+        with pytest.raises(ValueError, match="sale_date"):
+            soh_model.record_pos_sale_atomic(
+                "BAD-DATE-REF", bad_date, "test",
+                [{"barcode": product_barcode, "qty": 1, "line_total": 1.0, "description": ""}],
+            )
+
+    def test_accepts_valid_date(self, test_db, product_barcode):
+        result = soh_model.record_pos_sale_atomic(
+            "VALID-DATE-REF", "2026-01-15", "test",
+            [{"barcode": product_barcode, "qty": 1, "line_total": 1.0, "description": ""}],
+        )
+        assert result is True
+
+
 class TestGetByBarcode:
     def test_returns_none_for_unknown_barcode(self, test_db):
         assert soh_model.get_by_barcode("0000000000000") is None

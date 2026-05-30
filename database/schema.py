@@ -411,8 +411,15 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('po_pdf_path',         '',               'Folder path for exported PO PDFs'),
     ('ar_next_invoice_number', '1',           'Next AR invoice sequence number'),
     ('ar_next_credit_number',  '1',           'Next AR credit note sequence number'),
-    ('ar_invoice_pdf_path', '',               'Folder path for exported invoice PDFs'),
-    ('schema_version',      '52',             'Database schema version');
+    ('ar_invoice_pdf_path', '',               'Folder path for exported invoice PDFs')
+ON CONFLICT(key) DO NOTHING;
+
+-- Owned exclusively by the migration system.  Not in settings so that a bulk
+-- DELETE FROM settings cannot destroy the version marker.
+CREATE TABLE IF NOT EXISTS db_meta (
+    version INTEGER NOT NULL DEFAULT 1
+);
+INSERT OR IGNORE INTO db_meta (version) VALUES (54);
 
 CREATE TABLE IF NOT EXISTS bank_csv_profiles (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

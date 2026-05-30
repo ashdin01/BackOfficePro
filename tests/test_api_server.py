@@ -14,8 +14,8 @@ import pytest
 def api_client(test_db):
     """Flask test client with test DB wired and the server's generated API key."""
     import api_server
-    api_server._sale_times.clear()   # isolate rate-limiter state between tests
-    api_server._read_times.clear()
+    api_server._sale_clients.clear()   # isolate rate-limiter state between tests
+    api_server._read_clients.clear()
     api_server._api_key_cache = ""   # force key re-derivation from the fresh test DB
     app = api_server.app
     app.config["TESTING"] = True
@@ -70,10 +70,11 @@ def test_wrong_key_returns_401(api_client):
     assert r.status_code == 401
 
 
-def test_key_via_query_param_accepted(api_client):
+def test_key_via_query_param_rejected(api_client):
+    """API key in query string is no longer accepted — header only."""
     client, key = api_client
     r = client.get(f"/api/v1/store?api_key={key}")
-    assert r.status_code == 200
+    assert r.status_code == 401
 
 
 def test_key_via_header_accepted(api_client):
@@ -314,6 +315,25 @@ def test_pos_sale_missing_required_fields_is_400(api_client):
     assert r.status_code == 400
 
 
+@pytest.mark.parametrize("bad_date", [
+    "not-a-date",
+    "29-01-2026",     # DD-MM-YYYY
+    "2026/01/01",     # slashes
+    "2026-13-01",     # month 13
+    "2026-01-32",     # day 32
+])
+def test_pos_sale_invalid_date_is_400(api_client, bad_date):
+    client, key = api_client
+    r = client.post(
+        "/api/v1/pos/sale",
+        json={"reference": f"BAD-DATE-{bad_date}", "sale_date": bad_date,
+              "items": [{"barcode": "x", "qty": 1, "line_total": 1.0}]},
+        headers=_h(key),
+    )
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "INVALID_DATE"
+
+
 def test_pos_sale_no_items_is_400(api_client):
     client, key = api_client
     r = client.post(
@@ -429,11 +449,11 @@ def test_pos_sale_different_references_both_recorded(api_client, product_barcode
 
 
 def test_pos_sale_rate_limit(api_client):
-    from api_server import _sale_times, _SALE_MAX
-    # Pre-fill the sliding window to the limit so the very next request is rejected
+    from collections import deque
+    from api_server import _sale_clients, _SALE_MAX
+    # Pre-fill the sliding window for 127.0.0.1 (Flask test-client IP)
     now = time.monotonic()
-    for _ in range(_SALE_MAX):
-        _sale_times.append(now)
+    _sale_clients["127.0.0.1"] = deque([now] * _SALE_MAX)
 
     client, key = api_client
     payload = {
@@ -447,10 +467,10 @@ def test_pos_sale_rate_limit(api_client):
 
 
 def test_read_rate_limit(api_client):
-    from api_server import _read_times, _READ_MAX
+    from collections import deque
+    from api_server import _read_clients, _READ_MAX
     now = time.monotonic()
-    for _ in range(_READ_MAX):
-        _read_times.append(now)
+    _read_clients["127.0.0.1"] = deque([now] * _READ_MAX)
 
     client, key = api_client
     r = client.get("/api/v1/store", headers=_h(key))
@@ -459,10 +479,10 @@ def test_read_rate_limit(api_client):
 
 def test_read_rate_limit_does_not_affect_pos_sale(api_client, product_barcode):
     """Filling the read window must not block /pos/sale, which has its own limiter."""
-    from api_server import _read_times, _READ_MAX
+    from collections import deque
+    from api_server import _read_clients, _READ_MAX
     now = time.monotonic()
-    for _ in range(_READ_MAX):
-        _read_times.append(now)
+    _read_clients["127.0.0.1"] = deque([now] * _READ_MAX)
 
     client, key = api_client
     payload = {

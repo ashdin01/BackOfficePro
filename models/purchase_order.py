@@ -4,6 +4,31 @@ from config.constants import PO_STATUS_CANCELLED
 from datetime import datetime, timedelta
 
 
+def _validate_charges(charges: list) -> None:
+    """Raise ValueError if any charge dict is malformed.
+
+    Checked before opening a DB connection so callers get a clear error
+    rather than a mid-transaction rollback.
+    """
+    for i, c in enumerate(charges):
+        tag = f"charge[{i}]"
+        desc = c.get('description', '')
+        if not isinstance(desc, str) or not desc.strip():
+            raise ValueError(f"{tag}: description must be a non-empty string")
+        try:
+            tax_rate = float(c['tax_rate'])
+        except (TypeError, ValueError, KeyError):
+            raise ValueError(f"{tag}: tax_rate must be a number, got {c.get('tax_rate')!r}")
+        if not (0.0 <= tax_rate <= 100.0):
+            raise ValueError(f"{tag}: tax_rate {tax_rate} is outside 0–100")
+        try:
+            amount = float(c['amount_inc_tax'])
+        except (TypeError, ValueError, KeyError):
+            raise ValueError(f"{tag}: amount_inc_tax must be a number, got {c.get('amount_inc_tax')!r}")
+        if amount < 0.0:
+            raise ValueError(f"{tag}: amount_inc_tax {amount} must be >= 0")
+
+
 def _next_po_number(conn):
     # Atomic UPDATE+RETURNING increments the counter and returns the old value
     # in one statement — safe when the GUI and Flask API processes run concurrently.
@@ -271,8 +296,15 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
         actual_cost, unit_cost, is_promo,
         qty_units   (number of individual units being received, for SOH)
 
-    Raises on any error; the caller must not catch silently.
+    charges is an optional list of dicts:
+        description (non-empty str), tax_rate (0–100), amount_inc_tax (>= 0)
+
+    Raises ValueError for invalid charge data before any DB writes.
+    Raises on any other error; the caller must not catch silently.
     """
+    if charges:
+        _validate_charges(charges)
+
     from config.constants import MOVE_RECEIPT
     from database.audit_context import get_user, get_source
     who = get_user()
@@ -326,7 +358,9 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
                 conn.execute(
                     "INSERT INTO po_charges (po_id, description, tax_rate, amount_inc_tax)"
                     " VALUES (?,?,?,?)",
-                    (po_id, c['description'], c['tax_rate'], c['amount_inc_tax'])
+                    (po_id, c['description'].strip(),
+                     float(c['tax_rate']),
+                     float(c['amount_inc_tax']))
                 )
         conn.commit()
     except Exception:
@@ -360,9 +394,9 @@ def cleanup_old_pos():
         count = cursor.rowcount
         conn.commit()
         return count
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        logging.error(f"PO cleanup error: {e}", exc_info=True)
-        return 0
+        logging.error("PO cleanup failed", exc_info=True)
+        raise
     finally:
         conn.release()

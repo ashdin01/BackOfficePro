@@ -71,6 +71,8 @@ class TestValidateBackupFile:
         conn = sqlite3.connect(path)
         for tbl in backup_ctrl._REQUIRED_TABLES:
             conn.execute(f"CREATE TABLE {tbl} (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE db_meta (version INTEGER NOT NULL DEFAULT 1)")
+        conn.execute("INSERT INTO db_meta (version) VALUES (54)")
         conn.commit()
         conn.close()
 
@@ -121,6 +123,19 @@ class TestGetLastBackupTime:
         (tmp_path / "supermarket_20260102_093000.db").write_text("")
         result = backup_ctrl.get_last_backup_time()
         assert result == datetime(2026, 1, 2, 9, 30, 0)
+
+    def test_ignores_pre_restore_filenames(self, tmp_path, monkeypatch):
+        from datetime import datetime
+        monkeypatch.setattr(backup_ctrl, "_BACKUP_DIR", str(tmp_path))
+        (tmp_path / "supermarket_PRE_RESTORE_20260519_200355.db").write_text("")
+        (tmp_path / "supermarket_20260101_080000.db").write_text("")
+        result = backup_ctrl.get_last_backup_time()
+        assert result == datetime(2026, 1, 1, 8, 0, 0)
+
+    def test_returns_none_when_only_pre_restore_files(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(backup_ctrl, "_BACKUP_DIR", str(tmp_path))
+        (tmp_path / "supermarket_PRE_RESTORE_20260519_200355.db").write_text("")
+        assert backup_ctrl.get_last_backup_time() is None
 
 
 # ── get_backup_email ──────────────────────────────────────────────────────────

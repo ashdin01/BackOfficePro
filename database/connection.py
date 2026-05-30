@@ -63,7 +63,7 @@ class _Connection:
         try:
             object.__getattribute__(self, '_raw').rollback()
         except Exception:
-            pass
+            logging.warning("Connection rollback failed", exc_info=True)
 
     def close(self):
         """Alias for release() — kept for backward compatibility."""
@@ -104,7 +104,7 @@ def get_connection() -> _Connection:
             try:
                 object.__getattribute__(cached, '_raw').close()
             except Exception:
-                pass
+                logging.warning("Error closing stale connection", exc_info=True)
 
         raw = sqlite3.connect(current_path, timeout=10)
         raw.row_factory = sqlite3.Row
@@ -130,7 +130,7 @@ def close_thread_connection():
         try:
             object.__getattribute__(cached, '_raw').close()
         except Exception:
-            pass
+            logging.warning("Error closing thread connection", exc_info=True)
         _local.conn = None
         _local.path = None
 
