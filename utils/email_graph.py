@@ -24,11 +24,13 @@ def _load_graph_settings() -> dict:
     conn = get_connection()
     rows = conn.execute(
         "SELECT key, value FROM settings WHERE key IN "
-        "('graph_client_id','graph_tenant_id','graph_from_address')"
+        "('graph_client_id','graph_tenant_id','graph_from_address','graph_client_secret')"
     ).fetchall()
     conn.release()
     settings = {r[0]: (r[1] or "").strip() for r in rows}
-    settings["graph_client_secret"] = get_secret("graph_client_secret")
+    # Prefer keyring; fall back to DB value if keyring is unavailable or empty.
+    keyring_secret = get_secret("graph_client_secret")
+    settings["graph_client_secret"] = keyring_secret or settings.get("graph_client_secret", "")
     return settings
 
 

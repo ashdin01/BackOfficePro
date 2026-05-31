@@ -19,8 +19,8 @@ def get_secret(key: str) -> str:
         return ""
 
 
-def set_secret(key: str, value: str) -> None:
-    """Store value in the OS keystore under key."""
+def set_secret(key: str, value: str) -> bool:
+    """Store value in the OS keystore under key. Returns True on success."""
     try:
         import keyring
         if value:
@@ -30,5 +30,7 @@ def set_secret(key: str, value: str) -> None:
                 keyring.delete_password(_SERVICE, key)
             except Exception:
                 pass
+        return True
     except Exception as e:
         logging.warning("secret_store.set_secret(%r) failed: %s", key, e)
+        return False

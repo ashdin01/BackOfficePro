@@ -367,19 +367,28 @@ class MainWindow(QMainWindow):
             logging.warning("Backup email: backup_email setting is empty — skipping.")
             return None
 
-        from utils.email_graph import send_backup
-
         def _send():
             logging.info(f"Backup email thread: starting send to {to_address}")
             try:
+                from utils.email_graph import send_backup
                 send_backup(backup_path, to_address)
                 logging.info(f"Backup email thread: sent successfully to {to_address}")
+            except ImportError as e:
+                logging.error(
+                    f"Backup email thread: email library unavailable ({e}). "
+                    "Ensure 'msal' is installed: pip install msal"
+                )
+            except RuntimeError as e:
+                logging.error(
+                    f"Backup email thread: configuration error — {e}. "
+                    "Check Email Configuration in Settings."
+                )
             except Exception as e:
                 logging.error(f"Backup email thread: send failed: {e}", exc_info=True)
 
         t = threading.Thread(target=_send, daemon=True)
         t.start()
-        logging.info(f"Backup email thread: started")
+        logging.info("Backup email thread: started")
         return t
 
     def _manual_backup(self):

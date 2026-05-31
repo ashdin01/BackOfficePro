@@ -3,6 +3,7 @@ Settings screen for BackOfficePro.
 Allows editing of store details, email addresses, Microsoft Graph API configuration,
 and user management (add / edit / reset PIN / deactivate).
 """
+import logging
 import secrets as _secrets
 
 from PyQt6.QtWidgets import (
@@ -288,6 +289,15 @@ class SettingsScreen(QWidget):
         backup_note.setStyleSheet("color: grey; font-size: 8pt;")
         backup_note.setWordWrap(True)
         backup_form.addRow("", backup_note)
+
+        btn_test_backup = QPushButton("Send Test Backup Email")
+        btn_test_backup.setFixedHeight(30)
+        btn_test_backup.setStyleSheet(
+            f"QPushButton {{ background: {styles.CLR_ACCENT_HOVER}; color: white; border-radius: 4px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT}; }}"
+        )
+        btn_test_backup.clicked.connect(self._test_backup_email)
+        backup_form.addRow("", btn_test_backup)
         scroll_layout.addWidget(backup_group)
 
         # ── API Access ────────────────────────────────────────────────
@@ -437,13 +447,21 @@ class SettingsScreen(QWidget):
         for key, edit in self._fields.items():
             edit.setText(settings.get(key, ""))
 
-        # Migrate legacy plaintext secret from DB into keystore, then clear DB entry
+        # Migrate legacy plaintext secret from DB into keystore, then clear DB entry.
+        # Only clear the DB copy if keyring storage confirmed success.
         db_secret = settings.get("graph_client_secret", "")
         keyring_secret = get_secret("graph_client_secret")
         if db_secret and not keyring_secret:
-            set_secret("graph_client_secret", db_secret)
+            if set_secret("graph_client_secret", db_secret):
+                keyring_secret = db_secret
+                _save_setting("graph_client_secret", "")
+            else:
+                # Keyring unavailable — keep the DB copy and use it directly.
+                keyring_secret = db_secret
+
+        # If keyring returned nothing but the DB still has a value, use that.
+        if not keyring_secret and db_secret:
             keyring_secret = db_secret
-            _save_setting("graph_client_secret", "")
 
         self._fields["graph_client_secret"].setText(keyring_secret)
         self._load_api_key()
@@ -521,7 +539,13 @@ class SettingsScreen(QWidget):
 
         for key, edit in self._fields.items():
             if key == "graph_client_secret":
-                set_secret("graph_client_secret", edit.text().strip())
+                secret_val = edit.text().strip()
+                if not set_secret("graph_client_secret", secret_val):
+                    # Keyring unavailable — store in DB as fallback (plaintext).
+                    logging.warning("Keyring unavailable; storing graph_client_secret in DB.")
+                    _save_setting("graph_client_secret", secret_val)
+                else:
+                    _save_setting("graph_client_secret", "")  # clear any DB copy
             elif key == "store_abn" and abn_val:
                 _save_setting(key, abn_val)
             elif key == "store_phone" and phone_val:
@@ -540,7 +564,12 @@ class SettingsScreen(QWidget):
             if key not in graph_keys:
                 continue
             if key == "graph_client_secret":
-                set_secret("graph_client_secret", edit.text().strip())
+                secret_val = edit.text().strip()
+                if not set_secret("graph_client_secret", secret_val):
+                    logging.warning("Keyring unavailable; storing graph_client_secret in DB.")
+                    _save_setting("graph_client_secret", secret_val)
+                else:
+                    _save_setting("graph_client_secret", "")
             else:
                 _save_setting(key, edit.text().strip())
         try:
@@ -552,6 +581,32 @@ class SettingsScreen(QWidget):
                 QMessageBox.critical(self, "Connection Failed", message)
         except Exception as e:
             show_error(self, "Could not test Microsoft Graph connection.", e)
+
+    def _test_backup_email(self):
+        _save_setting("backup_email", self._fields["backup_email"].text().strip())
+        to_address = self._fields["backup_email"].text().strip()
+        if not to_address:
+            QMessageBox.warning(self, "No Email Address",
+                                "Enter an email address in the 'Email backup to' field first.")
+            return
+        try:
+            import controllers.backup_controller as backup_ctrl
+            from utils.email_graph import send_backup
+            dest = backup_ctrl.silent_auto_backup()
+            if not dest:
+                QMessageBox.critical(self, "Backup Failed",
+                                     "Could not create a backup file to send.")
+                return
+            send_backup(dest, to_address)
+            QMessageBox.information(self, "Test Backup Email Sent",
+                                    f"Backup emailed successfully to:\n{to_address}")
+        except ImportError as e:
+            QMessageBox.critical(self, "Missing Library",
+                                 f"Email library not available: {e}\n\nRun: pip install msal")
+        except RuntimeError as e:
+            QMessageBox.critical(self, "Email Configuration Error", str(e))
+        except Exception as e:
+            show_error(self, "Could not send test backup email.", e)
 
     # ── User management ────────────────────────────────────────────────
 
