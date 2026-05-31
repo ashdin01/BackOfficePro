@@ -1,35 +1,28 @@
 """CRUD for bank reconciliation profiles and imported transactions."""
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 # ── Profiles ──────────────────────────────────────────────────────────────────
 
 def get_all_profiles():
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute(
             "SELECT * FROM bank_csv_profiles ORDER BY name COLLATE NOCASE"
         ).fetchall()]
-    finally:
-        conn.release()
 
 
 def get_profile(profile_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT * FROM bank_csv_profiles WHERE id=?", (profile_id,)
         ).fetchone()
         return dict(row) if row else None
-    finally:
-        conn.release()
 
 
 def save_profile(name, delimiter, has_header, skip_rows, date_format, amount_type,
                  col_date=None, col_amount=None, col_debit=None, col_credit=None,
                  col_description=None, col_reference=None, col_balance=None):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         existing = conn.execute(
             "SELECT id FROM bank_csv_profiles WHERE name=?", (name,)
         ).fetchone()
@@ -60,30 +53,18 @@ def save_profile(name, delimiter, has_header, skip_rows, date_format, amount_typ
             ).fetchone()['id']
         conn.commit()
         return pid
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def delete_profile(profile_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("DELETE FROM bank_csv_profiles WHERE id=?", (profile_id,))
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────
 
 def insert_transactions(profile_id, batch, rows):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         for r in rows:
             conn.execute("""
                 INSERT INTO bank_transactions
@@ -94,29 +75,20 @@ def insert_transactions(profile_id, batch, rows):
                   r['txn_date'], r['amount'], r['description'],
                   r.get('reference') or '', r.get('balance')))
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def get_transactions(batch):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute("""
             SELECT * FROM bank_transactions
             WHERE import_batch=?
             ORDER BY txn_date, id
         """, (batch,)).fetchall()]
-    finally:
-        conn.release()
 
 
 def get_all_batches():
     """Return summary of all import batches, newest first."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute("""
             SELECT import_batch,
                    COUNT(*) AS total,
@@ -128,15 +100,12 @@ def get_all_batches():
             GROUP BY import_batch
             ORDER BY import_batch DESC
         """).fetchall()]
-    finally:
-        conn.release()
 
 
 def set_matched(txn_id, invoice_id, payment_id):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute(
             "SELECT status, invoice_id, payment_id FROM bank_transactions WHERE id=?",
             (txn_id,)
@@ -154,18 +123,12 @@ def set_matched(txn_id, invoice_id, payment_id):
                             'payment_id': payment_id},
                            get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def set_ignored(txn_id):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute(
             "SELECT status FROM bank_transactions WHERE id=?", (txn_id,)
         ).fetchone()
@@ -177,11 +140,6 @@ def set_ignored(txn_id):
             record_changes(conn, 'bank_transaction', str(txn_id),
                            {'status': old['status']}, {'status': 'IGNORED'}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def unmatch_transaction(txn_id):
@@ -191,8 +149,7 @@ def unmatch_transaction(txn_id):
     from models.audit_log import record_changes
     from database.audit_context import get_user
 
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT status, invoice_id, payment_id FROM bank_transactions WHERE id=?",
             (txn_id,)
@@ -247,8 +204,3 @@ def unmatch_transaction(txn_id):
                 )
 
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()

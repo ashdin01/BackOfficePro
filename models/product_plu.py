@@ -1,11 +1,10 @@
 """PLU management queries for the products table."""
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_all_plu() -> list:
     """All products that have a PLU assigned, ordered by PLU numerically then barcode."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute("""
             SELECT p.barcode, p.plu, p.description, p.active,
                    d.name AS dept_name, s.name AS supplier_name
@@ -15,8 +14,6 @@ def get_all_plu() -> list:
             WHERE p.plu IS NOT NULL AND p.plu != ''
             ORDER BY CAST(p.plu AS INTEGER), p.barcode
         """).fetchall()]
-    finally:
-        conn.release()
 
 
 def get_duplicate_plu_groups() -> list:
@@ -24,8 +21,7 @@ def get_duplicate_plu_groups() -> list:
     All products sharing a PLU with at least one other product.
     Grouped by PLU; within a group sorted by active desc then barcode.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute("""
             SELECT p.plu, p.barcode, p.description, p.active,
                    d.name AS dept_name, s.name AS supplier_name
@@ -39,8 +35,6 @@ def get_duplicate_plu_groups() -> list:
             )
             ORDER BY CAST(p.plu AS INTEGER), p.active DESC, p.barcode
         """).fetchall()]
-    finally:
-        conn.release()
 
 
 def get_plu_map_conflicts() -> list:
@@ -48,8 +42,7 @@ def get_plu_map_conflicts() -> list:
     Barcodes where plu_barcode_map.plu differs from products.plu.
     Returns list of dicts with keys: map_plu, barcode, prod_plu, description.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute("""
             SELECT m.plu AS map_plu, m.barcode, p.plu AS prod_plu, p.description
             FROM plu_barcode_map m
@@ -58,8 +51,6 @@ def get_plu_map_conflicts() -> list:
               AND CAST(p.plu AS INTEGER) != m.plu
             ORDER BY m.plu
         """).fetchall()]
-    finally:
-        conn.release()
 
 
 def set_plu(barcode, new_plu) -> None:
@@ -68,8 +59,7 @@ def set_plu(barcode, new_plu) -> None:
     Raises ValueError if new_plu is already used by a different product.
     """
     new_plu = str(new_plu).strip() if new_plu is not None else ''
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         if new_plu:
             conflict = conn.execute(
                 "SELECT barcode FROM products WHERE plu=? AND barcode!=?",
@@ -89,21 +79,13 @@ def set_plu(barcode, new_plu) -> None:
             (new_plu or None, barcode)
         )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def find_barcode_by_plu(plu_str) -> str | None:
     """Return barcode for a product whose plu column matches plu_str, or None."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT barcode FROM products WHERE plu = ? AND active = 1 LIMIT 1",
             (str(plu_str),)
         ).fetchone()
         return row['barcode'] if row else None
-    finally:
-        conn.release()

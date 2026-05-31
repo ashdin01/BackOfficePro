@@ -1,10 +1,9 @@
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_by_barcode(barcode):
     """All supplier links for a product, default first."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return conn.execute("""
             SELECT ps.supplier_id, s.name AS supplier_name, ps.is_default,
                    COALESCE(ps.supplier_sku, '') AS supplier_sku,
@@ -15,14 +14,11 @@ def get_by_barcode(barcode):
             WHERE ps.barcode = ?
             ORDER BY ps.is_default DESC, s.name
         """, (barcode,)).fetchall()
-    finally:
-        conn.release()
 
 
 def get_by_supplier(supplier_id, default_only=True):
     """All active products linked to a supplier."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         sql = """
             SELECT p.*
             FROM products p
@@ -33,8 +29,6 @@ def get_by_supplier(supplier_id, default_only=True):
             sql += " AND ps.is_default = 1"
         sql += " ORDER BY p.description"
         return conn.execute(sql, (supplier_id,)).fetchall()
-    finally:
-        conn.release()
 
 
 def save_for_barcode(barcode, supplier_rows):
@@ -43,8 +37,7 @@ def save_for_barcode(barcode, supplier_rows):
     supplier_rows: list of {supplier_id, is_default, supplier_sku, pack_qty, pack_unit}
     Also keeps products.supplier_id in sync with the default.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("DELETE FROM product_suppliers WHERE barcode = ?", (barcode,))
         default_id = None
         for row in supplier_rows:
@@ -65,8 +58,3 @@ def save_for_barcode(barcode, supplier_rows):
             (default_id, barcode)
         )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()

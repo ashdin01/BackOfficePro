@@ -1,7 +1,7 @@
 """Model for sales_daily table and related PLU-based sales queries."""
 import logging
 from datetime import date, timedelta
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 # ── Internal helper ───────────────────────────────────────────────────────────
@@ -19,29 +19,24 @@ def _where_params(d_from, d_to, group=None):
 
 def table_exists() -> bool:
     """Return True if the sales_daily table exists."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='sales_daily'"
         ).fetchone() is not None
-    finally:
-        conn.release()
 
 
 def get_groups() -> list:
     """Distinct sub_group values from sales_daily, sorted."""
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            "SELECT DISTINCT sub_group FROM sales_daily "
-            "WHERE sub_group IS NOT NULL ORDER BY sub_group"
-        ).fetchall()
-        return [r[0] for r in rows]
-    except Exception:
-        logging.exception("sales_daily.get_groups failed")
-        return []
-    finally:
-        conn.release()
+    with db_conn() as conn:
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT sub_group FROM sales_daily "
+                "WHERE sub_group IS NOT NULL ORDER BY sub_group"
+            ).fetchall()
+            return [r[0] for r in rows]
+        except Exception:
+            logging.exception("sales_daily.get_groups failed")
+            return []
 
 
 def get_stats(d_from: str, d_to: str, group=None) -> dict:
@@ -50,8 +45,7 @@ def get_stats(d_from: str, d_to: str, group=None) -> dict:
     Returns: total_rev, total_qty, total_days, top_name, top_sales.
     """
     where, params = _where_params(d_from, d_to, group)
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         stats = conn.execute(f"""
             SELECT SUM(sales_dollars) + SUM(discount), SUM(quantity),
                    COUNT(DISTINCT sale_date)
@@ -69,8 +63,6 @@ def get_stats(d_from: str, d_to: str, group=None) -> dict:
             'top_name':    top[0][:30] if top else None,
             'top_sales':   top[1]      if top else None,
         }
-    finally:
-        conn.release()
 
 
 def get_by_product(d_from: str, d_to: str, group=None) -> list:
@@ -79,8 +71,7 @@ def get_by_product(d_from: str, d_to: str, group=None) -> list:
     Returns list of dicts: plu, plu_name, sub_group, qty, sales, avg_day.
     """
     where, params = _where_params(d_from, d_to, group)
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(f"""
             SELECT
                 sd.plu,
@@ -95,8 +86,6 @@ def get_by_product(d_from: str, d_to: str, group=None) -> list:
             ORDER BY sales DESC
         """, params).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.release()
 
 
 def get_by_day(d_from: str, d_to: str, group=None) -> list:
@@ -105,8 +94,7 @@ def get_by_day(d_from: str, d_to: str, group=None) -> list:
     Returns list of dicts: sale_date, quantity, sales_dollars, discount, net_sales.
     """
     where, params = _where_params(d_from, d_to, group)
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(f"""
             SELECT sale_date,
                    SUM(quantity)      AS quantity,
@@ -117,8 +105,6 @@ def get_by_day(d_from: str, d_to: str, group=None) -> list:
             GROUP BY sale_date ORDER BY sale_date DESC
         """, params).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.release()
 
 
 def get_by_group(d_from: str, d_to: str, group=None) -> list:
@@ -127,8 +113,7 @@ def get_by_group(d_from: str, d_to: str, group=None) -> list:
     Returns list of dicts: sub_group, quantity, sales_dollars.
     """
     where, params = _where_params(d_from, d_to, group)
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(f"""
             SELECT sub_group,
                    SUM(quantity)      AS quantity,
@@ -137,20 +122,15 @@ def get_by_group(d_from: str, d_to: str, group=None) -> list:
             GROUP BY sub_group ORDER BY SUM(sales_dollars) DESC
         """, params).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.release()
 
 
 def get_last_import_date():
     """Return the most recent sale_date in sales_daily as a date object, or None."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute("SELECT MAX(sale_date) FROM sales_daily").fetchone()
         if row and row[0]:
             return date.fromisoformat(row[0])
         return None
-    finally:
-        conn.release()
 
 
 # ── Per-barcode sales queries ─────────────────────────────────────────────────
@@ -171,35 +151,33 @@ def get_sales_for_barcode(barcode):
     month_start = today.replace(day=1)
     year_start  = today.replace(month=1, day=1)
 
-    conn = get_connection()
-    try:
-        plu_row = conn.execute(
-            "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
-        ).fetchone()
-        if not plu_row:
+    with db_conn() as conn:
+        try:
+            plu_row = conn.execute(
+                "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
+            ).fetchone()
+            if not plu_row:
+                return None
+
+            plu = str(plu_row[0])
+
+            def _qty(d_from, d_to):
+                row = conn.execute("""
+                    SELECT COALESCE(SUM(quantity), 0)
+                    FROM sales_daily
+                    WHERE plu = ? AND sale_date BETWEEN ? AND ?
+                """, (plu, str(d_from), str(d_to))).fetchone()
+                return int(row[0]) if row else 0
+
+            return {
+                "last_week":   _qty(last_week_start, last_week_end),
+                "two_weeks":   _qty(two_weeks_start, two_weeks_end),
+                "this_month":  _qty(month_start, today),
+                "ytd":         _qty(year_start, today),
+            }
+        except Exception:
+            logging.exception("sales_daily.get_sales_for_barcode failed")
             return None
-
-        plu = str(plu_row[0])
-
-        def _qty(d_from, d_to):
-            row = conn.execute("""
-                SELECT COALESCE(SUM(quantity), 0)
-                FROM sales_daily
-                WHERE plu = ? AND sale_date BETWEEN ? AND ?
-            """, (plu, str(d_from), str(d_to))).fetchone()
-            return int(row[0]) if row else 0
-
-        return {
-            "last_week":   _qty(last_week_start, last_week_end),
-            "two_weeks":   _qty(two_weeks_start, two_weeks_end),
-            "this_month":  _qty(month_start, today),
-            "ytd":         _qty(year_start, today),
-        }
-    except Exception:
-        logging.exception("sales_daily.get_sales_for_barcode failed")
-        return None
-    finally:
-        conn.release()
 
 
 def get_sales_for_barcode_range(barcode, date_from, date_to):
@@ -207,25 +185,23 @@ def get_sales_for_barcode_range(barcode, date_from, date_to):
     Return total sales quantity for barcode between date_from and date_to (inclusive).
     Returns None if no PLU mapping exists, otherwise an int.
     """
-    conn = get_connection()
-    try:
-        plu_row = conn.execute(
-            "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
-        ).fetchone()
-        if not plu_row:
+    with db_conn() as conn:
+        try:
+            plu_row = conn.execute(
+                "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
+            ).fetchone()
+            if not plu_row:
+                return None
+            plu = str(plu_row[0])
+            row = conn.execute("""
+                SELECT COALESCE(SUM(quantity), 0)
+                FROM sales_daily
+                WHERE plu = ? AND sale_date BETWEEN ? AND ?
+            """, (plu, str(date_from), str(date_to))).fetchone()
+            return int(row[0]) if row else 0
+        except Exception:
+            logging.exception("sales_daily.get_sales_for_barcode_range failed")
             return None
-        plu = str(plu_row[0])
-        row = conn.execute("""
-            SELECT COALESCE(SUM(quantity), 0)
-            FROM sales_daily
-            WHERE plu = ? AND sale_date BETWEEN ? AND ?
-        """, (plu, str(date_from), str(date_to))).fetchone()
-        return int(row[0]) if row else 0
-    except Exception:
-        logging.exception("sales_daily.get_sales_for_barcode_range failed")
-        return None
-    finally:
-        conn.release()
 
 
 def get_sales_for_barcodes_range(barcodes, date_from, date_to):
@@ -235,8 +211,7 @@ def get_sales_for_barcodes_range(barcodes, date_from, date_to):
     """
     if not barcodes:
         return {}
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         ph = ','.join('?' * len(barcodes))
         plu_rows = conn.execute(
             f"SELECT barcode, plu FROM plu_barcode_map WHERE barcode IN ({ph})",
@@ -258,8 +233,6 @@ def get_sales_for_barcodes_range(barcodes, date_from, date_to):
             for barcode, plu in barcode_to_plu.items():
                 result[barcode] = plu_to_qty.get(plu, 0)
         return result
-    finally:
-        conn.release()
 
 
 # ── Backfill helper ───────────────────────────────────────────────────────────
@@ -268,8 +241,7 @@ def backfill_movements(plu, barcode: str):
     """Create stock movements for sales_daily rows imported before PLU was mapped."""
     try:
         plu_str = str(plu).strip()
-        conn = get_connection()
-        try:
+        with db_conn() as conn:
             orphaned = conn.execute("""
                 SELECT sd.sale_date, sd.plu, sd.plu_name, sd.quantity
                 FROM sales_daily sd
@@ -312,10 +284,5 @@ def backfill_movements(plu, barcode: str):
             if backfilled:
                 logging.info("Backfilled %d sale movements for PLU %s → %s",
                              backfilled, plu, barcode)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.release()
     except Exception as e:
         logging.warning("Sales backfill error: %s", e, exc_info=True)

@@ -2,14 +2,13 @@
 import sqlite3
 import uuid
 
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 # ── Invoices ──────────────────────────────────────────────────────────────────
 
 def get_all(customer_id=None, status=None, limit=None, offset=0):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         clauses, params = [], []
         if customer_id:
             clauses.append("i.customer_id = ?")
@@ -30,14 +29,11 @@ def get_all(customer_id=None, status=None, limit=None, offset=0):
             ORDER BY i.invoice_date DESC, i.invoice_number DESC
             {limit_clause}
         """, params).fetchall()
-    finally:
-        conn.release()
 
 
 def count(customer_id=None, status=None) -> int:
     """Return the total number of invoices matching the given filters."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         clauses, params = [], []
         if customer_id:
             clauses.append("customer_id = ?")
@@ -50,13 +46,10 @@ def count(customer_id=None, status=None) -> int:
             f"SELECT COUNT(*) FROM ar_invoices {where}", params
         ).fetchone()
         return row[0] if row else 0
-    finally:
-        conn.release()
 
 
 def get_by_id(invoice_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute("""
             SELECT i.*, c.name AS customer_name, c.abn AS customer_abn,
                    c.address_line1, c.address_line2, c.suburb, c.state,
@@ -66,14 +59,11 @@ def get_by_id(invoice_id):
             WHERE i.id = ?
         """, (invoice_id,)).fetchone()
         return dict(row) if row else None
-    finally:
-        conn.release()
 
 
 def create(invoice_number, customer_id, invoice_date, due_date,
            notes='', created_by=''):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("""
             INSERT INTO ar_invoices
                 (invoice_number, customer_id, invoice_date, due_date,
@@ -86,11 +76,6 @@ def create(invoice_number, customer_id, invoice_date, due_date,
             "SELECT id FROM ar_invoices WHERE invoice_number=?",
             (invoice_number,)
         ).fetchone()['id']
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def _apply_totals(conn, invoice_id):
@@ -111,15 +96,9 @@ def _apply_totals(conn, invoice_id):
 
 def update_totals(invoice_id):
     """Recalculate subtotal, gst_amount, total from lines."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         _apply_totals(conn, invoice_id)
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 _PAYMENT_STATUSES = {'PAID', 'PARTIAL'}
@@ -133,8 +112,7 @@ def update_status(invoice_id, status):
         )
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute(
             "SELECT invoice_number, status FROM ar_invoices WHERE id=?", (invoice_id,)
         ).fetchone()
@@ -146,50 +124,32 @@ def update_status(invoice_id, status):
             record_changes(conn, 'ar_invoice', old['invoice_number'],
                            {'status': old['status']}, {'status': status}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def _update_amount_paid(invoice_id, amount_paid):
     """Internal helper — callers outside this module should use apply_payment()."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("""
             UPDATE ar_invoices SET
                 amount_paid=?, updated_at=datetime('now','localtime')
             WHERE id=?
         """, (amount_paid, invoice_id))
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def update_notes(invoice_id, notes):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute(
             "UPDATE ar_invoices SET notes=?, updated_at=datetime('now','localtime') WHERE id=?",
             (notes, invoice_id)
         )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def void_invoice(invoice_id):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute(
             "SELECT invoice_number, status FROM ar_invoices WHERE id=?", (invoice_id,)
         ).fetchone()
@@ -201,32 +161,23 @@ def void_invoice(invoice_id):
             record_changes(conn, 'ar_invoice', old['invoice_number'],
                            {'status': old['status']}, {'status': 'VOID'}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 # ── Invoice lines ─────────────────────────────────────────────────────────────
 
 def get_lines(invoice_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute(
             "SELECT * FROM ar_invoice_lines WHERE invoice_id=? ORDER BY id",
             (invoice_id,)
         ).fetchall()]
-    finally:
-        conn.release()
 
 
 def add_line(invoice_id, description, quantity, unit_price,
              discount_pct=0.0, gst_rate=10.0, barcode=''):
     subtotal, gst, total = _calc_line(quantity, unit_price, discount_pct, gst_rate)
     barcode = barcode or None
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("""
             INSERT INTO ar_invoice_lines
                 (invoice_id, barcode, description, quantity, unit_price,
@@ -236,19 +187,13 @@ def add_line(invoice_id, description, quantity, unit_price,
               discount_pct, gst_rate, subtotal, gst, total))
         _apply_totals(conn, invoice_id)
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def update_line(line_id, description, quantity, unit_price,
                 discount_pct=0.0, gst_rate=10.0, barcode=''):
     subtotal, gst, total = _calc_line(quantity, unit_price, discount_pct, gst_rate)
     barcode = barcode or None
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         inv_row = conn.execute(
             "SELECT invoice_id FROM ar_invoice_lines WHERE id=?", (line_id,)
         ).fetchone()
@@ -263,16 +208,10 @@ def update_line(line_id, description, quantity, unit_price,
         if inv_row:
             _apply_totals(conn, inv_row['invoice_id'])
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def delete_line(line_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         inv_row = conn.execute(
             "SELECT invoice_id FROM ar_invoice_lines WHERE id=?", (line_id,)
         ).fetchone()
@@ -280,11 +219,6 @@ def delete_line(line_id):
         if inv_row:
             _apply_totals(conn, inv_row['invoice_id'])
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def get_unpaid_for_aged_debtors():
@@ -293,8 +227,7 @@ def get_unpaid_for_aged_debtors():
     Each row: id, invoice_number, invoice_date, due_date, total, amount_paid,
               status, customer_id, customer_name, code.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return conn.execute("""
             SELECT i.id, i.invoice_number, i.invoice_date, i.due_date,
                    i.total, i.amount_paid, i.status,
@@ -304,14 +237,11 @@ def get_unpaid_for_aged_debtors():
             WHERE i.status NOT IN ('PAID', 'VOID')
             ORDER BY c.name, i.due_date
         """).fetchall()
-    finally:
-        conn.release()
 
 
 def refresh_overdue(today_str: str):
     """Mark SENT/PARTIAL invoices past due date as OVERDUE."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("""
             UPDATE ar_invoices
             SET status='OVERDUE', updated_at=datetime('now','localtime')
@@ -319,11 +249,6 @@ def refresh_overdue(today_str: str):
               AND due_date < ?
         """, (today_str,))
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def get_statement_rows(customer_id, date_from, date_to) -> dict:
@@ -332,8 +257,7 @@ def get_statement_rows(customer_id, date_from, date_to) -> dict:
     plus opening balance (outstanding before date_from).
     Dict keys: opening_balance (float), invoices (list of dicts), payments (list of dicts).
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         opening_rows = conn.execute("""
             SELECT COALESCE(SUM(total - amount_paid), 0) AS balance
             FROM ar_invoices
@@ -363,8 +287,6 @@ def get_statement_rows(customer_id, date_from, date_to) -> dict:
             'invoices':        invoices,
             'payments':        payments,
         }
-    finally:
-        conn.release()
 
 
 def apply_payment(invoice_id, customer_id, payment_date, amount,
@@ -383,8 +305,7 @@ def apply_payment(invoice_id, customer_id, payment_date, amount,
     if payment_ref is None:
         payment_ref = str(uuid.uuid4())
 
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         try:
             cur = conn.execute("""
                 INSERT INTO ar_payments
@@ -433,11 +354,6 @@ def apply_payment(invoice_id, customer_id, payment_date, amount,
 
         conn.commit()
         return payment_id, total_paid, new_status
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def _calc_line(quantity, unit_price, discount_pct, gst_rate):

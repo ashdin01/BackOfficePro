@@ -1,6 +1,6 @@
 """Model functions for report queries."""
 from datetime import date, timedelta
-from database.connection import get_connection
+from database.connection import db_conn
 from utils.calculations import week_bounds, fy_bounds
 
 
@@ -8,7 +8,6 @@ from utils.calculations import week_bounds, fy_bounds
 
 def get_stock_valuation_summary(dept_id=None):
     """Department summary: product count, total units, cost and sell values."""
-    conn = get_connection()
     sql = """
         SELECT d.name as dept_name,
                COUNT(p.barcode) as product_count,
@@ -25,15 +24,12 @@ def get_stock_valuation_summary(dept_id=None):
         sql += " AND p.department_id = ?"
         params.append(dept_id)
     sql += " GROUP BY d.name ORDER BY d.name"
-    try:
+    with db_conn() as conn:
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.release()
 
 
 def get_stock_valuation_detail(dept_id=None):
     """Full product detail: barcode, description, qty, cost and sell values."""
-    conn = get_connection()
     sql = """
         SELECT p.barcode, p.description, d.name as dept_name,
                p.unit, p.cost_price, p.sell_price,
@@ -50,17 +46,14 @@ def get_stock_valuation_detail(dept_id=None):
         sql += " AND p.department_id = ?"
         params.append(dept_id)
     sql += " ORDER BY d.name, p.description"
-    try:
+    with db_conn() as conn:
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.release()
 
 
 # ── Reorder Report ────────────────────────────────────────────────────────────
 
 def get_reorder_items(dept_id=None, supplier_id=None):
     """Products at or below reorder point with suggested order quantities."""
-    conn = get_connection()
     sql = """
         SELECT p.barcode, p.description, d.name as dept_name,
                sup.name as supplier_name,
@@ -94,17 +87,14 @@ def get_reorder_items(dept_id=None, supplier_id=None):
         sql += " AND p.supplier_id = ?"
         params.append(supplier_id)
     sql += " ORDER BY sup.name, d.name, p.description"
-    try:
+    with db_conn() as conn:
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.release()
 
 
 # ── Movement History ──────────────────────────────────────────────────────────
 
 def get_stock_movements(barcode=None, move_type=None, date_from=None, date_to=None, limit=2000):
     """Stock movements with optional filtering by barcode/description, type and date range."""
-    conn = get_connection()
     sql = """
         SELECT sm.id, sm.barcode, p.description, sm.movement_type,
                sm.quantity, sm.reference, sm.notes, sm.created_at
@@ -126,10 +116,8 @@ def get_stock_movements(barcode=None, move_type=None, date_from=None, date_to=No
         sql += " AND date(sm.created_at) <= ?"
         params.append(date_to)
     sql += f" ORDER BY sm.created_at DESC LIMIT {int(limit)}"
-    try:
+    with db_conn() as conn:
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.release()
 
 
 # ── GST Report ────────────────────────────────────────────────────────────────
@@ -139,12 +127,9 @@ def get_gst_report(date_from, date_to) -> dict:
     GST collected on sales and GST paid on received POs for a date range.
     Returns {'sales': {...}, 'purchases': {...}} matching BAS field names.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         sales     = _gst_collected(conn, date_from, date_to)
         purchases = _gst_paid(conn, date_from, date_to)
-    finally:
-        conn.release()
     return {'sales': sales, 'purchases': purchases}
 
 
@@ -214,7 +199,6 @@ def _gst_paid(conn, d_from, d_to) -> dict:
 
 def get_gp_data(dept_id=None, gp_filter='all'):
     """Product-level GP% and GP$ with optional department and tier filtering."""
-    conn = get_connection()
     sql = """
         SELECT p.barcode, p.description, d.name as dept_name,
                p.sell_price, p.cost_price,
@@ -237,15 +221,12 @@ def get_gp_data(dept_id=None, gp_filter='all'):
     elif gp_filter == "low":
         sql += " AND (1.0 - p.cost_price / p.sell_price) * 100 < 15"
     sql += " ORDER BY gp_pct ASC"
-    try:
+    with db_conn() as conn:
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.release()
 
 
 def get_gp_summary(dept_id=None):
     """Department-level GP summary: avg GP%, healthy/marginal/low counts."""
-    conn = get_connection()
     sql = """
         SELECT d.name as dept_name,
                COUNT(*) as product_count,
@@ -265,10 +246,8 @@ def get_gp_summary(dept_id=None):
         sql += " AND p.department_id = ?"
         params.append(dept_id)
     sql += " GROUP BY d.name ORDER BY avg_gp ASC"
-    try:
+    with db_conn() as conn:
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.release()
 
 
 # ── Liquor Tracking ───────────────────────────────────────────────────────────
@@ -278,8 +257,7 @@ def get_liquor_tracking(dept_id=None, date_from=None, date_to=None):
     SOH start/end and IN/OUT movements per product for a date range.
     Returns rows ordered by group_name, description.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         where  = "p.active = 1"
         params = [date_to, date_from, date_to]
         if dept_id is not None:
@@ -318,8 +296,6 @@ def get_liquor_tracking(dept_id=None, date_from=None, date_to=None):
             WHERE {where}
             ORDER BY group_name, p.description
         """, params).fetchall()
-    finally:
-        conn.release()
 
 
 # ── Supplier Sales ────────────────────────────────────────────────────────────
@@ -345,8 +321,7 @@ def get_supplier_sales(supplier_id=None):
     lm_e         = tm_s - timedelta(days=1)
     lm_s         = lm_e.replace(day=1)
 
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         sup_filter = "AND p.supplier_id = ?" if supplier_id else ""
         sup_params = [supplier_id] if supplier_id else []
 
@@ -375,38 +350,36 @@ def get_supplier_sales(supplier_id=None):
                     (sr['sale_date'], sr['quantity'])
                 )
 
-        periods = [
-            (str(thisw_s),        str(today)),
-            (str(lw_s),           str(lw_e)),
-            (str(tw_s),           str(tw_e)),
-            (str(tm_s),           str(today)),
-            (str(lm_s),           str(lm_e)),
-            (str(fy_s),           str(fy_e)),
-            (str(pfy_s),          str(pfy_e)),
-            ('2000-01-01',        str(today)),
-        ]
+    periods = [
+        (str(thisw_s),        str(today)),
+        (str(lw_s),           str(lw_e)),
+        (str(tw_s),           str(tw_e)),
+        (str(tm_s),           str(today)),
+        (str(lm_s),           str(lm_e)),
+        (str(fy_s),           str(fy_e)),
+        (str(pfy_s),          str(pfy_e)),
+        ('2000-01-01',        str(today)),
+    ]
 
-        def qty_from_cache(plu, d1, d2):
-            return int(sum(
-                q for sd, q in sales_by_plu.get(plu, [])
-                if d1 <= sd <= d2
-            ))
+    def qty_from_cache(plu, d1, d2):
+        return int(sum(
+            q for sd, q in sales_by_plu.get(plu, [])
+            if d1 <= sd <= d2
+        ))
 
-        rows   = []
-        totals = [0] * 8
-        for row in db_rows:
-            plu = str(row['plu']) if row['plu'] else None
-            vals = [qty_from_cache(plu, d1, d2) for d1, d2 in periods] if plu else [0] * 8
-            for i, v in enumerate(vals):
-                totals[i] += v
-            rows.append({
-                'barcode':       row['barcode'],
-                'description':   row['description'],
-                'supplier_name': row['supplier_name'],
-                'qty':           vals,
-            })
-    finally:
-        conn.release()
+    rows   = []
+    totals = [0] * 8
+    for row in db_rows:
+        plu = str(row['plu']) if row['plu'] else None
+        vals = [qty_from_cache(plu, d1, d2) for d1, d2 in periods] if plu else [0] * 8
+        for i, v in enumerate(vals):
+            totals[i] += v
+        rows.append({
+            'barcode':       row['barcode'],
+            'description':   row['description'],
+            'supplier_name': row['supplier_name'],
+            'qty':           vals,
+        })
 
     return rows, totals
 
@@ -421,7 +394,6 @@ _ALL_WRITEOFF    = _SPOILAGE_TYPES + _SHRINKAGE_TYPES + _ADMIN_TYPES
 
 def get_writeoff_data(date_from, date_to, dept_id=None, category=None):
     """Write-off/shrinkage movements for a date range with optional filtering."""
-    conn = get_connection()
     placeholders = ','.join('?' for _ in _ALL_WRITEOFF)
     sql = f"""
         SELECT sm.id, sm.barcode, sm.movement_type, sm.quantity,
@@ -453,18 +425,15 @@ def get_writeoff_data(date_from, date_to, dept_id=None, category=None):
         sql += f" AND sm.movement_type IN ({ph})"
         params += _ADMIN_TYPES
     sql += " ORDER BY sm.created_at DESC"
-    try:
+    with db_conn() as conn:
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
-    finally:
-        conn.release()
 
 
 # ── Combined POS + AR daily revenue ──────────────────────────────────────────
 
 def get_combined_daily_revenue(d_from: str, d_to: str) -> dict:
     """Return {date_str: {'pos': float, 'ar': float}} for the date range."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         pos_rows = conn.execute("""
             SELECT sale_date, SUM(sales_dollars) AS total
             FROM sales_daily
@@ -479,8 +448,6 @@ def get_combined_daily_revenue(d_from: str, d_to: str) -> dict:
               AND status NOT IN ('VOID', 'DRAFT')
             GROUP BY invoice_date
         """, (d_from, d_to)).fetchall()
-    finally:
-        conn.release()
 
     data: dict = {}
     for r in pos_rows:

@@ -513,11 +513,17 @@ class TestCleanupOldPos:
         """cleanup_old_pos must re-raise so callers can detect failure."""
         import sqlite3
         from unittest.mock import MagicMock
+        from contextlib import contextmanager
 
         mock_conn = MagicMock()
         mock_conn.execute.side_effect = sqlite3.OperationalError("simulated error")
+
+        @contextmanager
+        def mock_db_conn():
+            yield mock_conn
+
         # Patch at the import site inside purchase_order, not in database.connection
-        monkeypatch.setattr(po_model, "get_connection", lambda: mock_conn)
+        monkeypatch.setattr(po_model, "db_conn", mock_db_conn)
 
         with pytest.raises(sqlite3.OperationalError):
             po_model.cleanup_old_pos()

@@ -1,5 +1,5 @@
 """Model for stock_movements table."""
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_by_barcode(barcode, move_type=None):
@@ -8,8 +8,7 @@ def get_by_barcode(barcode, move_type=None):
     Each row: (movement_type, quantity, reference, notes, created_at)
     Optionally filter by a specific movement_type string.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         sql = """
             SELECT movement_type, quantity, reference, notes, created_at
             FROM stock_movements
@@ -21,8 +20,6 @@ def get_by_barcode(barcode, move_type=None):
             params.append(move_type)
         sql += " ORDER BY created_at DESC"
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.release()
 
 
 def get_recent_adjustments(limit=100):
@@ -30,8 +27,7 @@ def get_recent_adjustments(limit=100):
     Return the most recent non-sale/receipt stock movements across all products.
     Each row: (created_at, barcode, description, movement_type, quantity, reference, notes)
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute("""
             SELECT m.created_at, m.barcode, p.description,
                    m.movement_type, m.quantity, m.reference, m.notes
@@ -41,5 +37,3 @@ def get_recent_adjustments(limit=100):
             ORDER BY m.created_at DESC LIMIT ?
         """, (limit,)).fetchall()
         return [tuple(r) for r in rows]
-    finally:
-        conn.release()

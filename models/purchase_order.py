@@ -1,5 +1,5 @@
 import logging
-from database.connection import get_connection
+from database.connection import db_conn
 from config.constants import PO_STATUS_CANCELLED
 from datetime import datetime, timedelta
 
@@ -49,8 +49,7 @@ def get_all(status=None, archived=False):
     archived=True  → archived POs (RECEIVED, CANCELLED, REVERSED)
     status=x       → filter by specific status
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         if status:
             query = """
                 SELECT po.*, s.name as supplier_name
@@ -78,26 +77,20 @@ def get_all(status=None, archived=False):
                 ORDER BY po.created_at DESC
             """
             return conn.execute(query).fetchall()
-    finally:
-        conn.release()
 
 
 def get_by_id(po_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return conn.execute("""
             SELECT po.*, s.name as supplier_name
             FROM purchase_orders po
             JOIN suppliers s ON po.supplier_id = s.id
             WHERE po.id = ?
         """, (po_id,)).fetchone()
-    finally:
-        conn.release()
 
 
 def create(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO'):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         po_number = _next_po_number(conn)
         conn.execute("""
             INSERT INTO purchase_orders
@@ -106,18 +99,12 @@ def create(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO
         """, (po_number, supplier_id, delivery_date, notes, created_by, po_type))
         conn.commit()
         return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def update_status(po_id, status):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute(
             "SELECT po_number, status FROM purchase_orders WHERE id=?", (po_id,)
         ).fetchone()
@@ -129,11 +116,6 @@ def update_status(po_id, status):
             record_changes(conn, 'purchase_order', old['po_number'],
                            {'status': old['status']}, {'status': status}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def cancel(po_id):
@@ -154,8 +136,7 @@ def reverse(po_id, reversed_by=''):
     from database.audit_context import get_source, get_user
     from models.audit_log import record_changes
 
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         po = conn.execute(
             "SELECT po.*, s.name as supplier_name FROM purchase_orders po "
             "JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = ?",
@@ -203,17 +184,11 @@ def reverse(po_id, reversed_by=''):
                        {'status': po['status']}, {'status': 'REVERSED'},
                        reversed_by or get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def get_with_supplier(po_id):
     """Return the PO row joined with supplier name as a dict, or None."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT po.*, s.name AS supplier_name "
             "FROM purchase_orders po "
@@ -222,14 +197,11 @@ def get_with_supplier(po_id):
             (po_id,)
         ).fetchone()
         return dict(row) if row else None
-    finally:
-        conn.release()
 
 
 def close_force(po_id, unreceived_line_ids, reason):
     """Mark listed lines NOT SUPPLIED and set PO status to RECEIVED atomically."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         note = f"NOT SUPPLIED: {reason}"
         for line_id in unreceived_line_ids:
             conn.execute("UPDATE po_lines SET notes=? WHERE id=?", (note, line_id))
@@ -239,11 +211,6 @@ def close_force(po_id, unreceived_line_ids, reason):
             (po_id,)
         )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def close_credit_atomic(po_id, po_number, line_receipts):
@@ -255,8 +222,7 @@ def close_credit_atomic(po_id, po_number, line_receipts):
     from database.audit_context import get_user, get_source
     who = get_user()
     src = get_source()
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         for r in line_receipts:
             conn.execute(
                 "UPDATE po_lines SET received_qty=? WHERE id=?",
@@ -279,11 +245,6 @@ def close_credit_atomic(po_id, po_number, line_receipts):
             (po_id,)
         )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def receive_atomic(po_id, po_number, line_receipts, final_status,
@@ -309,8 +270,7 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
     from database.audit_context import get_user, get_source
     who = get_user()
     src = get_source()
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         for r in line_receipts:
             fields = ["received_qty=?"]
             params = [r['new_received_qty']]
@@ -363,11 +323,6 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
                      float(c['amount_inc_tax']))
                 )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def cleanup_old_pos():
@@ -376,8 +331,7 @@ def cleanup_old_pos():
     Returns count of deleted POs.
     """
     cutoff = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("""
             DELETE FROM po_lines
             WHERE po_id IN (
@@ -394,9 +348,3 @@ def cleanup_old_pos():
         count = cursor.rowcount
         conn.commit()
         return count
-    except Exception:
-        conn.rollback()
-        logging.error("PO cleanup failed", exc_info=True)
-        raise
-    finally:
-        conn.release()

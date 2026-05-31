@@ -1,5 +1,5 @@
 """Audit log model — field-level change history for master data."""
-from database.connection import get_connection
+from database.connection import db_conn
 
 # Internal columns that are not meaningful to audit
 _SKIP = frozenset({'id', 'created_at', 'updated_at'})
@@ -34,8 +34,7 @@ def record_changes(conn, entity: str, entity_key: str,
 
 def get_for_entity(entity: str, entity_key: str, limit: int = 200) -> list[dict]:
     """Return audit rows for a specific record, newest first."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute("""
             SELECT id, entity, entity_key, field, old_value, new_value,
                    changed_by, changed_at
@@ -45,14 +44,11 @@ def get_for_entity(entity: str, entity_key: str, limit: int = 200) -> list[dict]
             LIMIT ?
         """, (entity, entity_key, limit)).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.release()
 
 
 def get_recent(limit: int = 200) -> list[dict]:
     """Return the most recent audit rows across all entities."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute("""
             SELECT id, entity, entity_key, field, old_value, new_value,
                    changed_by, changed_at
@@ -61,5 +57,3 @@ def get_recent(limit: int = 200) -> list[dict]:
             LIMIT ?
         """, (limit,)).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.release()

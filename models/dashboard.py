@@ -1,6 +1,6 @@
 """Model for dashboard statistics."""
 from datetime import date
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_stats() -> dict:
@@ -8,8 +8,7 @@ def get_stats() -> dict:
     Returns a dict with all stats needed by the home screen:
         store_name, today_sales, open_po_count, low_stock_count, active_product_count
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         today = date.today().isoformat()
 
         row = conn.execute(
@@ -49,5 +48,3 @@ def get_stats() -> dict:
             'low_stock_count':      low_stock_count,
             'active_product_count': active_product_count,
         }
-    finally:
-        conn.release()

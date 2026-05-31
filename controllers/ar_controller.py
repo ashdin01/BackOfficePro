@@ -180,8 +180,15 @@ def get_statement_data(customer_id, date_from, date_to) -> dict:
 
 # ── MYOB provision ────────────────────────────────────────────────────────────
 
-def push_invoice_to_myob(invoice_id) -> None:
-    raise NotImplementedError("MYOB AR export not yet implemented")
+def push_invoice_to_myob(invoice_id) -> tuple[bool, str]:
+    """Push an AR invoice to MYOB AccountRight as a bill.
+    Returns (False, message) until OAuth registration is complete.
+    """
+    return False, (
+        "MYOB export is not yet active.\n\n"
+        "To enable: register the app at developer.myob.com and "
+        "complete the OAuth credentials in Settings."
+    )
 
 
 # ── PDF generation ────────────────────────────────────────────────────────────

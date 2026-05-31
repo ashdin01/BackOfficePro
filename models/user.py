@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import logging
 import os
-from database.connection import get_connection
+from database.connection import db_conn
 
 _PBKDF2_ITERS  = 260_000
 _PBKDF2_PREFIX = "pbkdf2:"
@@ -34,25 +34,19 @@ def _verify_pbkdf2(pin: str, stored: str) -> bool:
 
 
 def get_all_active():
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(
             "SELECT id, username, full_name, role FROM users WHERE active=1 ORDER BY full_name"
         ).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.release()
 
 
 def get_by_username(username: str):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE username=? AND active=1", (username,)
         ).fetchone()
         return dict(row) if row else None
-    finally:
-        conn.release()
 
 
 def verify_pin(username: str, pin: str) -> bool:
@@ -85,8 +79,7 @@ def set_pin(username: str, pin: str):
     _validate_pin(pin)
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute(
             "UPDATE users SET pin=? WHERE username=?",
             (_hash_pin(pin), username)
@@ -94,19 +87,13 @@ def set_pin(username: str, pin: str):
         record_changes(conn, 'user', username,
                        {'pin': '[protected]'}, {'pin': '[changed]'}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def create(username: str, full_name: str, role: str, pin: str):
     _validate_pin(pin)
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute(
             "INSERT INTO users (username, full_name, role, pin, active) VALUES (?,?,?,?,1)",
             (username, full_name, role, _hash_pin(pin))
@@ -114,30 +101,21 @@ def create(username: str, full_name: str, role: str, pin: str):
         record_changes(conn, 'user', username, {},
                        {'role': role, 'active': '1'}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def get_all():
     """Return all users including inactive, ordered by full_name."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(
             "SELECT id, username, full_name, role, active FROM users ORDER BY full_name"
         ).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.release()
 
 
 def update(user_id: int, username: str, full_name: str, role: str):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute(
             "SELECT username, full_name, role FROM users WHERE id=?", (user_id,)
         ).fetchone()
@@ -151,19 +129,13 @@ def update(user_id: int, username: str, full_name: str, role: str):
                            {'username': username, 'full_name': full_name, 'role': role},
                            get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def set_active(user_id: int, active: bool):
     from models.audit_log import record_changes
     from database.audit_context import get_user
     new_val = 1 if active else 0
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute(
             "SELECT username, active FROM users WHERE id=?", (user_id,)
         ).fetchone()
@@ -174,39 +146,25 @@ def set_active(user_id: int, active: bool):
                            {'active': str(new_val)},
                            get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def set_pin_by_id(user_id: int, pin: str):
     _validate_pin(pin)
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()
         conn.execute("UPDATE users SET pin=? WHERE id=?", (_hash_pin(pin), user_id))
         if row:
             record_changes(conn, 'user', row['username'],
                            {'pin': '[protected]'}, {'pin': '[changed]'}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def has_any_pin_set() -> bool:
     """True if at least one active user has a PIN configured."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM users WHERE active=1 AND pin IS NOT NULL AND pin != ''"
         ).fetchone()
         return row[0] > 0
-    finally:
-        conn.release()

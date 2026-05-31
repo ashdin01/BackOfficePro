@@ -8,6 +8,9 @@ Model functions call get_connection() then conn.release() when done.
 release() rolls back any uncommitted transaction without disconnecting,
 keeping the thread-local connection alive across calls.
 
+The db_conn() context manager wraps get_connection()/release() for
+convenient use in model functions — see its docstring for usage.
+
 If DATABASE_PATH changes (which happens in tests via monkeypatch), the
 cached connection is replaced automatically.
 """
@@ -143,3 +146,25 @@ def invalidate_all_connections():
     """
     global _generation
     _generation += 1
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def db_conn():
+    """Context manager for a thread-local database connection.
+
+    Automatically releases (rolls back any uncommitted work) on exit.
+    Callers should still call conn.commit() explicitly before the with-block exits.
+
+    Usage:
+        with db_conn() as conn:
+            conn.execute(...)
+            conn.commit()
+    """
+    conn = get_connection()
+    try:
+        yield conn
+    finally:
+        conn.release()

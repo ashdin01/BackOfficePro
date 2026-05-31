@@ -1,25 +1,19 @@
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_all(active_only=True):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         query = "SELECT * FROM suppliers"
         query += " WHERE active = 1" if active_only else ""
         query += " ORDER BY name"
         return conn.execute(query).fetchall()
-    finally:
-        conn.release()
 
 
 def get_by_id(supplier_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return conn.execute(
             "SELECT * FROM suppliers WHERE id = ?", (supplier_id,)
         ).fetchone()
-    finally:
-        conn.release()
 
 
 def create(code, name, contact_name='', phone='', account_number='',
@@ -28,8 +22,7 @@ def create(code, name, contact_name='', phone='', account_number='',
         online_order=0, online_order_note='', order_days='',
         order_first_monday=0, order_fortnightly_start='', delivery_days='',
         bank_account_name='', bank_bsb='', bank_account_number=''):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("""
             INSERT INTO suppliers (
                 code, name, contact_name, phone, account_number,
@@ -47,11 +40,6 @@ def create(code, name, contact_name='', phone='', account_number='',
               order_first_monday, order_fortnightly_start, delivery_days,
               bank_account_name, bank_bsb, bank_account_number))
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def update(supplier_id, code, name, contact_name, phone, account_number,
@@ -62,8 +50,7 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
            bank_account_name='', bank_bsb='', bank_account_number=''):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute("SELECT * FROM suppliers WHERE id=?", (supplier_id,)).fetchone()
         conn.execute("""
             UPDATE suppliers
@@ -96,11 +83,6 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
         record_changes(conn, 'supplier', name,
                        dict(old) if old else {}, new, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def get_order_due_today():
@@ -117,8 +99,7 @@ def get_order_due_today():
     today_code = today.strftime('%a').upper()
     is_first_monday = (today.weekday() == 0 and today.day <= 7)
 
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM suppliers WHERE active=1 ORDER BY name"
         ).fetchall()
@@ -159,15 +140,12 @@ def get_order_due_today():
             """).fetchall()
         }
         return [r for r in due if r['id'] not in done_ids]
-    finally:
-        conn.release()
 
 
 def deactivate(supplier_id):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute("SELECT name, active FROM suppliers WHERE id=?", (supplier_id,)).fetchone()
         conn.execute("UPDATE suppliers SET active = 0 WHERE id = ?", (supplier_id,))
         key = old['name'] if old else str(supplier_id)
@@ -175,22 +153,14 @@ def deactivate(supplier_id):
                        {'active': old['active']} if old else {},
                        {'active': 0}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def get_delivery_days(supplier_id) -> str | None:
     """Return the delivery_days string for a supplier, or None if not set / not found."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT delivery_days FROM suppliers WHERE id=?", (supplier_id,)
         ).fetchone()
         if not row:
             return None
         return (row['delivery_days'] or '').strip() or None
-    finally:
-        conn.release()

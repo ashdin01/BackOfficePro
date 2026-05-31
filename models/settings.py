@@ -1,41 +1,29 @@
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_all_settings():
     """Return all settings as a {key: value} dict."""
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         return {r[0]: (r[1] or "") for r in rows}
-    finally:
-        conn.release()
 
 
 def get_setting(key, default=''):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT value FROM settings WHERE key = ?", (key,)
         ).fetchone()
         return (row[0] or default) if row else default
-    finally:
-        conn.release()
 
 
 def set_setting(key, value):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value)
         )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def next_sequence(key, prefix) -> str:
@@ -47,8 +35,7 @@ def next_sequence(key, prefix) -> str:
     statement — safe across multiple OS processes (desktop GUI + Flask API) without
     any application-level lock.
     """
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "UPDATE settings SET value = CAST(value AS INTEGER) + 1"
             " WHERE key = ? RETURNING CAST(value AS INTEGER) - 1",
@@ -64,8 +51,3 @@ def next_sequence(key, prefix) -> str:
             seq = int(row[0])
         conn.commit()
         return f"{prefix}-{seq:05d}"
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()

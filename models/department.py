@@ -1,43 +1,30 @@
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_all(active_only=True):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         if active_only:
             return conn.execute("SELECT * FROM departments WHERE active = 1 ORDER BY name").fetchall()
         else:
             return conn.execute("SELECT * FROM departments ORDER BY name").fetchall()
-    finally:
-        conn.release()
 
 
 def get_by_id(dept_id):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM departments WHERE id = ?", (dept_id,)).fetchone()
         return dict(row) if row else None
-    finally:
-        conn.release()
 
 
 def create(code, name):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("INSERT INTO departments (code, name) VALUES (?, ?)", (code.upper(), name))
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def update(dept_id, code, name, active):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute("SELECT * FROM departments WHERE id=?", (dept_id,)).fetchone()
         conn.execute(
             "UPDATE departments SET code = ?, name = ?, active = ? WHERE id = ?",
@@ -48,18 +35,12 @@ def update(dept_id, code, name, active):
                        dict(code=code.upper(), name=name, active=active),
                        get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def deactivate(dept_id):
     from models.audit_log import record_changes
     from database.audit_context import get_user
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         old = conn.execute("SELECT code, active FROM departments WHERE id=?", (dept_id,)).fetchone()
         conn.execute("UPDATE departments SET active = 0 WHERE id = ?", (dept_id,))
         key = old['code'] if old else str(dept_id)
@@ -67,8 +48,3 @@ def deactivate(dept_id):
                        {'active': old['active']} if old else {},
                        {'active': 0}, get_user())
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()

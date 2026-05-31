@@ -54,6 +54,9 @@ def _rate_ok(clients: dict, lock: threading.Lock, window: float, max_calls: int,
         times = clients.setdefault(client_ip, deque())
         while times and times[0] < now - window:
             times.popleft()
+        if not times:
+            del clients[client_ip]
+            times = clients.setdefault(client_ip, deque())
         if len(times) >= max_calls:
             return False
         times.append(now)

@@ -260,6 +260,18 @@ class SettingsScreen(QWidget):
         btn_test.clicked.connect(self._test_graph)
         graph_form.addRow("", btn_test)
 
+        self._keyring_warn = QLabel(
+            "⚠ Client Secret is stored as plaintext — the OS keychain (Windows Credential Manager) "
+            "is unavailable on this machine. The secret is secure only if the database file is protected "
+            "by OS-level file permissions. Re-enter and Save to retry keychain storage."
+        )
+        self._keyring_warn.setStyleSheet(
+            f"color: {styles.CLR_WARNING}; font-size: 8pt; font-weight: bold;"
+        )
+        self._keyring_warn.setWordWrap(True)
+        self._keyring_warn.setVisible(False)
+        graph_form.addRow("", self._keyring_warn)
+
         note = QLabel(
             "💡 Requires an Azure App Registration with Mail.Send permission.\n"
             "    Azure Portal → App registrations → Your App → Certificates & secrets"
@@ -451,18 +463,21 @@ class SettingsScreen(QWidget):
         # Only clear the DB copy if keyring storage confirmed success.
         db_secret = settings.get("graph_client_secret", "")
         keyring_secret = get_secret("graph_client_secret")
+        using_db_fallback = False
+
         if db_secret and not keyring_secret:
             if set_secret("graph_client_secret", db_secret):
                 keyring_secret = db_secret
                 _save_setting("graph_client_secret", "")
             else:
-                # Keyring unavailable — keep the DB copy and use it directly.
                 keyring_secret = db_secret
+                using_db_fallback = True
 
-        # If keyring returned nothing but the DB still has a value, use that.
         if not keyring_secret and db_secret:
             keyring_secret = db_secret
+            using_db_fallback = True
 
+        self._keyring_warn.setVisible(using_db_fallback)
         self._fields["graph_client_secret"].setText(keyring_secret)
         self._load_api_key()
         self._load_users()

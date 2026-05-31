@@ -1,23 +1,19 @@
 import sqlite3
 from datetime import datetime
 
-from database.connection import get_connection
+from database.connection import db_conn
 
 
 def get_by_barcode(barcode):
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT * FROM stock_on_hand WHERE barcode = ?", (barcode,)
         ).fetchone()
         return dict(row) if row else None
-    finally:
-        conn.release()
 
 
 def get_all_with_product():
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return conn.execute("""
             SELECT s.*, p.description, p.reorder_point, p.reorder_qty, d.name as dept_name
             FROM stock_on_hand s
@@ -26,13 +22,10 @@ def get_all_with_product():
             WHERE p.active = 1
             ORDER BY d.name, p.description
         """).fetchall()
-    finally:
-        conn.release()
 
 
 def get_below_reorder():
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         return conn.execute("""
             SELECT s.barcode, p.description, s.quantity, p.reorder_point, p.reorder_qty,
                    sup.name as supplier_name, d.name as dept_name
@@ -43,32 +36,26 @@ def get_below_reorder():
             WHERE s.quantity <= p.reorder_point AND p.active = 1
             ORDER BY p.description
         """).fetchall()
-    finally:
-        conn.release()
 
 
 def get_by_barcodes(barcodes):
     """Return a {barcode: quantity} map for a list of barcodes in a single query."""
     if not barcodes:
         return {}
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         placeholders = ",".join("?" * len(barcodes))
         rows = conn.execute(
             f"SELECT barcode, quantity FROM stock_on_hand WHERE barcode IN ({placeholders})",
             barcodes
         ).fetchall()
         return {r["barcode"]: r["quantity"] for r in rows}
-    finally:
-        conn.release()
 
 
 def adjust(barcode, quantity, movement_type, reference='', notes='', created_by=''):
     from database.audit_context import get_user, get_source
     who = created_by or get_user()
     src = get_source()
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("""
             INSERT INTO stock_on_hand (barcode, quantity)
             VALUES (?, ?)
@@ -82,11 +69,6 @@ def adjust(barcode, quantity, movement_type, reference='', notes='', created_by=
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (barcode, movement_type, quantity, reference, notes, who, src))
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
 
 
 def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items: list) -> bool:
@@ -111,8 +93,7 @@ def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items:
 
     from database.audit_context import get_source
     src = get_source()
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         # Idempotency gate: claim the reference before touching stock.
         # If the POS retries after a network timeout, this INSERT fails and
         # we return False without touching SOH or movements a second time.
@@ -175,8 +156,3 @@ def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items:
 
         conn.commit()
         return True
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.release()
