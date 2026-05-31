@@ -143,7 +143,7 @@ def _log_response(response):
     duration_ms = (time.monotonic() - getattr(g, 'request_start', time.monotonic())) * 1000
     req_id = getattr(g, 'request_id', '--------')
     response.headers['X-Request-ID'] = req_id
-    msg  = "API %s %s → %d (%.1f ms) [req=%s]"
+    msg  = "API %s %s -> %d (%.1f ms) [req=%s]"
     args = (request.method, request.path, response.status_code, duration_ms, req_id)
     if response.status_code == 401:
         logging.warning(msg, *args)
@@ -447,7 +447,7 @@ if __name__ == "__main__":
     _get_api_key()
     if args.no_tls:
         from waitress import serve as _waitress_serve
-        print(f"BackOfficePro API → http://{args.host}:{args.port}  (TLS disabled)")
+        print(f"BackOfficePro API -> http://{args.host}:{args.port}  (TLS disabled)")
         print("API key loaded from keyring/DB. Pass as header: X-API-Key: <key>")
         _waitress_serve(app, host=args.host, port=args.port, threads=args.threads)
     else:

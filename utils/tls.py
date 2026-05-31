@@ -139,8 +139,8 @@ def serve_tls(flask_app, host: str, port: int, threads: int = 4) -> None:
 
     httpd = make_server(host, port, flask_app, server_class=_ThreadingWSGIServer)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
-    logging.info("BackOfficePro API → https://%s:%d  (TLS, self-signed)", host, port)
-    print(f"BackOfficePro API → https://{host}:{port}")
+    logging.info("BackOfficePro API -> https://%s:%d  (TLS, self-signed)", host, port)
+    print(f"BackOfficePro API -> https://{host}:{port}")
     print(f"TLS cert: {cert_path}")
     print("API key loaded from keyring/DB. Pass as header: X-API-Key: <key>")
     httpd.serve_forever()
