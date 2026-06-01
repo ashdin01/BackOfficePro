@@ -2,9 +2,10 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
     QLineEdit, QDoubleSpinBox, QDialog, QFormLayout, QSpinBox,
-    QFileDialog, QAbstractItemView, QDialogButtonBox, QDateEdit, QFrame
+    QFileDialog, QAbstractItemView, QDialogButtonBox, QDateEdit, QFrame,
+    QProgressDialog,
 )
-from PyQt6.QtCore import Qt, QTimer, QUrl, QDate
+from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, QDate, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.error_dialog import show_error
@@ -22,6 +23,35 @@ from utils.calculations import week_bounds, fy_bounds
 from views.base_view import BaseView
 from views.purchase_orders.item_lookup_dialog import ItemLookupDialog
 from views.purchase_orders.add_line_dialog import AddLineDialog
+
+
+class _PoEmailWorker(QThread):
+    """Generates the PO PDF and sends via MS Graph on a background thread.
+
+    Emits success(pdf_path) when the Graph API returns 202.
+    Emits failure(error_message) on any exception so the PO status is
+    never updated unless the email was actually accepted for delivery.
+    """
+    success = pyqtSignal(str)   # pdf_path
+    failure = pyqtSignal(str)   # human-readable error
+
+    def __init__(self, po_id: int, supplier_email: str):
+        super().__init__()
+        self._po_id = po_id
+        self._supplier_email = supplier_email
+
+    def run(self):
+        try:
+            import controllers.purchase_order_controller as _po_ctrl
+            path = _po_ctrl.send_po_email(self._po_id, self._supplier_email)
+            self.success.emit(path)
+        except Exception as exc:
+            import logging
+            logging.error("PO email worker failed", exc_info=True)
+            self.failure.emit(str(exc))
+        finally:
+            from database.connection import close_thread_connection
+            close_thread_connection()
 
 
 class PODetail(BaseView):
@@ -263,7 +293,6 @@ class PODetail(BaseView):
             QMessageBox.critical(self, "PDF Export Failed", f"Could not generate the PDF.\n\nDetail: {e}")
 
     def _email_po(self):
-        import os
         import logging
         from PyQt6.QtWidgets import QInputDialog
 
@@ -311,16 +340,39 @@ class PODetail(BaseView):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        try:
-            po_controller.send_po_email(self.po_id, supplier_email)
+        # ── Send on a background thread so the UI stays responsive ───
+        progress = QProgressDialog("Sending email…", None, 0, 0, self)
+        progress.setWindowTitle("Sending")
+        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress.setMinimumDuration(0)
+        progress.setCancelButton(None)   # not cancellable mid-flight
+        progress.setRange(0, 0)          # indeterminate busy indicator
+
+        self._email_worker = _PoEmailWorker(self.po_id, supplier_email)
+
+        def _on_success(_pdf_path: str):
+            progress.close()
             self.load()
             if self.on_save:
                 self.on_save()
-            QMessageBox.information(self, "Email Sent", f"✓ {_doc_title} {po['po_number']} sent to:\n{supplier_email}")
-        except Exception as e:
-            import logging
-            logging.error(f"Email send failed: {e}", exc_info=True)
-            QMessageBox.critical(self, "Email Failed", f"Could not send the email.\n\nDetail: {e}")
+            QMessageBox.information(
+                self, "Email Sent",
+                f"✓ {_doc_title} {po['po_number']} sent to:\n{supplier_email}\n\n"
+                "Purchase order marked as Sent."
+            )
+
+        def _on_failure(msg: str):
+            progress.close()
+            logging.error("PO email failed: %s", msg)
+            QMessageBox.critical(
+                self, "Email Failed",
+                f"The email could not be sent — purchase order status has not changed.\n\n{msg}"
+            )
+
+        self._email_worker.success.connect(_on_success)
+        self._email_worker.failure.connect(_on_failure)
+        self._email_worker.start()
+        progress.exec()   # spins the event loop; closes when worker emits
 
     def _export_csv(self):
         if self.table.rowCount() == 0:
