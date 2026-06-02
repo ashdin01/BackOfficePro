@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=BackOfficePro
+Comment=BackOfficePro Point of Sale and Back Office Management
+Exec=bash -c "cd $HOME/BackOfficePro && source venv/bin/activate && python3 main.py"
+Icon=backofficeproicon
+Type=Application
+Categories=Office;Finance;
+StartupWMClass=BackOfficePro

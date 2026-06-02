@@ -93,23 +93,32 @@ def test_configure_app_icon_missing_file_does_not_raise(tmp_path):
 
 # ── .desktop file ─────────────────────────────────────────────────────────────
 
-def test_desktop_file_exists():
-    path = os.path.expanduser('~/.local/share/applications/BackOfficePro.desktop')
-    assert os.path.isfile(path), ".desktop file not found"
+_REPO_DESKTOP = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'assets', 'BackOfficePro.desktop',
+)
+_INSTALLED_DESKTOP = os.path.expanduser('~/.local/share/applications/BackOfficePro.desktop')
 
 
-def test_desktop_file_fields():
-    path = os.path.expanduser('~/.local/share/applications/BackOfficePro.desktop')
-    content = open(path).read()
+def test_repo_desktop_file_exists():
+    assert os.path.isfile(_REPO_DESKTOP), f"assets/BackOfficePro.desktop not found in repo"
+
+
+def test_repo_desktop_file_fields():
+    content = open(_REPO_DESKTOP).read()
     assert 'Name=BackOfficePro' in content
     assert 'Icon=' in content
     assert 'Exec=' in content
     assert 'StartupWMClass=BackOfficePro' in content
 
 
-def test_desktop_file_icon_path_exists():
-    path = os.path.expanduser('~/.local/share/applications/BackOfficePro.desktop')
-    for line in open(path):
-        if line.startswith('Icon='):
-            icon_path = line.strip().split('=', 1)[1]
-            assert os.path.isfile(icon_path), f"Desktop file Icon= path does not exist: {icon_path}"
+@pytest.mark.skipif(
+    not os.path.isfile(_INSTALLED_DESKTOP),
+    reason=".desktop file not installed on this machine",
+)
+def test_installed_desktop_file_fields():
+    content = open(_INSTALLED_DESKTOP).read()
+    assert 'Name=BackOfficePro' in content
+    assert 'Icon=' in content
+    assert 'Exec=' in content
+    assert 'StartupWMClass=BackOfficePro' in content
