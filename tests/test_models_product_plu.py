@@ -89,3 +89,21 @@ class TestDuplicatePluGroups:
         groups = plu_model.get_duplicate_plu_groups()
         assert len(groups) == 2
         assert all(r['plu'] == '77' for r in groups)
+
+
+class TestGetPluMapConflicts:
+    def test_returns_empty_when_no_conflicts(self, test_db):
+        assert plu_model.get_plu_map_conflicts() == []
+
+    def test_detects_conflict(self, test_db, product_barcode, db_conn):
+        # Set product plu to '100', plu_barcode_map to plu=200
+        db_conn.execute(
+            "UPDATE products SET plu='100' WHERE barcode=?", (product_barcode,)
+        )
+        db_conn.execute(
+            "INSERT OR REPLACE INTO plu_barcode_map (plu, barcode) VALUES (200, ?)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        conflicts = plu_model.get_plu_map_conflicts()
+        assert any(r['barcode'] == product_barcode for r in conflicts)

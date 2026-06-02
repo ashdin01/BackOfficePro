@@ -509,3 +509,140 @@ def test_bundles_returns_list(api_client):
     r = client.get("/api/v1/bundles", headers=_h(key))
     assert r.status_code == 200
     assert isinstance(r.get_json(), list)
+
+
+# ── Product image endpoints ───────────────────────────────────────────────────
+
+def test_get_product_image_404_when_no_image(api_client, product_barcode):
+    client, key = api_client
+    r = client.get(f"/api/v1/products/{product_barcode}/image", headers=_h(key))
+    assert r.status_code == 404
+
+
+def test_get_product_image_400_for_bad_barcode(api_client):
+    client, key = api_client
+    r = client.get("/api/v1/products/../../etc/passwd/image", headers=_h(key))
+    assert r.status_code in (400, 404)
+
+
+def test_delete_product_image_ok_when_no_image(api_client, product_barcode):
+    client, key = api_client
+    r = client.delete(f"/api/v1/products/{product_barcode}/image", headers=_h(key))
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is False
+
+
+def test_get_product_image_serves_file(api_client, product_barcode, tmp_path, monkeypatch):
+    import controllers.product_controller as pc
+    img = tmp_path / f"{product_barcode}.jpg"
+    img.write_bytes(b"FAKEJPEG")
+    monkeypatch.setattr(pc, "find_product_image", lambda bc: str(img))
+    client, key = api_client
+    r = client.get(f"/api/v1/products/{product_barcode}/image", headers=_h(key))
+    assert r.status_code == 200
+
+
+# ── Products: limit/offset pagination ────────────────────────────────────────
+
+def test_list_products_with_limit_offset(api_client):
+    client, key = api_client
+    r = client.get("/api/v1/products?limit=5&offset=0", headers=_h(key))
+    assert r.status_code == 200
+
+
+def test_list_products_invalid_limit_returns_400(api_client):
+    client, key = api_client
+    r = client.get("/api/v1/products?limit=abc", headers=_h(key))
+    assert r.status_code == 400
+
+
+# ── POS sale error paths ──────────────────────────────────────────────────────
+
+def test_pos_sale_db_locked_returns_503(api_client, product_barcode, monkeypatch):
+    import sqlite3
+    import controllers.sales_report_controller as sr
+    monkeypatch.setattr(
+        sr, "record_pos_sale",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            sqlite3.OperationalError("database is locked")
+        ),
+    )
+    client, key = api_client
+    payload = {
+        "reference": "ERR-LOCK-001",
+        "sale_date": "2026-05-01",
+        "operator": "test",
+        "items": [{"barcode": product_barcode, "qty": 1,
+                   "unit_price": 3.50, "line_total": 3.50, "description": "X"}],
+    }
+    r = client.post("/api/v1/pos/sale", json=payload, headers=_h(key))
+    assert r.status_code == 503
+
+
+def test_pos_sale_generic_error_returns_500(api_client, product_barcode, monkeypatch):
+    import controllers.sales_report_controller as sr
+    monkeypatch.setattr(
+        sr, "record_pos_sale",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    client, key = api_client
+    payload = {
+        "reference": "ERR-BOOM-001",
+        "sale_date": "2026-05-01",
+        "operator": "test",
+        "items": [{"barcode": product_barcode, "qty": 1,
+                   "unit_price": 3.50, "line_total": 3.50, "description": "X"}],
+    }
+    r = client.post("/api/v1/pos/sale", json=payload, headers=_h(key))
+    assert r.status_code == 500
+
+
+# ── add_count edge cases ──────────────────────────────────────────────────────
+
+def test_add_count_qty_over_limit_returns_400(api_client, db_conn, supplier_id, product_barcode):
+    import controllers.stocktake_controller as st_ctrl
+    session_id = st_ctrl.create_session("Test")
+    client, key = api_client
+    r = client.post(
+        f"/api/v1/sessions/{session_id}/counts",
+        json={"barcode": product_barcode, "qty": 100000},
+        headers=_h(key),
+    )
+    assert r.status_code == 400
+
+
+def test_add_count_product_not_found_returns_404(api_client, db_conn, supplier_id):
+    import controllers.stocktake_controller as st_ctrl
+    session_id = st_ctrl.create_session("Test2")
+    client, key = api_client
+    r = client.post(
+        f"/api/v1/sessions/{session_id}/counts",
+        json={"barcode": "0000000000000", "qty": 1},
+        headers=_h(key),
+    )
+    assert r.status_code == 404
+
+
+# ── _get_api_key double-checked locking ──────────────────────────────────────
+
+def test_get_api_key_fast_path_returns_cached(api_client):
+    import api_server
+    key1 = api_server._get_api_key()
+    key2 = api_server._get_api_key()
+    assert key1 == key2 and len(key1) > 0
+
+
+# ── Bundles with eligible items ───────────────────────────────────────────────
+
+def test_bundles_with_eligible_items(api_client, db_conn, product_barcode):
+    from controllers.bundle_controller import create as create_bundle
+    from controllers.bundle_controller import add_eligible
+    bundle_id = create_bundle("Test Bundle", "", 4, 12.00)
+    add_eligible(bundle_id, product_barcode, "Test Product", unit_qty=1)
+    client, key = api_client
+    r = client.get("/api/v1/bundles", headers=_h(key))
+    assert r.status_code == 200
+    bundles = r.get_json()
+    b = next((b for b in bundles if b["id"] == bundle_id), None)
+    assert b is not None
+    assert len(b["eligible"]) == 1

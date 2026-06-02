@@ -250,3 +250,25 @@ def test_get_products_with_stock(test_db, product_barcode):
     assert isinstance(products, list)
     barcodes = [p['barcode'] for p in products]
     assert product_barcode in barcodes
+
+
+def test_ensure_plu_map_table(test_db):
+    sr_ctrl.ensure_plu_map_table()
+
+
+def test_get_departments(test_db):
+    depts = sr_ctrl.get_departments()
+    assert isinstance(depts, list)
+    assert any(d['code'] == 'GROC' for d in depts)
+
+
+def test_get_suppliers(test_db, supplier_id):
+    suppliers = sr_ctrl.get_suppliers()
+    assert isinstance(suppliers, list)
+
+
+def test_update_product_barcode(test_db, product_barcode):
+    new_bc = '9300000099880'
+    sr_ctrl.update_product_barcode(product_barcode, new_bc)
+    import models.product as product_model
+    assert product_model.get_by_barcode(new_bc) is not None

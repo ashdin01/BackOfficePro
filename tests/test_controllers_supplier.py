@@ -55,3 +55,7 @@ class TestSupplierCRUD:
         products = sup_ctrl.get_products(supplier_id, default_only=False)
         barcodes = [p['barcode'] for p in products]
         assert product_barcode in barcodes
+
+    def test_get_order_due_today(self, test_db):
+        result = sup_ctrl.get_order_due_today()
+        assert isinstance(result, list)

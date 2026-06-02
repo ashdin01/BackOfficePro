@@ -145,3 +145,16 @@ class TestInactiveProducts:
         result = auto_map_plu_barcodes()
         # PLU 300 belongs to an inactive product — should appear in unmapped
         assert "300" in result["unmapped"]
+
+
+class TestAutoMapPluBarcodesException:
+    def test_exception_returns_empty_result_dict(self, test_db, monkeypatch):
+        import utils.auto_plu_map as apm_mod
+        from unittest.mock import MagicMock
+
+        def bad_get_connection():
+            raise Exception("DB offline")
+
+        monkeypatch.setattr(apm_mod, "get_connection", bad_get_connection)
+        result = auto_map_plu_barcodes()
+        assert result == {"mapped": [], "skipped": [], "unmapped": []}

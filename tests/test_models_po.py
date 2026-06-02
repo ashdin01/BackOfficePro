@@ -159,3 +159,77 @@ class TestPoReverse:
     def test_reverse_nonexistent_po_raises(self, test_db):
         with pytest.raises(ValueError):
             po_model.reverse(99999, "admin")
+
+
+# ── po_lines.receive() optional params ────────────────────────────────────────
+
+class TestPoLinesReceive:
+    def _setup_line(self, db_conn, supplier_id, product_barcode):
+        db_conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)
+            VALUES ('PO-RECV-001', ?, 'SENT', 'PO')
+        """, (supplier_id,))
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='PO-RECV-001'"
+        ).fetchone()["id"]
+        db_conn.execute("""
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, unit_cost, pack_qty)
+            VALUES (?, ?, 'Product', 10, 2.00, 1)
+        """, (po_id, product_barcode))
+        db_conn.commit()
+        return db_conn.execute(
+            "SELECT id FROM po_lines WHERE po_id=?", (po_id,)
+        ).fetchone()["id"]
+
+    def test_receive_basic(self, test_db, db_conn, supplier_id, product_barcode):
+        import models.po_lines as po_lines_model
+        line_id = self._setup_line(db_conn, supplier_id, product_barcode)
+        po_lines_model.receive(line_id, 5.0)
+        row = db_conn.execute(
+            "SELECT received_qty FROM po_lines WHERE id=?", (line_id,)
+        ).fetchone()
+        assert row["received_qty"] == pytest.approx(5.0)
+
+    def test_receive_with_actual_cost(self, test_db, db_conn, supplier_id, product_barcode):
+        import models.po_lines as po_lines_model
+        line_id = self._setup_line(db_conn, supplier_id, product_barcode)
+        po_lines_model.receive(line_id, 5.0, actual_cost=2.50)
+        row = db_conn.execute(
+            "SELECT actual_cost FROM po_lines WHERE id=?", (line_id,)
+        ).fetchone()
+        assert row["actual_cost"] == pytest.approx(2.50)
+
+    def test_receive_with_unit_cost(self, test_db, db_conn, supplier_id, product_barcode):
+        import models.po_lines as po_lines_model
+        line_id = self._setup_line(db_conn, supplier_id, product_barcode)
+        po_lines_model.receive(line_id, 5.0, unit_cost=3.00)
+        row = db_conn.execute(
+            "SELECT unit_cost FROM po_lines WHERE id=?", (line_id,)
+        ).fetchone()
+        assert row["unit_cost"] == pytest.approx(3.00)
+
+    def test_receive_with_is_promo(self, test_db, db_conn, supplier_id, product_barcode):
+        import models.po_lines as po_lines_model
+        line_id = self._setup_line(db_conn, supplier_id, product_barcode)
+        po_lines_model.receive(line_id, 5.0, is_promo=True)
+        row = db_conn.execute(
+            "SELECT is_promo FROM po_lines WHERE id=?", (line_id,)
+        ).fetchone()
+        assert row["is_promo"] == 1
+
+    def test_receive_with_is_promo_false(self, test_db, db_conn, supplier_id, product_barcode):
+        import models.po_lines as po_lines_model
+        line_id = self._setup_line(db_conn, supplier_id, product_barcode)
+        po_lines_model.receive(line_id, 5.0, is_promo=False)
+        row = db_conn.execute(
+            "SELECT is_promo FROM po_lines WHERE id=?", (line_id,)
+        ).fetchone()
+        assert row["is_promo"] == 0
+
+
+# ── po_lines.get_on_order_units([]) ──────────────────────────────────────────
+
+def test_get_on_order_units_empty_list(test_db):
+    import models.po_lines as po_lines_model
+    assert po_lines_model.get_on_order_units([]) == {}

@@ -11,8 +11,13 @@ import config.styles as styles
 _MAX_ATTEMPTS = 5
 _LOCKOUT_SECONDS = 30
 
-# Module-level: survives login screen close/reopen within the same app session,
-# preventing bypass by dismissing and reopening the widget.
+# Module-level counters survive login screen close/reopen within the same app
+# session, preventing bypass by dismissing and reopening the widget.
+# Limitation: counters reset on application restart. A determined attacker
+# with physical access can brute-force PINs by restarting the app. This is
+# accepted for a local desktop application — the primary threat model assumes
+# the machine itself is in a controlled environment. If stricter lockout is
+# required, persist counters to the settings table.
 _failed_attempts: dict = {}  # username -> int
 _lockout_until: dict = {}    # username -> datetime
 

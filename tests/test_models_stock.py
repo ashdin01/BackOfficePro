@@ -128,3 +128,94 @@ class TestGetBelowReorder:
         soh_model.adjust(product_barcode, 0, "RECEIPT", "", "", "admin")
         results = soh_model.get_below_reorder()
         assert any(r["barcode"] == product_barcode for r in results)
+
+
+# ── get_by_barcodes edge cases ────────────────────────────────────────────────
+
+class TestGetByBarcodes:
+    def test_empty_list_returns_empty_dict(self, test_db):
+        assert soh_model.get_by_barcodes([]) == {}
+
+    def test_returns_quantities_for_known_barcodes(self, test_db, product_barcode):
+        soh_model.adjust(product_barcode, 10, "RECEIPT", "", "", "")
+        result = soh_model.get_by_barcodes([product_barcode])
+        assert product_barcode in result
+        assert result[product_barcode] == pytest.approx(10.0)
+
+    def test_unknown_barcode_not_in_result(self, test_db, product_barcode):
+        result = soh_model.get_by_barcodes([product_barcode, '0000000000000'])
+        assert '0000000000000' not in result
+
+
+# ── record_pos_sale_atomic ────────────────────────────────────────────────────
+
+class TestRecordPosSaleAtomic:
+    def test_happy_path_returns_true_and_reduces_stock(
+        self, test_db, product_barcode, db_conn
+    ):
+        db_conn.execute(
+            "INSERT OR REPLACE INTO stock_on_hand (barcode, quantity) VALUES (?, 20)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        items = [{'barcode': product_barcode, 'qty': 3, 'line_total': 10.50, 'description': 'Test'}]
+        result = soh_model.record_pos_sale_atomic('REF-001', '2026-05-01', 'cashier', items)
+        assert result is True
+        row = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+        ).fetchone()
+        assert row["quantity"] == pytest.approx(17.0)
+
+    def test_duplicate_reference_returns_false(
+        self, test_db, product_barcode, db_conn
+    ):
+        db_conn.execute(
+            "INSERT OR REPLACE INTO stock_on_hand (barcode, quantity) VALUES (?, 20)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        items = [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50, 'description': 'T'}]
+        soh_model.record_pos_sale_atomic('REF-DUP', '2026-05-01', 'cashier', items)
+        result = soh_model.record_pos_sale_atomic('REF-DUP', '2026-05-01', 'cashier', items)
+        assert result is False
+
+    def test_invalid_sale_date_raises(self, test_db, product_barcode):
+        items = [{'barcode': product_barcode, 'qty': 1, 'line_total': 1.0, 'description': 'X'}]
+        with pytest.raises(ValueError, match="YYYY-MM-DD"):
+            soh_model.record_pos_sale_atomic('REF-BAD', 'not-a-date', 'cashier', items)
+
+    def test_zero_qty_item_skipped(self, test_db, product_barcode, db_conn):
+        db_conn.execute(
+            "INSERT OR REPLACE INTO stock_on_hand (barcode, quantity) VALUES (?, 10)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        items = [{'barcode': product_barcode, 'qty': 0, 'line_total': 0, 'description': 'X'}]
+        soh_model.record_pos_sale_atomic('REF-ZERO', '2026-05-01', 'cashier', items)
+        row = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+        ).fetchone()
+        # qty=0 is skipped — SOH unchanged
+        assert row["quantity"] == pytest.approx(10.0)
+
+    def test_selling_unit_uses_master_barcode(
+        self, test_db, product_barcode, db_conn
+    ):
+        su_bc = '9300000099888'
+        db_conn.execute("""
+            INSERT INTO product_selling_units
+                (master_barcode, barcode, label, unit_qty, sell_price, active)
+            VALUES (?, ?, '2-pack', 2, 7.00, 1)
+        """, (product_barcode, su_bc))
+        db_conn.execute(
+            "INSERT OR REPLACE INTO stock_on_hand (barcode, quantity) VALUES (?, 10)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        items = [{'barcode': su_bc, 'qty': 1, 'line_total': 7.00, 'description': '2-pack'}]
+        soh_model.record_pos_sale_atomic('REF-SU', '2026-05-01', 'cashier', items)
+        row = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+        ).fetchone()
+        # 1 selling unit = 2 master units consumed
+        assert row["quantity"] == pytest.approx(8.0)

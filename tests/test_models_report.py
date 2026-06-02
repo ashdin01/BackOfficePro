@@ -152,3 +152,182 @@ class TestGetGstReport:
         result = report_model.get_gst_report("2020-01-01", "2020-12-31")
         assert result["sales"]["gst_collected"] == pytest.approx(0.0)
         assert result["purchases"]["gst_paid"] == pytest.approx(0.0)
+
+    def test_gst_free_sales_counted_in_exempt(self, test_db, db_conn, product_barcode):
+        # GST-free product (tax_rate=0) — sales counted as exempt
+        db_conn.execute("UPDATE products SET tax_rate=0 WHERE barcode=?", (product_barcode,))
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (400, ?)",
+            (product_barcode,)
+        )
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES ('2026-05-01', '400', 'GST Free Item', 2, 10.00)
+        """)
+        db_conn.commit()
+        result = report_model.get_gst_report("2026-05-01", "2026-05-01")
+        assert result["sales"]["exempt_sales"] == pytest.approx(10.00)
+
+
+class TestGetStockMovementsDateFilters:
+    def test_filter_by_date_from(self, test_db, db_conn, product_barcode):
+        db_conn.execute("""
+            INSERT INTO stock_movements (barcode, movement_type, quantity, reference,
+                                         created_by, source, created_at)
+            VALUES (?, 'RECEIPT', 5, 'PO-DATE', 'test', 'UI', '2026-04-01 10:00:00')
+        """, (product_barcode,))
+        db_conn.commit()
+        rows = report_model.get_stock_movements(date_from="2026-05-01")
+        assert not any(r["reference"] == "PO-DATE" for r in rows)
+
+    def test_filter_by_date_to(self, test_db, db_conn, product_barcode):
+        db_conn.execute("""
+            INSERT INTO stock_movements (barcode, movement_type, quantity, reference,
+                                         created_by, source, created_at)
+            VALUES (?, 'RECEIPT', 5, 'PO-FUTURE', 'test', 'UI', '2026-12-01 10:00:00')
+        """, (product_barcode,))
+        db_conn.commit()
+        rows = report_model.get_stock_movements(date_to="2026-01-01")
+        assert not any(r["reference"] == "PO-FUTURE" for r in rows)
+
+
+class TestGetGpData:
+    def test_returns_list(self, test_db, product_barcode):
+        rows = report_model.get_gp_data()
+        assert isinstance(rows, list)
+
+    def test_dept_filter_reduces_results(self, test_db, product_barcode, dept_id):
+        all_rows = report_model.get_gp_data()
+        filtered  = report_model.get_gp_data(dept_id=dept_id)
+        assert len(filtered) <= len(all_rows)
+
+    def test_healthy_filter(self, test_db, product_barcode):
+        rows = report_model.get_gp_data(gp_filter="healthy")
+        assert isinstance(rows, list)
+
+    def test_marginal_filter(self, test_db, product_barcode):
+        rows = report_model.get_gp_data(gp_filter="marginal")
+        assert isinstance(rows, list)
+
+    def test_low_filter(self, test_db, product_barcode):
+        rows = report_model.get_gp_data(gp_filter="low")
+        assert isinstance(rows, list)
+
+
+class TestGetGpSummary:
+    def test_returns_list(self, test_db):
+        assert isinstance(report_model.get_gp_summary(), list)
+
+    def test_dept_filter(self, test_db, dept_id):
+        rows = report_model.get_gp_summary(dept_id=dept_id)
+        assert isinstance(rows, list)
+
+
+class TestGetLiquorTracking:
+    def test_returns_list(self, test_db):
+        rows = report_model.get_liquor_tracking(date_from="2026-01-01", date_to="2026-12-31")
+        assert isinstance(rows, list)
+
+    def test_dept_filter(self, test_db, dept_id):
+        rows = report_model.get_liquor_tracking(
+            dept_id=dept_id, date_from="2026-01-01", date_to="2026-12-31"
+        )
+        assert isinstance(rows, list)
+
+
+class TestGetSupplierSales:
+    def test_returns_rows_and_totals(self, test_db):
+        rows, totals = report_model.get_supplier_sales()
+        assert isinstance(rows, list)
+        assert isinstance(totals, list)
+        assert len(totals) == 8
+
+    def test_supplier_filter(self, test_db, supplier_id):
+        rows, totals = report_model.get_supplier_sales(supplier_id=supplier_id)
+        assert isinstance(rows, list)
+
+    def test_with_sales_data_aggregated_in_sql(
+        self, test_db, db_conn, supplier_id, product_barcode
+    ):
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (501, ?)",
+            (product_barcode,)
+        )
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES ('2000-01-15', '501', 'Test Product', 7, 24.50)
+        """)
+        db_conn.commit()
+        rows, totals = report_model.get_supplier_sales(supplier_id=supplier_id)
+        assert isinstance(rows, list)
+        row = next((r for r in rows if r['barcode'] == product_barcode), None)
+        assert row is not None
+        assert len(row['qty']) == 8
+        # w7 is 'all time' (2000-01-01 to today), must include our 7-unit sale
+        assert row['qty'][7] == 7
+        assert totals[7] >= 7
+
+
+class TestGetWriteoffData:
+    def test_returns_list(self, test_db):
+        rows = report_model.get_writeoff_data("2026-01-01", "2026-12-31")
+        assert isinstance(rows, list)
+
+    def test_dept_filter(self, test_db, dept_id):
+        rows = report_model.get_writeoff_data("2026-01-01", "2026-12-31", dept_id=dept_id)
+        assert isinstance(rows, list)
+
+    def test_spoilage_category_filter(self, test_db):
+        rows = report_model.get_writeoff_data("2026-01-01", "2026-12-31", category="Spoilage")
+        assert isinstance(rows, list)
+
+    def test_shrinkage_category_filter(self, test_db):
+        rows = report_model.get_writeoff_data("2026-01-01", "2026-12-31", category="Shrinkage")
+        assert isinstance(rows, list)
+
+    def test_admin_category_filter(self, test_db):
+        rows = report_model.get_writeoff_data("2026-01-01", "2026-12-31", category="Admin")
+        assert isinstance(rows, list)
+
+
+class TestGetCombinedDailyRevenue:
+    def test_returns_dict(self, test_db):
+        result = report_model.get_combined_daily_revenue("2026-05-01", "2026-05-31")
+        assert isinstance(result, dict)
+
+    def test_pos_sales_appear(self, test_db, db_conn):
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES ('2026-05-10', '999', 'Product', 1, 5.00)
+        """)
+        db_conn.commit()
+        result = report_model.get_combined_daily_revenue("2026-05-01", "2026-05-31")
+        assert "2026-05-10" in result
+        assert result["2026-05-10"]["pos"] == pytest.approx(5.00)
+
+    def test_ar_sales_appear(self, test_db, customer_id, db_conn):
+        db_conn.execute("""
+            INSERT INTO ar_invoices
+                (invoice_number, customer_id, invoice_date, due_date, status,
+                 subtotal, gst_amount, total)
+            VALUES ('INV-REV01', ?, '2026-05-12', '2026-06-30', 'SENT',
+                    100.0, 10.0, 110.0)
+        """, (customer_id,))
+        db_conn.commit()
+        result = report_model.get_combined_daily_revenue("2026-05-01", "2026-05-31")
+        assert "2026-05-12" in result
+        assert result["2026-05-12"]["ar"] == pytest.approx(110.0)
+
+
+class TestGetReorderItemsFilters:
+    def test_returns_list(self, test_db):
+        rows = report_model.get_reorder_items()
+        assert isinstance(rows, list)
+
+    def test_dept_filter(self, test_db, dept_id):
+        rows = report_model.get_reorder_items(dept_id=dept_id)
+        assert isinstance(rows, list)
+
+    def test_supplier_filter(self, test_db, supplier_id):
+        rows = report_model.get_reorder_items(supplier_id=supplier_id)
+        assert isinstance(rows, list)

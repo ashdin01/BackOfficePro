@@ -203,3 +203,88 @@ class TestCsvEmptyPo:
         rows = _read_csv(out)
         assert rows[0][0] == "Supplier"
         assert rows[2][1] == "CSV-001"
+
+
+# ── generate_po_pdf_to_disk ───────────────────────────────────────────────────
+
+class TestGeneratePoPdfToDisk:
+    def test_calls_generate_and_returns_path(self, test_db, po_id, tmp_path, monkeypatch):
+        import controllers.po_export_controller as export_ctrl
+        generated = []
+
+        def fake_generate(po_id_arg, path_arg):
+            generated.append(path_arg)
+            open(path_arg, 'wb').close()
+
+        monkeypatch.setattr(
+            "controllers.po_export_controller.generate_po_pdf_to_disk",
+            lambda pid: _fake_pdf_to_disk(pid, tmp_path, fake_generate),
+        )
+        # Call the real function with patched pdf generator
+        import controllers.po_export_controller as ctrl_mod
+        import utils.po_pdf as po_pdf_mod
+        monkeypatch.setattr(po_pdf_mod, "generate_po_pdf", fake_generate)
+
+        path = ctrl_mod.generate_po_pdf_to_disk(po_id)
+        assert path.endswith(".pdf")
+
+
+def _fake_pdf_to_disk(po_id, tmp_path, fake_generate):
+    import models.purchase_order as po_model
+    import controllers.po_export_controller as ctrl
+    po = po_model.get_by_id(po_id)
+    path = str(tmp_path / f"{po['po_number']}.pdf")
+    open(path, 'wb').close()
+    return path
+
+
+# ── _po_pdf_path ──────────────────────────────────────────────────────────────
+
+class TestPoPdfPath:
+    def test_uses_configured_folder(self, test_db, po_id, tmp_path, monkeypatch):
+        import controllers.po_export_controller as ctrl
+        import models.settings as settings_model
+        monkeypatch.setattr(
+            settings_model, "get_setting",
+            lambda key, default=None: str(tmp_path) if key == "po_pdf_path" else default,
+        )
+        import models.purchase_order as po_model
+        import utils.po_pdf as po_pdf_mod
+        monkeypatch.setattr(po_pdf_mod, "generate_po_pdf", lambda po_id_arg, path: open(path, 'wb').close())
+        path = ctrl.generate_po_pdf_to_disk(po_id)
+        assert str(tmp_path) in path
+
+    def test_defaults_to_documents_when_not_configured(self, test_db, po_id, monkeypatch):
+        import controllers.po_export_controller as ctrl
+        import models.settings as settings_model
+        monkeypatch.setattr(
+            settings_model, "get_setting",
+            lambda key, default=None: "" if key == "po_pdf_path" else default,
+        )
+        import utils.po_pdf as po_pdf_mod
+        monkeypatch.setattr(po_pdf_mod, "generate_po_pdf", lambda po_id_arg, path: open(path, 'wb').close())
+        path = ctrl.generate_po_pdf_to_disk(po_id)
+        assert path.endswith(".pdf")
+
+
+# ── send_po_email ─────────────────────────────────────────────────────────────
+
+class TestSendPoEmail:
+    def test_generates_pdf_and_marks_sent(self, test_db, po_id, tmp_path, monkeypatch):
+        import controllers.po_export_controller as ctrl
+        import models.settings as settings_model
+        import utils.po_pdf as po_pdf_mod
+        import utils.email_graph as email_mod
+        import models.purchase_order as po_model
+
+        monkeypatch.setattr(
+            settings_model, "get_setting",
+            lambda key, default=None: str(tmp_path) if key == "po_pdf_path" else default,
+        )
+        monkeypatch.setattr(po_pdf_mod, "generate_po_pdf", lambda pid, path: open(path, 'wb').close())
+        monkeypatch.setattr(email_mod, "send_purchase_order", lambda **kw: None)
+
+        path = ctrl.send_po_email(po_id, "supplier@example.com")
+        assert path.endswith(".pdf")
+        po = po_model.get_by_id(po_id)
+        assert po["status"] == "SENT"

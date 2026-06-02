@@ -105,3 +105,38 @@ class TestGetPluForBarcode:
 
     def test_returns_none_for_unknown_barcode(self, test_db):
         assert plu_map.get_plu_for_barcode("0000000000000") is None
+
+
+class TestLoad:
+    def test_load_returns_dict(self, test_db):
+        result = plu_map.load()
+        assert isinstance(result, dict)
+
+    def test_load_returns_empty_on_no_data(self, test_db):
+        assert plu_map.load() == {}
+
+    def test_load_returns_seeded_entries(self, test_db, db_conn):
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (999, '9300000999999')"
+        )
+        db_conn.commit()
+        result = plu_map.load()
+        assert 999 in result
+        assert result[999] == "9300000999999"
+
+    def test_load_exception_returns_empty_dict(self, test_db, monkeypatch):
+        import models.plu_barcode_map as plu_map_mod
+        from contextlib import contextmanager
+
+        @contextmanager
+        def bad_conn():
+            from unittest.mock import MagicMock
+            mock = MagicMock()
+            mock.execute.side_effect = Exception("DB exploded")
+            mock.__enter__ = lambda s: mock
+            mock.__exit__ = MagicMock(return_value=False)
+            yield mock
+
+        monkeypatch.setattr(plu_map_mod, "db_conn", bad_conn)
+        result = plu_map.load()
+        assert result == {}

@@ -137,3 +137,60 @@ def test_search_no_results(test_db):
 
 def test_search_empty_term(test_db):
     assert product_model.search('') == []
+
+
+# ── check_barcode_available ───────────────────────────────────────────────────
+
+def test_check_barcode_available_returns_none_for_free(test_db):
+    assert product_model.check_barcode_available('0000000000000') is None
+
+
+def test_check_barcode_available_returns_description_when_taken(test_db, product_barcode):
+    result = product_model.check_barcode_available(product_barcode)
+    assert result == 'Test Product'
+
+
+# ── barcode_exists ────────────────────────────────────────────────────────────
+
+def test_barcode_exists_true(test_db, product_barcode):
+    assert product_model.barcode_exists(product_barcode) is True
+
+
+def test_barcode_exists_false(test_db):
+    assert product_model.barcode_exists('0000000000000') is False
+
+
+# ── get_all_with_stock ────────────────────────────────────────────────────────
+
+def test_get_all_with_stock_returns_list(test_db, product_barcode):
+    rows = product_model.get_all_with_stock()
+    assert isinstance(rows, list)
+    barcodes = [r['barcode'] for r in rows]
+    assert product_barcode in barcodes
+
+
+def test_get_all_with_stock_includes_on_hand_column(test_db, product_barcode):
+    rows = product_model.get_all_with_stock()
+    row = next(r for r in rows if r['barcode'] == product_barcode)
+    assert 'on_hand' in row
+
+
+# ── rename_barcode ────────────────────────────────────────────────────────────
+
+def test_rename_barcode_renames_product(test_db, product_barcode):
+    new_bc = '9300000099900'
+    product_model.rename_barcode(product_barcode, new_bc)
+    assert product_model.get_by_barcode(new_bc) is not None
+    assert product_model.get_by_barcode(product_barcode) is None
+
+
+def test_rename_barcode_raises_if_new_barcode_in_use(test_db, product_barcode, db_conn, dept_id, supplier_id):
+    other_bc = '9300000099901'
+    db_conn.execute("""
+        INSERT INTO products (barcode, description, department_id, supplier_id,
+                             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+        VALUES (?, 'Other Product', ?, ?, 1.00, 0.50, 0.0, 1, 'EA', 1, 'EA')
+    """, (other_bc, dept_id, supplier_id))
+    db_conn.commit()
+    with pytest.raises(ValueError, match=other_bc):
+        product_model.rename_barcode(product_barcode, other_bc)

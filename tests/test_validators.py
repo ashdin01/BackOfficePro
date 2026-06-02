@@ -215,3 +215,37 @@ class TestValidateBsb:
     def test_letters_only_raises(self):
         with pytest.raises(ValueError):
             validate_bsb("ABC-DEF")
+
+
+class TestPercentage:
+    def test_passes_for_zero(self):
+        from utils.validators import percentage
+        percentage(0, "Rate")
+
+    def test_passes_for_100(self):
+        from utils.validators import percentage
+        percentage(100, "Rate")
+
+    def test_passes_for_midpoint(self):
+        from utils.validators import percentage
+        percentage(10.5, "GST Rate")
+
+    def test_raises_for_negative(self):
+        from utils.validators import percentage
+        with pytest.raises(ValueError, match="Rate"):
+            percentage(-1, "Rate")
+
+    def test_raises_for_over_100(self):
+        from utils.validators import percentage
+        with pytest.raises(ValueError):
+            percentage(100.01, "Rate")
+
+    def test_raises_for_non_numeric_string(self):
+        from utils.validators import percentage
+        with pytest.raises(ValueError):
+            percentage("abc", "Rate")
+
+    def test_raises_for_none(self):
+        from utils.validators import percentage
+        with pytest.raises(ValueError):
+            percentage(None, "Rate")

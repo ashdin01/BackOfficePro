@@ -8,18 +8,14 @@ import sys
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from database.connection import get_connection
-from database.schema import SCHEMA
-from database.migrations import run_migrations
+from database import init_db
+from database.migrations import apply_migrations
 
 def setup():
     data_dir = os.path.join(BASE_DIR, 'data')
     os.makedirs(data_dir, exist_ok=True)
-    conn = get_connection()
-    conn.executescript(SCHEMA)
-    conn.commit()
-    run_migrations(conn)
-    conn.release()
+    init_db()
+    apply_migrations()
     print("✅ Fresh database created")
 
 if __name__ == "__main__":

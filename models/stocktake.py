@@ -156,35 +156,13 @@ def import_from_csv(session_id, filepath):
                     skipped += 1
                     continue
 
-                product = conn.execute(
-                    "SELECT barcode FROM products WHERE barcode=?", (barcode,)
-                ).fetchone()
-                if not product:
-                    alias = conn.execute(
-                        "SELECT master_barcode FROM barcode_aliases WHERE alias_barcode=?",
-                        (barcode,)
-                    ).fetchone()
-                    if alias:
-                        barcode = alias['master_barcode']
-                    else:
-                        errors.append(f"Unknown barcode: {barcode}")
-                        skipped += 1
-                        continue
+                resolved = _resolve_barcode(conn, barcode)
+                if resolved is None:
+                    errors.append(f"Unknown barcode: {barcode}")
+                    skipped += 1
+                    continue
 
-                existing = conn.execute(
-                    "SELECT id, counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
-                    (session_id, barcode)
-                ).fetchone()
-                if existing:
-                    conn.execute(
-                        "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (existing['counted_qty'] + qty, existing['id'])
-                    )
-                else:
-                    conn.execute(
-                        "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
-                        (session_id, barcode, qty)
-                    )
+                _accumulate_count(conn, session_id, resolved, qty)
                 imported += 1
             conn.commit()
 
@@ -202,6 +180,34 @@ def _check_identifier(name):
     if ']' in name:
         raise ValueError(
             f"Unsafe identifier in SQLite file: {name!r} — contains ']'"
+        )
+
+
+def _resolve_barcode(conn, barcode: str) -> str | None:
+    """Resolve barcode → master barcode via alias table, or None if not found in products."""
+    if conn.execute("SELECT 1 FROM products WHERE barcode=?", (barcode,)).fetchone():
+        return barcode
+    alias = conn.execute(
+        "SELECT master_barcode FROM barcode_aliases WHERE alias_barcode=?", (barcode,)
+    ).fetchone()
+    return alias['master_barcode'] if alias else None
+
+
+def _accumulate_count(conn, session_id: int, barcode: str, qty: float) -> None:
+    """Upsert a counted quantity line for session_id / barcode."""
+    existing = conn.execute(
+        "SELECT id, counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
+        (session_id, barcode),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
+            (existing['counted_qty'] + qty, existing['id']),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
+            (session_id, barcode, qty),
         )
 
 
@@ -268,35 +274,13 @@ def import_from_sqlite(session_id, filepath):
                 skipped += 1
                 continue
 
-            product = conn.execute(
-                "SELECT barcode FROM products WHERE barcode=?", (barcode,)
-            ).fetchone()
-            if not product:
-                alias = conn.execute(
-                    "SELECT master_barcode FROM barcode_aliases WHERE alias_barcode=?",
-                    (barcode,)
-                ).fetchone()
-                if alias:
-                    barcode = alias['master_barcode']
-                else:
-                    errors.append(f"Unknown barcode: {barcode}")
-                    skipped += 1
-                    continue
+            resolved = _resolve_barcode(conn, barcode)
+            if resolved is None:
+                errors.append(f"Unknown barcode: {barcode}")
+                skipped += 1
+                continue
 
-            existing = conn.execute(
-                "SELECT id, counted_qty FROM stocktake_counts WHERE session_id=? AND barcode=?",
-                (session_id, barcode)
-            ).fetchone()
-            if existing:
-                conn.execute(
-                    "UPDATE stocktake_counts SET counted_qty=?, scanned_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (existing['counted_qty'] + qty, existing['id'])
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO stocktake_counts (session_id, barcode, counted_qty) VALUES (?,?,?)",
-                    (session_id, barcode, qty)
-                )
+            _accumulate_count(conn, session_id, resolved, qty)
             imported += 1
         conn.commit()
 

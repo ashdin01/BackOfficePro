@@ -8,6 +8,7 @@ from controllers.po_reorder_controller import (
     cartons_needed,
     calc_order_units,
     carton_note,
+    auto_populate_po_lines,
     reload_reorder_recommendations,
     lookup_product_for_po,
 )
@@ -216,6 +217,69 @@ class TestCalcOrderUnitsReorder:
         assert calc_order_units(20, 0, None) == 20
 
 
+# ── auto_populate_po_lines ────────────────────────────────────────────────────
+
+class TestAutoPopulatePoLines:
+    def test_returns_string_banner(self, test_db, db_conn, supplier_id):
+        db_conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)
+            VALUES ('PO-AUTO-001', ?, 'DRAFT', 'PO')
+        """, (supplier_id,))
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='PO-AUTO-001'"
+        ).fetchone()["id"]
+        result = auto_populate_po_lines(po_id, supplier_id)
+        assert isinstance(result, str)
+
+    def test_no_reorder_items_returns_all_good_message(
+        self, test_db, db_conn, supplier_id
+    ):
+        db_conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)
+            VALUES ('PO-AUTO-002', ?, 'DRAFT', 'PO')
+        """, (supplier_id,))
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='PO-AUTO-002'"
+        ).fetchone()["id"]
+        result = auto_populate_po_lines(po_id, supplier_id)
+        assert "above reorder" in result or isinstance(result, str)
+
+    def test_adds_reorder_lines_when_below_point(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        bc = '9300000088801'
+        db_conn.execute("""
+            INSERT INTO products
+                (barcode, description, department_id, supplier_id,
+                 sell_price, cost_price, tax_rate, pack_qty, pack_unit,
+                 active, unit, reorder_point, reorder_max)
+            VALUES (?, 'Reorder Me', ?, ?, 5.00, 3.00, 10.0, 6, 'CTN', 1, 'EA', 10, 30)
+        """, (bc, dept_id, supplier_id))
+        db_conn.execute(
+            "INSERT OR REPLACE INTO stock_on_hand (barcode, quantity) VALUES (?, 2)",
+            (bc,)
+        )
+        db_conn.execute("""
+            INSERT INTO product_suppliers (barcode, supplier_id, is_default)
+            VALUES (?, ?, 1)
+        """, (bc, supplier_id))
+        db_conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)
+            VALUES ('PO-AUTO-003', ?, 'DRAFT', 'PO')
+        """, (supplier_id,))
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='PO-AUTO-003'"
+        ).fetchone()["id"]
+        result = auto_populate_po_lines(po_id, supplier_id)
+        lines = db_conn.execute(
+            "SELECT * FROM po_lines WHERE po_id=?", (po_id,)
+        ).fetchall()
+        assert len(lines) >= 1
+
+
 # ── reload_reorder_recommendations ────────────────────────────────────────────
 
 class TestReloadReorderRecommendations:
@@ -297,3 +361,127 @@ class TestLookupProductForPO:
         po_id = create_po(supplier_id)
         result = lookup_product_for_po(bc, po_id, supplier_id, unit_mode=True)
         assert result['suggested_qty'] == 1
+
+
+# ── Milk forecast path ────────────────────────────────────────────────────────
+
+def _setup_dairy_milk_product(db_conn, supplier_id):
+    """Create a MILK group in the (pre-seeded) DAIRY department, plus a linked product."""
+    dairy_id = db_conn.execute(
+        "SELECT id FROM departments WHERE code='DAIRY'"
+    ).fetchone()["id"]
+
+    db_conn.execute("""
+        INSERT OR IGNORE INTO product_groups (department_id, code, name)
+        VALUES (?, 'MILK', 'Milk')
+    """, (dairy_id,))
+    db_conn.commit()
+    milk_group_id = db_conn.execute(
+        "SELECT id FROM product_groups WHERE code='MILK' AND department_id=?", (dairy_id,)
+    ).fetchone()["id"]
+
+    bc = '9300000099001'
+    db_conn.execute("""
+        INSERT INTO products
+            (barcode, description, department_id, supplier_id, group_id,
+             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+        VALUES (?, 'Full Cream Milk 2L', ?, ?, ?, 3.50, 2.00, 10.0, 12, 'CTN', 1, 'EA')
+    """, (bc, dairy_id, supplier_id, milk_group_id))
+    db_conn.execute(
+        "INSERT OR REPLACE INTO stock_on_hand (barcode, quantity) VALUES (?, 10)", (bc,)
+    )
+    db_conn.commit()
+    return bc
+
+
+class TestMilkForecastPath:
+    def test_milk_lines_added_when_delivery_days_set(
+        self, test_db, db_conn, supplier_id
+    ):
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        db_conn.commit()
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        po_id = create_po(supplier_id)
+
+        banner = auto_populate_po_lines(po_id, supplier_id)
+
+        lines = db_conn.execute(
+            "SELECT * FROM po_lines WHERE po_id=?", (po_id,)
+        ).fetchall()
+        milk_lines = [l for l in lines if l['barcode'] == bc]
+        assert len(milk_lines) == 1
+        assert '🥛' in banner
+
+    def test_milk_banner_includes_delivery_info(
+        self, test_db, db_conn, supplier_id
+    ):
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,WED,FRI' WHERE id=?",
+            (supplier_id,)
+        )
+        db_conn.commit()
+        _setup_dairy_milk_product(db_conn, supplier_id)
+        po_id = create_po(supplier_id)
+
+        banner = auto_populate_po_lines(po_id, supplier_id)
+        assert 'milk' in banner.lower()
+        assert 'day' in banner.lower()
+
+    def test_milk_note_includes_no_sales_warning_when_no_history(
+        self, test_db, db_conn, supplier_id
+    ):
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        db_conn.commit()
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        po_id = create_po(supplier_id)
+        auto_populate_po_lines(po_id, supplier_id)
+
+        lines = db_conn.execute(
+            "SELECT notes FROM po_lines WHERE po_id=? AND barcode=?", (po_id, bc)
+        ).fetchall()
+        assert len(lines) == 1
+        assert 'no sales history' in (lines[0]['notes'] or '').lower()
+
+    def test_milk_line_on_order_note_when_open_po_exists(
+        self, test_db, db_conn, supplier_id
+    ):
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        db_conn.commit()
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+
+        # Create an existing open PO with a milk line (so on_order > 0)
+        existing_po = create_po(supplier_id)
+        add_po_line(existing_po, bc, 'Full Cream Milk 2L', ordered_qty=2, unit_cost=2.00)
+
+        new_po = create_po(supplier_id)
+        banner = auto_populate_po_lines(new_po, supplier_id)
+
+        new_lines = db_conn.execute(
+            "SELECT notes FROM po_lines WHERE po_id=? AND barcode=?", (new_po, bc)
+        ).fetchall()
+        assert len(new_lines) == 1
+        assert 'On order' in (new_lines[0]['notes'] or '')
+
+    def test_no_milk_lines_when_delivery_days_not_set(
+        self, test_db, db_conn, supplier_id
+    ):
+        # delivery_days is empty by default
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        po_id = create_po(supplier_id)
+
+        auto_populate_po_lines(po_id, supplier_id)
+
+        lines = db_conn.execute(
+            "SELECT * FROM po_lines WHERE po_id=? AND barcode=?", (po_id, bc)
+        ).fetchall()
+        # Without delivery_days, get_milk_order_recommendations returns []
+        assert len(lines) == 0

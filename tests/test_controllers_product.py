@@ -1,5 +1,7 @@
-"""Tests for product_controller.get_stock_on_order_detail."""
+"""Tests for product_controller."""
+import os
 import pytest
+import controllers.product_controller as product_ctrl
 from controllers.product_controller import get_stock_on_order, get_stock_on_order_detail
 
 
@@ -177,3 +179,175 @@ class TestGetStockOnOrderDetail:
         rows = get_stock_on_order_detail(bc)
         assert len(rows) == 1
         assert rows[0]['qty_units'] == 5  # 7 - 2 = 5 units, NOT (7-2) × 12 = 60
+
+
+# ── Wrapper function coverage ─────────────────────────────────────────────────
+
+class TestProductControllerWrappers:
+    def test_get_all_products(self, test_db, product_barcode):
+        rows = product_ctrl.get_all_products()
+        assert any(r['barcode'] == product_barcode for r in rows)
+
+    def test_get_product_by_barcode(self, test_db, product_barcode):
+        row = product_ctrl.get_product_by_barcode(product_barcode)
+        assert row is not None and row['barcode'] == product_barcode
+
+    def test_get_products_by_barcodes(self, test_db, product_barcode):
+        result = product_ctrl.get_products_by_barcodes([product_barcode])
+        assert product_barcode in result
+
+    def test_search_products(self, test_db, product_barcode):
+        rows = product_ctrl.search_products('Test')
+        assert any(r['barcode'] == product_barcode for r in rows)
+
+    def test_get_soh_by_barcode_returns_none_or_dict(self, test_db, product_barcode):
+        result = product_ctrl.get_soh_by_barcode(product_barcode)
+        assert result is None or isinstance(result, dict)
+
+    def test_get_soh_by_barcodes(self, test_db, product_barcode):
+        product_ctrl.adjust_soh(product_barcode, 5, 'RECEIPT')
+        result = product_ctrl.get_soh_by_barcodes([product_barcode])
+        assert isinstance(result, list) or isinstance(result, dict)
+
+    def test_adjust_soh(self, test_db, product_barcode):
+        product_ctrl.adjust_soh(product_barcode, 10, 'RECEIPT', 'PO-001', '', 'test')
+        soh = product_ctrl.get_soh_by_barcode(product_barcode)
+        assert soh is not None and soh['quantity'] == pytest.approx(10.0)
+
+    def test_add_product(self, test_db, dept_id, supplier_id):
+        product_ctrl.add_product(
+            '9300000088881', 'New Ctrl Product', dept_id,
+            supplier_id=supplier_id, sell_price=5.0, cost_price=3.0, tax_rate=10.0
+        )
+        assert product_ctrl.get_product_by_barcode('9300000088881') is not None
+
+    def test_update_cost_price(self, test_db, product_barcode):
+        product_ctrl.update_cost_price(product_barcode, 3.99)
+        row = product_ctrl.get_product_by_barcode(product_barcode)
+        assert row['cost_price'] == pytest.approx(3.99)
+
+    def test_check_barcode_available_free(self, test_db):
+        result = product_ctrl.check_barcode_available('0000000000000')
+        assert result is None
+
+    def test_check_barcode_available_taken(self, test_db, product_barcode):
+        result = product_ctrl.check_barcode_available(product_barcode)
+        assert result is not None
+
+    def test_rename_barcode(self, test_db, product_barcode):
+        new_bc = '9300000088882'
+        product_ctrl.rename_barcode(product_barcode, new_bc)
+        assert product_ctrl.get_product_by_barcode(new_bc) is not None
+        assert product_ctrl.get_product_by_barcode(product_barcode) is None
+
+    def test_get_movement_history(self, test_db, product_barcode):
+        product_ctrl.adjust_soh(product_barcode, 5, 'RECEIPT')
+        rows = product_ctrl.get_movement_history(product_barcode)
+        assert isinstance(rows, list) and len(rows) >= 1
+
+    def test_get_recent_adjustments(self, test_db, product_barcode):
+        result = product_ctrl.get_recent_adjustments()
+        assert isinstance(result, list)
+
+    def test_calculate_gross_profit(self, test_db):
+        result = product_ctrl.calculate_gross_profit(10.0, 5.0, 0.0)
+        assert result == pytest.approx(50.0)
+
+    def test_calculate_gross_profit_zero_sell(self, test_db):
+        assert product_ctrl.calculate_gross_profit(0.0, 5.0, 0.0) is None
+
+    def test_get_all_plu_products(self, test_db):
+        assert isinstance(product_ctrl.get_all_plu_products(), list)
+
+    def test_get_duplicate_plu_groups(self, test_db):
+        assert isinstance(product_ctrl.get_duplicate_plu_groups(), list)
+
+    def test_get_plu_map_conflicts(self, test_db):
+        assert isinstance(product_ctrl.get_plu_map_conflicts(), list)
+
+    def test_set_product_plu(self, test_db, product_barcode):
+        product_ctrl.set_product_plu(product_barcode, '999')
+        row = product_ctrl.get_product_by_barcode(product_barcode)
+        assert row['plu'] == '999'
+
+    def test_sync_plu_map(self, test_db, product_barcode):
+        product_ctrl.sync_plu_map(product_barcode, '888')
+
+    def test_delete_plu_map_entry(self, test_db, product_barcode, db_conn):
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (777, ?)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        product_ctrl.delete_plu_map_entry(777)
+
+    def test_get_aliases_empty(self, test_db, product_barcode):
+        assert product_ctrl.get_aliases(product_barcode) == []
+
+    def test_add_and_delete_alias(self, test_db, product_barcode):
+        product_ctrl.add_alias('9300000000099', product_barcode, 'alias')
+        aliases = product_ctrl.get_aliases(product_barcode)
+        assert len(aliases) == 1
+        product_ctrl.delete_alias(aliases[0]['id'])
+        assert product_ctrl.get_aliases(product_barcode) == []
+
+    def test_get_all_for_pos(self, test_db, product_barcode):
+        rows = product_ctrl.get_all_for_pos()
+        assert isinstance(rows, list)
+
+    def test_get_product_for_pos_known(self, test_db, product_barcode):
+        result = product_ctrl.get_product_for_pos(product_barcode)
+        assert result is not None
+
+    def test_get_product_for_pos_unknown(self, test_db):
+        assert product_ctrl.get_product_for_pos('0000000000000') is None
+
+    def test_get_product_by_plu_none_when_not_mapped(self, test_db):
+        assert product_ctrl.get_product_by_plu(99999) is None
+
+    def test_get_selling_unit_master_none_for_normal(self, test_db, product_barcode):
+        result = product_ctrl.get_selling_unit_master(product_barcode)
+        assert result is None
+
+    def test_get_selling_units_empty(self, test_db, product_barcode):
+        assert product_ctrl.get_selling_units(product_barcode) == []
+
+    def test_add_and_get_and_delete_selling_unit(self, test_db, product_barcode):
+        product_ctrl.add_selling_unit(product_barcode, '9300000099777', '999', 'Half', 0.5, 2.00)
+        units = product_ctrl.get_selling_units(product_barcode)
+        assert len(units) == 1
+        su = product_ctrl.get_selling_unit_by_id(units[0]['id'])
+        assert su is not None
+        product_ctrl.update_selling_unit(su['id'], 'Half kg', 0.5, '999', '9300000099777', 2.00)
+        product_ctrl.delete_selling_unit(su['id'])
+        assert product_ctrl.get_selling_units(product_barcode) == []
+
+    def test_find_product_image_none_when_missing(self, test_db, product_barcode):
+        result = product_ctrl.find_product_image(product_barcode)
+        assert result is None
+
+    def test_prepare_image_destination_creates_dir(self, test_db, product_barcode, tmp_path, monkeypatch):
+        import config.settings as cfg
+        monkeypatch.setattr(cfg, 'DATA_DIR', str(tmp_path))
+        path = product_ctrl.prepare_image_destination(product_barcode)
+        assert path.endswith('.jpg')
+        assert os.path.isdir(os.path.dirname(path))
+
+    def test_delete_product_image_no_op_when_missing(self, test_db, product_barcode):
+        product_ctrl.delete_product_image(product_barcode)  # must not raise
+
+    def test_get_product_suppliers_empty(self, test_db, product_barcode):
+        rows = product_ctrl.get_product_suppliers(product_barcode)
+        assert isinstance(rows, list)
+
+    def test_save_product_updates_price(self, test_db, product_barcode, dept_id, supplier_id):
+        product_ctrl.save_product(
+            barcode=product_barcode, description='Test Product', brand='', plu='',
+            supplier_sku='', pack_qty=1, pack_unit='EA', group_id=None,
+            department_id=dept_id, supplier_id=supplier_id, unit='EA',
+            sell_price=9.99, cost_price=5.00, tax_rate=10.0,
+            reorder_point=0, reorder_max=0, variable_weight=0, expected=1,
+            active=1, auto_reorder=0, product_suppliers=[],
+        )
+        row = product_ctrl.get_product_by_barcode(product_barcode)
+        assert row['sell_price'] == pytest.approx(9.99)

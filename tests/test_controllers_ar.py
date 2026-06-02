@@ -463,3 +463,233 @@ class TestGenerateStatementPdf:
     def test_unknown_customer_raises(self, test_db):
         with pytest.raises(ValueError):
             ar_ctrl.generate_statement_pdf(99999, "2026-01-01", "2026-12-31", output_path="/tmp/nope.pdf")
+
+
+# ── create_invoice edge cases ─────────────────────────────────────────────────
+
+class TestCreateInvoiceEdgeCases:
+    def test_invalid_customer_raises(self, test_db):
+        with pytest.raises(ValueError, match="not found"):
+            ar_ctrl.create_invoice(99999)
+
+    def test_with_date_string(self, test_db, customer_id):
+        inv_id, inv_num = ar_ctrl.create_invoice(customer_id, invoice_date="2026-05-15")
+        assert inv_id > 0
+
+    def test_with_notes_and_created_by(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, notes="Test note", created_by="admin")
+        inv = invoice_model.get_by_id(inv_id)
+        assert inv["notes"] == "Test note"
+
+
+# ── record_payment edge cases ─────────────────────────────────────────────────
+
+class TestRecordPaymentEdgeCases:
+    def test_zero_amount_raises(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        with pytest.raises(ValueError, match="greater than zero"):
+            ar_ctrl.record_payment(inv_id, 0)
+
+    def test_negative_amount_raises(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        with pytest.raises(ValueError, match="greater than zero"):
+            ar_ctrl.record_payment(inv_id, -10)
+
+    def test_non_numeric_amount_raises(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        with pytest.raises(ValueError):
+            ar_ctrl.record_payment(inv_id, "not-a-number")
+
+    def test_invalid_invoice_raises(self, test_db):
+        with pytest.raises(ValueError, match="not found"):
+            ar_ctrl.record_payment(99999, 50.0)
+
+    def test_with_date_object(self, test_db, customer_id):
+        from datetime import date
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        invoice_model.add_line(inv_id, "Item", 1, 100.00, gst_rate=10.0)
+        pid = ar_ctrl.record_payment(inv_id, 110.00, payment_date=date(2026, 5, 20))
+        assert pid > 0
+
+
+# ── create_credit_note edge cases ─────────────────────────────────────────────
+
+class TestCreateCreditNoteEdgeCases:
+    def test_cn_date_as_date_object(self, test_db, customer_id):
+        from datetime import date
+        result = ar_ctrl.create_credit_note(customer_id, reason="Return", cn_date=date(2026, 5, 1))
+        cn_id = result[0] if isinstance(result, tuple) else result
+        assert cn_id > 0
+
+    def test_cn_date_as_string(self, test_db, customer_id):
+        result = ar_ctrl.create_credit_note(customer_id, cn_date="2026-05-01")
+        cn_id = result[0] if isinstance(result, tuple) else result
+        assert cn_id > 0
+
+    def test_cn_date_defaults_to_today(self, test_db, customer_id):
+        result = ar_ctrl.create_credit_note(customer_id)
+        cn_id = result[0] if isinstance(result, tuple) else result
+        assert cn_id > 0
+
+
+# ── get_aged_debtors edge cases ───────────────────────────────────────────────
+
+class TestGetAgedDebtorsEdgeCases:
+    def test_fully_paid_invoice_outstanding_zero_excluded(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        invoice_model.add_line(inv_id, "Item", 1, 100.00, gst_rate=10.0)
+        invoice_model.apply_payment(inv_id, customer_id, "2026-05-01", 110.00)
+        debtors = ar_ctrl.get_aged_debtors()
+        assert not any(d["customer_id"] == customer_id for d in debtors)
+
+    def test_as_of_date_as_string(self, test_db, customer_id):
+        debtors = ar_ctrl.get_aged_debtors(as_of_date="2026-05-01")
+        assert isinstance(debtors, list)
+
+    def test_overdue_bucket_populated(self, test_db, customer_id):
+        inv_id = invoice_model.create("INV-OVER", customer_id, "2025-01-01", "2025-02-01")
+        invoice_model.add_line(inv_id, "Item", 1, 100.00, gst_rate=10.0)
+        invoice_model.update_status(inv_id, "SENT")
+        debtors = ar_ctrl.get_aged_debtors()
+        row = next((d for d in debtors if d["customer_id"] == customer_id), None)
+        assert row is not None and row["days_90plus"] > 0
+
+
+# ── push_invoice_to_myob ──────────────────────────────────────────────────────
+
+class TestPushInvoiceToMyob:
+    def test_returns_false_with_message(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        ok, msg = ar_ctrl.push_invoice_to_myob(inv_id)
+        assert ok is False and isinstance(msg, str)
+
+
+# ── Invoice wrapper coverage ──────────────────────────────────────────────────
+
+class TestInvoiceWrappers:
+    def _make_invoice(self, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        invoice_model.add_line(inv_id, "Item", 1, 100.00, gst_rate=10.0)
+        return inv_id
+
+    def test_get_invoice_by_id(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        assert ar_ctrl.get_invoice_by_id(inv_id) is not None
+
+    def test_get_all_invoices_with_limit(self, test_db, customer_id):
+        for _ in range(3):
+            self._make_invoice(customer_id)
+        rows = ar_ctrl.get_all_invoices(limit=2)
+        assert len(rows) == 2
+
+    def test_count_invoices(self, test_db, customer_id):
+        self._make_invoice(customer_id)
+        assert ar_ctrl.count_invoices() >= 1
+        assert ar_ctrl.count_invoices(status="DRAFT") >= 1
+
+    def test_get_invoice_lines(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        assert len(ar_ctrl.get_invoice_lines(inv_id)) == 1
+
+    def test_add_invoice_line_invalid_qty_raises(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        with pytest.raises(ValueError):
+            ar_ctrl.add_invoice_line(inv_id, "Widget", 0, 5.00)
+
+    def test_add_invoice_line_invalid_desc_raises(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id)
+        with pytest.raises(ValueError):
+            ar_ctrl.add_invoice_line(inv_id, "", 1, 5.00)
+
+    def test_update_invoice_line(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        line = ar_ctrl.get_invoice_lines(inv_id)[0]
+        ar_ctrl.update_invoice_line(line["id"], "Updated", 2, 50.00)
+        assert ar_ctrl.get_invoice_lines(inv_id)[0]["quantity"] == pytest.approx(2.0)
+
+    def test_delete_invoice_line(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        line = ar_ctrl.get_invoice_lines(inv_id)[0]
+        ar_ctrl.delete_invoice_line(line["id"])
+        assert ar_ctrl.get_invoice_lines(inv_id) == []
+
+    def test_update_invoice_status(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        ar_ctrl.update_invoice_status(inv_id, "SENT")
+        assert ar_ctrl.get_invoice_by_id(inv_id)["status"] == "SENT"
+
+    def test_update_invoice_notes(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        ar_ctrl.update_invoice_notes(inv_id, "Pay by EFT")
+        assert ar_ctrl.get_invoice_by_id(inv_id)["notes"] == "Pay by EFT"
+
+    def test_get_payments_by_invoice(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        ar_ctrl.record_payment(inv_id, 110.00)
+        assert len(ar_ctrl.get_payments_by_invoice(inv_id)) == 1
+
+
+# ── Customer wrapper coverage ─────────────────────────────────────────────────
+
+class TestCustomerWrappers:
+    def test_create_and_get_customer(self, test_db):
+        cid = ar_ctrl.create_customer("TST2", "Test Corp")
+        result = ar_ctrl.get_customer_by_id(cid)
+        assert result is not None and result["code"] == "TST2"
+
+    def test_get_all_customers(self, test_db, customer_id):
+        rows = ar_ctrl.get_all_customers()
+        assert any(r["id"] == customer_id for r in rows)
+
+    def test_count_customers_active_only_false(self, test_db, customer_id):
+        assert ar_ctrl.count_customers(active_only=False) >= 1
+
+    def test_update_customer(self, test_db, customer_id):
+        ar_ctrl.update_customer(customer_id, "CUST001", "Updated Name")
+        assert ar_ctrl.get_customer_by_id(customer_id)["name"] == "Updated Name"
+
+
+# ── Bank recon wrapper coverage ───────────────────────────────────────────────
+
+class TestReconWrappers:
+    def test_get_all_recon_profiles_returns_list(self, test_db):
+        assert isinstance(ar_ctrl.get_all_recon_profiles(), list)
+
+    def test_save_and_get_and_delete_recon_profile(self, test_db):
+        pid = ar_ctrl.save_recon_profile(
+            name="ANZ CSV", delimiter=",", has_header=1, skip_rows=0,
+            date_format="%d/%m/%Y", amount_type="signed",
+            col_date=0, col_amount=1, col_description=2,
+        )
+        assert pid > 0
+        profile = ar_ctrl.get_recon_profile(pid)
+        assert profile is not None
+        ar_ctrl.delete_recon_profile(pid)
+        assert ar_ctrl.get_recon_profile(pid) is None
+
+    def test_insert_and_get_recon_transactions(self, test_db):
+        pid = ar_ctrl.save_recon_profile(
+            name="TXN CSV", delimiter=",", has_header=1, skip_rows=0,
+            date_format="%d/%m/%Y", amount_type="signed",
+        )
+        ar_ctrl.insert_recon_transactions(pid, "BATCH-001", [
+            {"txn_date": "2026-05-01", "amount": -50.0, "description": "EFTPOS"}
+        ])
+        txns = ar_ctrl.get_recon_transactions("BATCH-001")
+        assert len(txns) == 1
+
+    def test_set_ignored_and_unmatch(self, test_db):
+        pid = ar_ctrl.save_recon_profile(
+            name="IGN CSV", delimiter=",", has_header=1, skip_rows=0,
+            date_format="%d/%m/%Y", amount_type="signed",
+        )
+        ar_ctrl.insert_recon_transactions(pid, "B3", [
+            {"txn_date": "2026-05-01", "amount": -10.0, "description": "X"}
+        ])
+        txns = ar_ctrl.get_recon_transactions("B3")
+        txn_id = txns[0]["id"]
+        ar_ctrl.set_recon_ignored(txn_id)
+        ar_ctrl.unmatch_recon_transaction(txn_id)
+
+    def test_get_credit_note_by_id_none(self, test_db):
+        assert ar_ctrl.get_credit_note_by_id(99999) is None

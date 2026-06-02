@@ -88,58 +88,45 @@ def update(supplier_id, code, name, contact_name, phone, account_number,
 def get_order_due_today():
     """Return active suppliers with an order due today.
 
-    Checks three schedule types:
-    - Weekly: order_days contains today's weekday code ('MON', 'TUE', …)
+    Checks three schedule types in SQL:
+    - Weekly: today's weekday code ('MON', 'TUE', …) appears in comma-separated order_days
     - First Monday: order_first_monday=1 and today is the first Monday of the month
-    - Fortnightly: order_fortnightly_start is set and (today - start).days % 14 == 0
-    Excludes any supplier with a SENT or CANCELLED PO updated today.
+    - Fortnightly: julianday distance from order_fortnightly_start is divisible by 14
+    Excludes any supplier with a DRAFT/SENT PO created or updated within the last 2 days.
     """
     from datetime import date
     today = date.today()
-    today_code = today.strftime('%a').upper()
-    is_first_monday = (today.weekday() == 0 and today.day <= 7)
+    today_code    = today.strftime('%a').upper()          # 'MON', 'TUE', …
+    is_first_monday = int(today.weekday() == 0 and today.day <= 7)
 
     with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM suppliers WHERE active=1 ORDER BY name"
-        ).fetchall()
-
-        due = []
-        for r in rows:
-            keys = r.keys()
-            # Weekly days
-            order_days = (r['order_days'] or '').upper()
-            if order_days and today_code in order_days.split(','):
-                due.append(r)
-                continue
-            # First Monday of the month
-            if is_first_monday and 'order_first_monday' in keys and r['order_first_monday']:
-                due.append(r)
-                continue
-            # Fortnightly from a fixed start date
-            fn_start = r['order_fortnightly_start'] if 'order_fortnightly_start' in keys else ''
-            if fn_start:
-                try:
-                    start = date.fromisoformat(fn_start)
-                    delta = (today - start).days
-                    if delta >= 0 and delta % 14 == 0:
-                        due.append(r)
-                        continue
-                except ValueError:
-                    pass
-
-        # Suppress prompt if a DRAFT or SENT PO exists created/updated within the last 2 days
-        done_ids = {
-            r[0] for r in conn.execute("""
+        rows = conn.execute("""
+            SELECT * FROM suppliers
+            WHERE active = 1
+              AND (
+                -- Weekly: today's code appears in the comma-separated list
+                ',' || UPPER(COALESCE(order_days, '')) || ',' LIKE '%,' || ? || ',%'
+                -- First Monday of the month
+                OR (? = 1 AND order_first_monday = 1)
+                -- Fortnightly: whole number of 14-day periods since start date
+                OR (
+                    order_fortnightly_start IS NOT NULL
+                    AND order_fortnightly_start != ''
+                    AND CAST(julianday('now','localtime') - julianday(order_fortnightly_start)
+                             AS INTEGER) >= 0
+                    AND CAST(julianday('now','localtime') - julianday(order_fortnightly_start)
+                             AS INTEGER) % 14 = 0
+                )
+              )
+              -- Suppress if a DRAFT/SENT PO was created/updated in the last 2 days
+              AND id NOT IN (
                 SELECT DISTINCT supplier_id FROM purchase_orders
                 WHERE status IN ('DRAFT', 'SENT')
-                AND (
-                    DATE(COALESCE(updated_at, created_at)) >= DATE('now', '-1 day')
-                    OR DATE(created_at) >= DATE('now', '-1 day')
-                )
-            """).fetchall()
-        }
-        return [r for r in due if r['id'] not in done_ids]
+                  AND DATE(COALESCE(updated_at, created_at)) >= DATE('now', '-1 day')
+              )
+            ORDER BY name
+        """, (today_code, is_first_monday)).fetchall()
+        return list(rows)
 
 
 def deactivate(supplier_id):

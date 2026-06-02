@@ -84,10 +84,10 @@ class StockValuationReport(BaseView):
                 r = self.summary_table.rowCount()
                 self.summary_table.insertRow(r)
                 self.summary_table.setItem(r, 0, QTableWidgetItem(row['dept_name'] or 'Unknown'))
-                self.summary_table.setItem(r, 1, _right(\1))
-                self.summary_table.setItem(r, 2, _right(\1))
-                self.summary_table.setItem(r, 3, _right(\1))
-                self.summary_table.setItem(r, 4, _right(\1))
+                self.summary_table.setItem(r, 1, _right(str(int(row['product_count'] or 0))))
+                self.summary_table.setItem(r, 2, _right(f"{row['total_units'] or 0:.2f}"))
+                self.summary_table.setItem(r, 3, _right(f"${row['cost_value'] or 0:,.2f}"))
+                self.summary_table.setItem(r, 4, _right(f"${row['sell_value'] or 0:,.2f}"))
                 total_cost += row['cost_value'] or 0
                 total_sell += row['sell_value'] or 0
             self.summary_table.setSortingEnabled(True)
@@ -109,9 +109,9 @@ class StockValuationReport(BaseView):
                 self.detail_table.setItem(r, 1, QTableWidgetItem(row['description']))
                 self.detail_table.setItem(r, 2, QTableWidgetItem(row['dept_name'] or ''))
                 self.detail_table.setItem(r, 3, QTableWidgetItem(row['unit'] or ''))
-                self.detail_table.setItem(r, 4, _right(\1))
-                self.detail_table.setItem(r, 5, _right(\1))
-                self.detail_table.setItem(r, 6, _right(\1))
+                self.detail_table.setItem(r, 4, _right(f"{row['quantity'] or 0:.2f}"))
+                self.detail_table.setItem(r, 5, _right(f"${row['cost_value'] or 0:,.2f}"))
+                self.detail_table.setItem(r, 6, _right(f"${row['sell_value'] or 0:,.2f}"))
                 total_cost += row['cost_value'] or 0
                 total_sell += row['sell_value'] or 0
             self.detail_table.setSortingEnabled(True)

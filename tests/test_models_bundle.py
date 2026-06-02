@@ -120,3 +120,15 @@ class TestResolveBarcode:
         """, (product_barcode, su_bc))
         db_conn.commit()
         assert bundle_model.resolve_barcode_unit_qty(su_bc) == 0  # stored as 0 (< 1 truncates)
+
+    def test_resolve_description_from_selling_unit_label(self, db_conn, product_barcode):
+        su_bc = "9300000099998"
+        db_conn.execute("""
+            INSERT INTO product_selling_units
+                (master_barcode, barcode, label, unit_qty, sell_price, active)
+            VALUES (?, ?, 'Half Pack', 0.5, 2.00, 1)
+        """, (product_barcode, su_bc))
+        db_conn.commit()
+        # su_bc is NOT in products — resolve_barcode_description should fall through to su table
+        desc = bundle_model.resolve_barcode_description(su_bc)
+        assert desc == 'Half Pack'

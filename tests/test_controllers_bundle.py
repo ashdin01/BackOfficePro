@@ -66,3 +66,17 @@ class TestBundleEligible:
 
     def test_resolve_unknown_barcode_returns_empty(self, test_db):
         assert bundle_ctrl.resolve_barcode_description('9999999') == ''
+
+    def test_resolve_unit_qty_non_su_returns_1(self, test_db, product_barcode):
+        assert bundle_ctrl.resolve_barcode_unit_qty(product_barcode) == 1
+
+    def test_resolve_unit_qty_selling_unit_returns_qty(self, test_db, product_barcode, db_conn):
+        su_bc = '9300000077777'
+        db_conn.execute("""
+            INSERT INTO product_selling_units
+                (master_barcode, barcode, label, unit_qty, sell_price, active)
+            VALUES (?, ?, '500g pack', 0.5, 2.00, 1)
+        """, (product_barcode, su_bc))
+        db_conn.commit()
+        result = bundle_ctrl.resolve_barcode_unit_qty(su_bc)
+        assert result is not None

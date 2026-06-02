@@ -285,8 +285,8 @@ def add_product(barcode, description, department_id, supplier_id=None, unit='EA'
                       pack_qty=pack_qty, pack_unit=pack_unit, group_id=group_id)
 
 
-def search_products(term, active_only=True) -> list[dict]:
-    return product_model.search(term, active_only=active_only)
+def search_products(term, active_only=True, limit=None, offset=0) -> list[dict]:
+    return product_model.search(term, active_only=active_only, limit=limit, offset=offset)
 
 
 # ── Stock on hand wrappers ────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 """Tests for models/stocktake.py."""
+import sqlite3 as _sqlite3
 import pytest
 from database.connection import get_connection
 import models.stocktake as stocktake_model
@@ -179,3 +180,199 @@ class TestVarianceReport:
         rows = stocktake_model.get_variance_report(session_id)
         row = next(r for r in rows if r["barcode"] == product_barcode)
         assert row["counted_qty"] == pytest.approx(15.0)
+
+
+# ── TestUpsertClosed ──────────────────────────────────────────────────────────
+
+class TestUpsertClosed:
+    def test_upsert_on_closed_session_raises(self, test_db, session_id, product_barcode):
+        stocktake_model.close_session(session_id)
+        with pytest.raises(ValueError, match="not open"):
+            stocktake_model.upsert_count(session_id, product_barcode, 5.0)
+
+    def test_upsert_on_nonexistent_session_raises(self, test_db, product_barcode):
+        with pytest.raises(ValueError):
+            stocktake_model.upsert_count(99999, product_barcode, 5.0)
+
+
+# ── TestVarianceReportDeptFilter ──────────────────────────────────────────────
+
+class TestVarianceReportDeptFilter:
+    def test_dept_filtered_session_includes_matching_product(
+        self, test_db, product_barcode, dept_id
+    ):
+        sid = stocktake_model.create_session("Dept Session", department_id=dept_id)
+        rows = stocktake_model.get_variance_report(sid)
+        assert any(r["barcode"] == product_barcode for r in rows)
+
+    def test_dept_filtered_session_excludes_other_dept_product(
+        self, test_db, product_barcode, db_conn
+    ):
+        db_conn.execute("INSERT INTO departments (code, name) VALUES ('LIQUOR', 'Liquor')")
+        db_conn.commit()
+        other_id = db_conn.execute(
+            "SELECT id FROM departments WHERE code='LIQUOR'"
+        ).fetchone()["id"]
+        sid = stocktake_model.create_session("Other Dept", department_id=other_id)
+        rows = stocktake_model.get_variance_report(sid)
+        assert not any(r["barcode"] == product_barcode for r in rows)
+
+
+# ── TestImportFromCsv ─────────────────────────────────────────────────────────
+
+class TestImportFromCsv:
+    def test_happy_path(self, test_db, session_id, product_barcode, tmp_path):
+        f = tmp_path / "counts.csv"
+        f.write_text("barcode,qty\n9300000000001,10\n")
+        imported, skipped, errors = stocktake_model.import_from_csv(session_id, str(f))
+        assert imported == 1
+        assert skipped == 0
+        assert errors == []
+        assert stocktake_model.get_count_for_barcode(session_id, product_barcode) == pytest.approx(10.0)
+
+    def test_accumulates_onto_existing_count(
+        self, test_db, session_id, product_barcode, tmp_path
+    ):
+        stocktake_model.upsert_count(session_id, product_barcode, 5.0)
+        f = tmp_path / "counts.csv"
+        f.write_text("barcode,qty\n9300000000001,3\n")
+        stocktake_model.import_from_csv(session_id, str(f))
+        assert stocktake_model.get_count_for_barcode(session_id, product_barcode) == pytest.approx(8.0)
+
+    def test_alias_barcode_resolves_to_master(
+        self, test_db, session_id, product_barcode, db_conn, tmp_path
+    ):
+        alias = "9300000000099"
+        db_conn.execute(
+            "INSERT INTO barcode_aliases (alias_barcode, master_barcode) VALUES (?, ?)",
+            (alias, product_barcode),
+        )
+        db_conn.commit()
+        f = tmp_path / "alias.csv"
+        f.write_text(f"barcode,qty\n{alias},7\n")
+        imported, skipped, errors = stocktake_model.import_from_csv(session_id, str(f))
+        assert imported == 1
+        assert stocktake_model.get_count_for_barcode(session_id, product_barcode) == pytest.approx(7.0)
+
+    def test_unknown_barcode_is_skipped_with_error(self, test_db, session_id, tmp_path):
+        f = tmp_path / "unk.csv"
+        f.write_text("barcode,qty\n9999999999999,5\n")
+        imported, skipped, errors = stocktake_model.import_from_csv(session_id, str(f))
+        assert imported == 0
+        assert skipped == 1
+        assert any("9999999999999" in e for e in errors)
+
+    def test_bad_qty_is_skipped_with_error(
+        self, test_db, session_id, product_barcode, tmp_path
+    ):
+        f = tmp_path / "bad.csv"
+        f.write_text("barcode,qty\n9300000000001,notanumber\n")
+        imported, skipped, errors = stocktake_model.import_from_csv(session_id, str(f))
+        assert skipped == 1
+        assert any("Bad qty" in e for e in errors)
+
+    def test_empty_barcode_row_is_skipped(self, test_db, session_id, tmp_path):
+        f = tmp_path / "empty.csv"
+        f.write_text("barcode,qty\n,5\n")
+        imported, skipped, errors = stocktake_model.import_from_csv(session_id, str(f))
+        assert imported == 0
+        assert skipped == 1
+
+    def test_missing_barcode_column_raises(self, test_db, session_id, tmp_path):
+        f = tmp_path / "nobc.csv"
+        f.write_text("sku,qty\n123,5\n")
+        with pytest.raises(ValueError, match="[Bb]arcode"):
+            stocktake_model.import_from_csv(session_id, str(f))
+
+    def test_missing_qty_column_raises(self, test_db, session_id, tmp_path):
+        f = tmp_path / "noqty.csv"
+        f.write_text("barcode,price\n9300000000001,5.99\n")
+        with pytest.raises(ValueError, match="[Qq]uantity"):
+            stocktake_model.import_from_csv(session_id, str(f))
+
+
+# ── TestImportFromSqlite ──────────────────────────────────────────────────────
+
+def _make_ext_db(path, rows, table="counts", bc_col="barcode", qty_col="qty"):
+    """Create a minimal external SQLite file for import tests."""
+    conn = _sqlite3.connect(str(path))
+    conn.execute(f"CREATE TABLE {table} ({bc_col} TEXT, {qty_col} REAL)")
+    conn.executemany(f"INSERT INTO {table} VALUES (?, ?)", rows)
+    conn.commit()
+    conn.close()
+
+
+class TestImportFromSqlite:
+    def test_happy_path(self, test_db, session_id, product_barcode, tmp_path):
+        _make_ext_db(tmp_path / "ext.db", [(product_barcode, 8.0)])
+        imported, skipped, errors = stocktake_model.import_from_sqlite(
+            session_id, str(tmp_path / "ext.db")
+        )
+        assert imported == 1
+        assert errors == []
+        assert stocktake_model.get_count_for_barcode(session_id, product_barcode) == pytest.approx(8.0)
+
+    def test_accumulates_onto_existing_count(
+        self, test_db, session_id, product_barcode, tmp_path
+    ):
+        stocktake_model.upsert_count(session_id, product_barcode, 4.0)
+        _make_ext_db(tmp_path / "ext.db", [(product_barcode, 6.0)])
+        stocktake_model.import_from_sqlite(session_id, str(tmp_path / "ext.db"))
+        assert stocktake_model.get_count_for_barcode(session_id, product_barcode) == pytest.approx(10.0)
+
+    def test_alias_resolves_to_master(
+        self, test_db, session_id, product_barcode, db_conn, tmp_path
+    ):
+        alias = "9300000000088"
+        db_conn.execute(
+            "INSERT INTO barcode_aliases (alias_barcode, master_barcode) VALUES (?, ?)",
+            (alias, product_barcode),
+        )
+        db_conn.commit()
+        _make_ext_db(tmp_path / "ext.db", [(alias, 3.0)])
+        imported, skipped, errors = stocktake_model.import_from_sqlite(
+            session_id, str(tmp_path / "ext.db")
+        )
+        assert imported == 1
+        assert stocktake_model.get_count_for_barcode(session_id, product_barcode) == pytest.approx(3.0)
+
+    def test_no_tables_raises(self, test_db, session_id, tmp_path):
+        _sqlite3.connect(str(tmp_path / "empty.db")).close()
+        with pytest.raises(ValueError, match="No tables"):
+            stocktake_model.import_from_sqlite(session_id, str(tmp_path / "empty.db"))
+
+    def test_no_suitable_table_raises(self, test_db, session_id, tmp_path):
+        conn = _sqlite3.connect(str(tmp_path / "nomap.db"))
+        conn.execute("CREATE TABLE data (sku TEXT, price REAL)")
+        conn.commit()
+        conn.close()
+        with pytest.raises(ValueError, match="No suitable table"):
+            stocktake_model.import_from_sqlite(session_id, str(tmp_path / "nomap.db"))
+
+    def test_unknown_barcode_is_skipped(self, test_db, session_id, tmp_path):
+        _make_ext_db(tmp_path / "ext.db", [("9999999999999", 5.0)])
+        imported, skipped, errors = stocktake_model.import_from_sqlite(
+            session_id, str(tmp_path / "ext.db")
+        )
+        assert skipped == 1
+        assert any("9999999999999" in e for e in errors)
+
+    def test_bad_qty_is_skipped(self, test_db, session_id, product_barcode, tmp_path):
+        conn = _sqlite3.connect(str(tmp_path / "bad.db"))
+        conn.execute("CREATE TABLE counts (barcode TEXT, qty TEXT)")
+        conn.execute("INSERT INTO counts VALUES (?, ?)", (product_barcode, "notanumber"))
+        conn.commit()
+        conn.close()
+        imported, skipped, errors = stocktake_model.import_from_sqlite(
+            session_id, str(tmp_path / "bad.db")
+        )
+        assert skipped == 1
+        assert any("Bad qty" in e for e in errors)
+
+    def test_empty_barcode_is_skipped(self, test_db, session_id, tmp_path):
+        _make_ext_db(tmp_path / "ext.db", [("", 5.0)])
+        imported, skipped, errors = stocktake_model.import_from_sqlite(
+            session_id, str(tmp_path / "ext.db")
+        )
+        assert imported == 0
+        assert skipped == 1

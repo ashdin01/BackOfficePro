@@ -281,3 +281,131 @@ class TestGetStatementRows:
         # The old invoice should NOT appear in the invoices list
         invoice_numbers = [i["invoice_number"] for i in data["invoices"]]
         assert "INV-OLD-01" not in invoice_numbers
+
+
+# ── TestCount ─────────────────────────────────────────────────────────────────
+
+class TestCount:
+    def test_count_zero_on_empty(self, test_db):
+        assert invoice_model.count() == 0
+
+    def test_count_increases_after_create(self, test_db, customer_id):
+        invoice_model.create("INV-C01", customer_id, "2026-05-01", "2026-06-07")
+        assert invoice_model.count() == 1
+
+    def test_count_with_customer_filter(self, test_db, customer_id):
+        invoice_model.create("INV-C02", customer_id, "2026-05-01", "2026-06-07")
+        assert invoice_model.count(customer_id=customer_id) == 1
+        assert invoice_model.count(customer_id=99999) == 0
+
+    def test_count_with_status_filter(self, test_db, customer_id):
+        inv_id = invoice_model.create("INV-C03", customer_id, "2026-05-01", "2026-06-07")
+        assert invoice_model.count(status="DRAFT") == 1
+        assert invoice_model.count(status="SENT") == 0
+
+    def test_count_with_both_filters(self, test_db, customer_id):
+        invoice_model.create("INV-C04", customer_id, "2026-05-01", "2026-06-07")
+        assert invoice_model.count(customer_id=customer_id, status="DRAFT") == 1
+        assert invoice_model.count(customer_id=customer_id, status="SENT") == 0
+
+
+# ── TestGetAllWithLimit ───────────────────────────────────────────────────────
+
+class TestGetAllWithLimit:
+    def test_limit_restricts_results(self, test_db, customer_id):
+        for i in range(5):
+            invoice_model.create(f"INV-L{i:02}", customer_id, "2026-05-01", "2026-06-07")
+        rows = invoice_model.get_all(limit=2, offset=0)
+        assert len(rows) == 2
+
+    def test_offset_paginates(self, test_db, customer_id):
+        for i in range(4):
+            invoice_model.create(f"INV-P{i:02}", customer_id, "2026-05-01", "2026-06-07")
+        page1 = invoice_model.get_all(limit=2, offset=0)
+        page2 = invoice_model.get_all(limit=2, offset=2)
+        ids1 = {r["id"] for r in page1}
+        ids2 = {r["id"] for r in page2}
+        assert ids1.isdisjoint(ids2)
+
+
+# ── TestUpdateTotals ──────────────────────────────────────────────────────────
+
+class TestUpdateTotals:
+    def test_update_totals_after_external_line_insert(self, test_db, invoice_id, db_conn):
+        # Insert line directly bypassing add_line so totals are not updated automatically
+        db_conn.execute("""
+            INSERT INTO ar_invoice_lines
+                (invoice_id, description, quantity, unit_price, gst_rate,
+                 line_subtotal, line_gst, line_total)
+            VALUES (?, 'Direct Insert', 1, 20.00, 10.0, 20.00, 2.00, 22.00)
+        """, (invoice_id,))
+        db_conn.commit()
+        invoice_model.update_totals(invoice_id)
+        inv = invoice_model.get_by_id(invoice_id)
+        assert inv["total"] == pytest.approx(22.00)
+
+
+# ── TestUpdateStatusGuard ─────────────────────────────────────────────────────
+
+class TestUpdateStatusGuard:
+    def test_update_status_paid_raises(self, test_db, invoice_id):
+        with pytest.raises(ValueError, match="PAID"):
+            invoice_model.update_status(invoice_id, "PAID")
+
+    def test_update_status_partial_raises(self, test_db, invoice_id):
+        with pytest.raises(ValueError, match="PARTIAL"):
+            invoice_model.update_status(invoice_id, "PARTIAL")
+
+    def test_update_status_sent_ok(self, test_db, invoice_id):
+        invoice_model.update_status(invoice_id, "SENT")
+        assert invoice_model.get_by_id(invoice_id)["status"] == "SENT"
+
+
+# ── TestApplyPaymentDuplicate ─────────────────────────────────────────────────
+
+class TestApplyPaymentDuplicate:
+    def test_duplicate_payment_ref_returns_existing_id(self, test_db, customer_id, invoice_id):
+        invoice_model.add_line(invoice_id, "Item", 1, 100.00, gst_rate=10.0)
+        ref = "PAY-IDEM-001"
+        pid1, _, _ = invoice_model.apply_payment(
+            invoice_id, customer_id, "2026-05-20", 110.00, payment_ref=ref
+        )
+        pid2, total, status = invoice_model.apply_payment(
+            invoice_id, customer_id, "2026-05-21", 50.00, payment_ref=ref
+        )
+        assert pid2 == pid1
+        assert total == pytest.approx(0.0)   # duplicate: no extra amount
+        assert status is None
+
+    def test_new_payment_ref_fully_pays(self, test_db, customer_id, invoice_id):
+        invoice_model.add_line(invoice_id, "Item", 1, 100.00, gst_rate=10.0)
+        pid, total, status = invoice_model.apply_payment(
+            invoice_id, customer_id, "2026-05-20", 110.00
+        )
+        assert status == "PAID"
+
+    def test_partial_payment_gives_partial_status(self, test_db, customer_id, invoice_id):
+        invoice_model.add_line(invoice_id, "Item", 1, 100.00, gst_rate=10.0)
+        _, _, status = invoice_model.apply_payment(
+            invoice_id, customer_id, "2026-05-20", 55.00
+        )
+        assert status == "PARTIAL"
+
+
+# ── TestGetUnpaidForAgedDebtors ────────────────────────────────────────────────
+
+class TestGetUnpaidModel:
+    def test_returns_rows_for_unpaid_invoice(self, test_db, customer_id, invoice_id):
+        invoice_model.add_line(invoice_id, "Item", 1, 100.00, gst_rate=10.0)
+        invoice_model.update_status(invoice_id, "SENT")
+        rows = invoice_model.get_unpaid_for_aged_debtors()
+        ids = [r["id"] for r in rows]
+        assert invoice_id in ids
+
+    def test_paid_invoice_excluded(self, test_db, customer_id):
+        inv_id = invoice_model.create("INV-PAID", customer_id, "2026-05-01", "2026-06-07")
+        invoice_model.add_line(inv_id, "Item", 1, 100.00, gst_rate=10.0)
+        invoice_model.apply_payment(inv_id, customer_id, "2026-05-20", 110.00)
+        rows = invoice_model.get_unpaid_for_aged_debtors()
+        ids = [r["id"] for r in rows]
+        assert inv_id not in ids

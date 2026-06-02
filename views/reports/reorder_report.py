@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
 from views.base_view import BaseView
-from views.widgets.table_items import center_item, right_item
+from views.widgets.table_items import NumItem, center_item, right_item
 
 
 class ReorderReport(BaseView):

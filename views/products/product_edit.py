@@ -18,6 +18,7 @@ import controllers.product_controller as product_controller
 from PyQt6.QtGui import QColor
 import controllers.department_controller as dept_ctrl
 import controllers.supplier_controller as supplier_ctrl
+from views.products.product_alias_dialog import AddAliasDialog
 
 
 class ProductEdit(KeyboardMixin, QWidget):
@@ -1259,48 +1260,4 @@ class ProductEdit(KeyboardMixin, QWidget):
             show_error(self, "Could not save product.", e)
 
 
-class AddAliasDialog(QDialog):
-    def __init__(self, master_barcode, parent=None):
-        super().__init__(parent)
-        self.master_barcode = master_barcode
-        self.setWindowTitle("Add Alternate Barcode")
-        self.setMinimumWidth(340)
-        self._build_ui()
-
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setSpacing(10)
-        self.barcode = QLineEdit()
-        self.barcode.setPlaceholderText("Scan or type alternate barcode")
-        self.desc = QLineEdit()
-        self.desc.setPlaceholderText("e.g. Brand name or variant (optional)")
-        form.addRow("Barcode *", self.barcode)
-        form.addRow("Note", self.desc)
-        layout.addLayout(form)
-        layout.addSpacing(8)
-        btns = QHBoxLayout()
-        ok_btn = QPushButton("Add  [Ctrl+S]")
-        ok_btn.setFixedHeight(32)
-        ok_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel  [Esc]")
-        cancel_btn.setFixedHeight(32)
-        cancel_btn.clicked.connect(self.reject)
-        btns.addWidget(ok_btn)
-        btns.addWidget(cancel_btn)
-        layout.addLayout(btns)
-        from PyQt6.QtGui import QShortcut, QKeySequence
-        QShortcut(QKeySequence("Escape"), self, self.reject)
-        QShortcut(QKeySequence("Ctrl+S"), self, self._save)
-        self.barcode.setFocus()
-
-    def _save(self):
-        barcode = self.barcode.text().strip()
-        if not barcode:
-            QMessageBox.warning(self, "Validation", "Barcode is required.")
-            return
-        try:
-            product_controller.add_alias(barcode, self.master_barcode, self.desc.text().strip())
-            self.accept()
-        except Exception as e:
-            show_error(self, "Could not add barcode alias.", e)
+# AddAliasDialog lives in views/products/product_alias_dialog.py — imported above.

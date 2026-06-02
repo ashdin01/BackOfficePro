@@ -103,10 +103,35 @@ def _generate_self_signed(cert_path: Path, key_path: Path) -> None:
                  cert_path, [str(s) for s in san_entries])
 
 
+_CERT_RENEW_DAYS = 30   # regenerate if cert expires within this many days
+
+
+def _cert_expires_soon(cert_path: Path) -> bool:
+    """Return True if the cert at *cert_path* expires within _CERT_RENEW_DAYS days."""
+    try:
+        from cryptography import x509
+        data = cert_path.read_bytes()
+        cert = x509.load_pem_x509_certificate(data)
+        remaining = cert.not_valid_after_utc - datetime.datetime.now(datetime.timezone.utc)
+        return remaining.days < _CERT_RENEW_DAYS
+    except Exception:
+        return False
+
+
 def get_or_create_cert() -> tuple[str, str]:
-    """Return (cert_path, key_path), generating the pair if either file is missing."""
+    """Return (cert_path, key_path), generating or renewing the pair as needed.
+
+    Generates on first run (files missing). Also regenerates if the cert is
+    within _CERT_RENEW_DAYS days of expiry so clients only need to re-trust
+    once every ~10 years rather than being surprised by an expired cert.
+    """
     if not _CERT_FILE.exists() or not _KEY_FILE.exists():
         logging.info("TLS certificate not found — generating self-signed cert")
+        _generate_self_signed(_CERT_FILE, _KEY_FILE)
+    elif _cert_expires_soon(_CERT_FILE):
+        logging.info(
+            "TLS certificate expires within %d days — regenerating", _CERT_RENEW_DAYS
+        )
         _generate_self_signed(_CERT_FILE, _KEY_FILE)
     return str(_CERT_FILE), str(_KEY_FILE)
 

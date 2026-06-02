@@ -292,3 +292,22 @@ class TestSendBackup:
             eg.send_backup(str(backup), "admin@example.com")
 
         assert "mybackup.db" in captured["body"]
+
+
+class TestLoadGraphSettings:
+    def test_returns_dict(self, test_db):
+        from utils.email_graph import _load_graph_settings
+        settings = _load_graph_settings()
+        assert isinstance(settings, dict)
+
+    def test_graph_client_secret_key_present(self, test_db):
+        from utils.email_graph import _load_graph_settings
+        settings = _load_graph_settings()
+        assert "graph_client_secret" in settings
+        assert isinstance(settings["graph_client_secret"], str)
+
+    def test_all_values_are_strings(self, test_db):
+        from utils.email_graph import _load_graph_settings
+        settings = _load_graph_settings()
+        for v in settings.values():
+            assert isinstance(v, str)

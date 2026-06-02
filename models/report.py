@@ -309,6 +309,9 @@ def get_supplier_sales(supplier_id=None):
 
     Periods: this week, last week, 2 weeks ago, this month,
              last month, this FY, prior FY, all time.
+
+    All 8 window sums are computed in a single SQL GROUP BY query so the
+    entire sales_daily table is not fetched into Python memory.
     """
     today        = date.today()
     lw_s, lw_e   = week_bounds(0)
@@ -321,57 +324,46 @@ def get_supplier_sales(supplier_id=None):
     lm_e         = tm_s - timedelta(days=1)
     lm_s         = lm_e.replace(day=1)
 
-    with db_conn() as conn:
-        sup_filter = "AND p.supplier_id = ?" if supplier_id else ""
-        sup_params = [supplier_id] if supplier_id else []
+    # 16 date-boundary parameters (start, end for each of 8 windows)
+    window_params = [
+        str(thisw_s), str(today),   # this week
+        str(lw_s),    str(lw_e),    # last week
+        str(tw_s),    str(tw_e),    # two weeks ago
+        str(tm_s),    str(today),   # this month
+        str(lm_s),    str(lm_e),    # last month
+        str(fy_s),    str(fy_e),    # this FY
+        str(pfy_s),   str(pfy_e),   # prior FY
+        '2000-01-01', str(today),   # all time
+    ]
 
+    sup_filter = "AND p.supplier_id = ?" if supplier_id else ""
+    sup_params = [supplier_id] if supplier_id else []
+
+    with db_conn() as conn:
         db_rows = conn.execute(f"""
             SELECT p.barcode, p.description, s.name AS supplier_name,
-                   COALESCE(pbm.plu, '') AS plu
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w0,
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w1,
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w2,
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w3,
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w4,
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w5,
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w6,
+                   COALESCE(SUM(CASE WHEN sd.sale_date BETWEEN ? AND ? THEN sd.quantity ELSE 0 END), 0) AS w7
             FROM products p
             JOIN suppliers s ON s.id = p.supplier_id
             LEFT JOIN plu_barcode_map pbm ON pbm.barcode = p.barcode
+            LEFT JOIN sales_daily sd ON sd.plu = CAST(pbm.plu AS TEXT) AND pbm.plu IS NOT NULL
             WHERE p.active = 1
               {sup_filter}
+            GROUP BY p.barcode
             ORDER BY s.name, p.description
-        """, sup_params).fetchall()
-
-        # Fetch all sales rows for relevant PLUs in one query, aggregate in Python
-        all_plus = [str(r['plu']) for r in db_rows if r['plu']]
-        sales_by_plu: dict = {}
-        if all_plus:
-            placeholders = ','.join('?' * len(all_plus))
-            raw = conn.execute(f"""
-                SELECT plu, sale_date, quantity FROM sales_daily
-                WHERE plu IN ({placeholders})
-            """, all_plus).fetchall()
-            for sr in raw:
-                sales_by_plu.setdefault(sr['plu'], []).append(
-                    (sr['sale_date'], sr['quantity'])
-                )
-
-    periods = [
-        (str(thisw_s),        str(today)),
-        (str(lw_s),           str(lw_e)),
-        (str(tw_s),           str(tw_e)),
-        (str(tm_s),           str(today)),
-        (str(lm_s),           str(lm_e)),
-        (str(fy_s),           str(fy_e)),
-        (str(pfy_s),          str(pfy_e)),
-        ('2000-01-01',        str(today)),
-    ]
-
-    def qty_from_cache(plu, d1, d2):
-        return int(sum(
-            q for sd, q in sales_by_plu.get(plu, [])
-            if d1 <= sd <= d2
-        ))
+        """, window_params + sup_params).fetchall()
 
     rows   = []
     totals = [0] * 8
     for row in db_rows:
-        plu = str(row['plu']) if row['plu'] else None
-        vals = [qty_from_cache(plu, d1, d2) for d1, d2 in periods] if plu else [0] * 8
+        vals = [int(row[f'w{i}']) for i in range(8)]
         for i, v in enumerate(vals):
             totals[i] += v
         rows.append({

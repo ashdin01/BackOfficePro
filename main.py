@@ -237,10 +237,22 @@ def _start_api_server():
     return t
 
 
+def _configure_app_icon(app):
+    """Set the application window icon so it appears in the taskbar."""
+    from PyQt6.QtGui import QIcon
+    icon_path = os.path.join(BASE_DIR, 'assets', 'icon.ico')
+    if os.path.isfile(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        logging.info("App icon set from %s", icon_path)
+    else:
+        logging.warning("App icon not found: %s", icon_path)
+
+
 def main():
     logging.info("main() called")
     from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
+    _configure_app_icon(app)
     _init_db_with_lock_recovery(app)
     api_thread = _start_api_server()
 

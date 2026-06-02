@@ -61,6 +61,18 @@ class TestCustomer:
         cid = customer_model.create("ACME", "Acme Corp")
         assert customer_model.get_by_id(cid)["payment_terms_days"] == 37
 
+    def test_count_active_only(self, test_db):
+        customer_model.create("ACT2", "Active Two", active=1)
+        customer_model.create("INACT2", "Inactive Two", active=0)
+        assert customer_model.count(active_only=True) >= 1
+
+    def test_count_all_includes_inactive(self, test_db):
+        customer_model.create("ACT3", "Active Three", active=1)
+        customer_model.create("INACT3", "Inactive Three", active=0)
+        count_all    = customer_model.count(active_only=False)
+        count_active = customer_model.count(active_only=True)
+        assert count_all >= count_active
+
 
 # ── Invoice model ─────────────────────────────────────────────────────────────
 
@@ -216,3 +228,40 @@ class TestArPayment:
         payments = payment_model.get_by_invoice(inv_id)
         assert len(payments) == 1
         assert payments[0]["amount"] == pytest.approx(110.00)
+
+    def test_get_by_customer_returns_list(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        payment_model.create(inv_id, customer_id, "2026-05-15", 50.00)
+        rows = payment_model.get_by_customer(customer_id)
+        assert isinstance(rows, list)
+        assert len(rows) == 1
+        assert rows[0]["amount"] == pytest.approx(50.00)
+
+    def test_get_by_customer_includes_invoice_number(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        payment_model.create(inv_id, customer_id, "2026-05-15", 30.00)
+        rows = payment_model.get_by_customer(customer_id)
+        assert "invoice_number" in rows[0]
+
+    def test_create_with_explicit_payment_ref(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        ref = "EXPLICIT-REF-001"
+        pid = payment_model.create(inv_id, customer_id, "2026-05-15", 50.00, payment_ref=ref)
+        from database.connection import get_connection
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT payment_ref FROM ar_payments WHERE id=?", (pid,)
+        ).fetchone()
+        conn.release()
+        assert row["payment_ref"] == ref
+
+    def test_create_without_payment_ref_generates_uuid(self, test_db, customer_id):
+        inv_id = self._make_invoice(customer_id)
+        pid = payment_model.create(inv_id, customer_id, "2026-05-15", 50.00)
+        from database.connection import get_connection
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT payment_ref FROM ar_payments WHERE id=?", (pid,)
+        ).fetchone()
+        conn.release()
+        assert row["payment_ref"] is not None and len(row["payment_ref"]) > 0

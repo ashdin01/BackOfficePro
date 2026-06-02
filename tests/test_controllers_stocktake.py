@@ -80,3 +80,24 @@ class TestApplyAndVariance:
         report = st_ctrl.get_variance_report(session_id)
         assert isinstance(report, list)
         assert any(r['barcode'] == product_barcode for r in report)
+
+
+class TestImportWrappers:
+    def test_import_from_csv_via_controller(self, test_db, session_id, product_barcode, tmp_path):
+        f = tmp_path / "ctrl_counts.csv"
+        f.write_text(f"barcode,qty\n{product_barcode},4\n")
+        imported, skipped, errors = st_ctrl.import_from_csv(session_id, str(f))
+        assert imported == 1
+        assert errors == []
+
+    def test_import_from_sqlite_via_controller(self, test_db, session_id, product_barcode, tmp_path):
+        import sqlite3
+        db_path = tmp_path / "ctrl_ext.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE counts (barcode TEXT, qty REAL)")
+        conn.execute("INSERT INTO counts VALUES (?, ?)", (product_barcode, 6.0))
+        conn.commit()
+        conn.close()
+        imported, skipped, errors = st_ctrl.import_from_sqlite(session_id, str(db_path))
+        assert imported == 1
+        assert errors == []

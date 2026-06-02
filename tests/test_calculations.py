@@ -150,3 +150,37 @@ class TestGstFromInclusive:
     def test_fractional_result(self):
         # $33 inc at 10%: GST = 33 - 33/1.1 = 33 - 30.0̄ = 3.0̄
         assert gst_from_inclusive(33.0, 10.0) == pytest.approx(3.0, rel=1e-5)
+
+
+class TestGrossProfitPct:
+    def test_returns_none_when_sell_price_zero(self):
+        from utils.calculations import gross_profit_pct
+        assert gross_profit_pct(0.0, 2.0, 10.0) is None
+
+    def test_positive_gp_standard(self):
+        from utils.calculations import gross_profit_pct
+        result = gross_profit_pct(10.0, 5.0, 0.0)
+        assert result == pytest.approx(50.0)
+
+    def test_cost_greater_than_sell_gives_negative_gp(self):
+        from utils.calculations import gross_profit_pct
+        result = gross_profit_pct(5.0, 6.0, 0.0)
+        assert result is not None and result < 0
+
+    def test_tax_included_in_cost_calculation(self):
+        from utils.calculations import gross_profit_pct
+        result_taxed   = gross_profit_pct(11.0, 5.0, 10.0)
+        result_untaxed = gross_profit_pct(11.0, 5.0, 0.0)
+        assert result_taxed != pytest.approx(result_untaxed)
+
+    def test_week_bounds_returns_monday_sunday(self):
+        from utils.calculations import week_bounds
+        start, end = week_bounds(0)
+        assert start.weekday() == 0  # Monday
+        assert end.weekday() == 6    # Sunday
+
+    def test_fy_bounds_starts_july_1(self):
+        from utils.calculations import fy_bounds
+        start, end = fy_bounds(2025)
+        assert start.month == 7 and start.day == 1 and start.year == 2025
+        assert end.month == 6 and end.day == 30 and end.year == 2026

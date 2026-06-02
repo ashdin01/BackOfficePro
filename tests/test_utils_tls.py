@@ -155,3 +155,132 @@ class TestGetOrCreateCert:
         key.unlink()
         tls_mod.get_or_create_cert()
         assert key.exists()
+
+    def test_regenerates_when_cert_expires_soon(self, monkeypatch, tmp_path):
+        cert, key = self._patch_paths(monkeypatch, tmp_path)
+        tls_mod.get_or_create_cert()
+        mtime_before = cert.stat().st_mtime
+        # Make _cert_expires_soon return True so get_or_create_cert regenerates
+        monkeypatch.setattr(tls_mod, "_cert_expires_soon", lambda p: True)
+        tls_mod.get_or_create_cert()
+        assert cert.stat().st_mtime >= mtime_before  # cert was rewritten
+
+
+class TestCertExpiresSoon:
+    def _patch_paths(self, monkeypatch, tmp_path):
+        cert = tmp_path / "api_server.crt"
+        key  = tmp_path / "api_server.key"
+        monkeypatch.setattr(tls_mod, "_CERT_FILE", cert)
+        monkeypatch.setattr(tls_mod, "_KEY_FILE",  key)
+        return cert, key
+
+    def test_returns_false_for_missing_file(self, tmp_path):
+        result = tls_mod._cert_expires_soon(tmp_path / "nonexistent.crt")
+        assert result is False
+
+    def test_returns_false_for_invalid_cert_data(self, tmp_path):
+        bad = tmp_path / "bad.crt"
+        bad.write_bytes(b"not a cert")
+        assert tls_mod._cert_expires_soon(bad) is False
+
+    def test_returns_false_for_fresh_cert(self, monkeypatch, tmp_path):
+        cert, key = self._patch_paths(monkeypatch, tmp_path)
+        tls_mod.get_or_create_cert()
+        assert tls_mod._cert_expires_soon(cert) is False
+
+
+class TestLanIps:
+    def test_returns_list(self):
+        result = tls_mod._lan_ips()
+        assert isinstance(result, list)
+
+    def test_handles_bad_address_gracefully(self, monkeypatch):
+        import socket
+        monkeypatch.setattr(
+            socket, "getaddrinfo",
+            lambda *a, **kw: [("", "", "", "", ("not-an-ip", 0))],
+        )
+        result = tls_mod._lan_ips()
+        assert isinstance(result, list)
+
+    def test_handles_socket_error_gracefully(self, monkeypatch):
+        import socket
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: (_ for _ in ()).throw(OSError("no net")))
+        result = tls_mod._lan_ips()
+        assert result == []
+
+
+class TestServeTlsFallback:
+    def test_import_error_falls_back_to_plain_http(self, monkeypatch):
+        def fake_get_or_create_cert():
+            raise ImportError("cryptography not installed")
+
+        def fake_waitress(app, **kw):
+            raise SystemExit(0)
+
+        monkeypatch.setattr(tls_mod, "get_or_create_cert", fake_get_or_create_cert)
+        import sys
+        fake_mod = type(sys)("waitress_fake")
+        fake_mod.serve = fake_waitress
+        monkeypatch.setitem(sys.modules, "waitress", fake_mod)
+
+        from unittest.mock import MagicMock
+        with pytest.raises(SystemExit):
+            tls_mod.serve_tls(MagicMock(), host="127.0.0.1", port=19876)
+
+
+class TestServeTlsMainPath:
+    def test_serve_tls_binds_and_serves(self, monkeypatch, tmp_path):
+        """Main TLS path: mocked cert + SSLContext + make_server so no real socket is opened."""
+        from unittest.mock import MagicMock, patch
+        import ssl
+
+        cert = str(tmp_path / "cert.pem")
+        key  = str(tmp_path / "key.pem")
+        # Write placeholder files so load_cert_chain doesn't fail
+        open(cert, 'w').close()
+        open(key, 'w').close()
+
+        monkeypatch.setattr(tls_mod, "get_or_create_cert", lambda: (cert, key))
+
+        mock_ctx = MagicMock()
+        mock_ctx.wrap_socket.return_value = MagicMock()
+        monkeypatch.setattr(ssl, "SSLContext", lambda *a, **kw: mock_ctx)
+
+        mock_httpd = MagicMock()
+        mock_httpd.serve_forever.side_effect = SystemExit(0)
+        monkeypatch.setattr(tls_mod, "make_server", lambda *a, **kw: mock_httpd)
+
+        with pytest.raises(SystemExit):
+            tls_mod.serve_tls(MagicMock(), host="127.0.0.1", port=19999)
+
+        mock_ctx.load_cert_chain.assert_called_once_with(certfile=cert, keyfile=key)
+        mock_httpd.serve_forever.assert_called_once()
+
+    def test_serve_tls_wraps_socket(self, monkeypatch, tmp_path):
+        """Confirms ctx.wrap_socket is called with server_side=True."""
+        from unittest.mock import MagicMock
+        import ssl
+
+        cert = str(tmp_path / "cert.pem")
+        key  = str(tmp_path / "key.pem")
+        open(cert, 'w').close()
+        open(key, 'w').close()
+
+        monkeypatch.setattr(tls_mod, "get_or_create_cert", lambda: (cert, key))
+
+        mock_ctx = MagicMock()
+        wrapped_socket = MagicMock()
+        mock_ctx.wrap_socket.return_value = wrapped_socket
+        monkeypatch.setattr(ssl, "SSLContext", lambda *a, **kw: mock_ctx)
+
+        mock_httpd = MagicMock()
+        mock_httpd.serve_forever.side_effect = SystemExit(0)
+        monkeypatch.setattr(tls_mod, "make_server", lambda *a, **kw: mock_httpd)
+
+        with pytest.raises(SystemExit):
+            tls_mod.serve_tls(MagicMock(), host="127.0.0.1", port=19998)
+
+        _, kwargs = mock_ctx.wrap_socket.call_args
+        assert kwargs.get("server_side") is True
+        assert mock_httpd.socket == wrapped_socket

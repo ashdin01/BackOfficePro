@@ -105,3 +105,86 @@ class TestGetSalesForBarcode:
         assert result is not None
         for key in ('last_week', 'two_weeks', 'this_month', 'ytd'):
             assert key in result
+
+
+class TestGetSalesForBarcodeRange:
+    def test_returns_none_when_no_plu_mapping(self, test_db, product_barcode):
+        result = sd_model.get_sales_for_barcode_range(
+            product_barcode, '2026-05-01', '2026-05-31'
+        )
+        assert result is None
+
+    def test_returns_int_when_mapped(self, test_db, db_conn, product_barcode, seeded_sales):
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (100, ?)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        result = sd_model.get_sales_for_barcode_range(
+            product_barcode, '2026-05-01', '2026-05-02'
+        )
+        assert isinstance(result, int)
+        assert result >= 0
+
+
+class TestGetSalesForBarcodesRangeEmpty:
+    def test_empty_barcodes_returns_empty_dict(self, test_db):
+        assert sd_model.get_sales_for_barcodes_range([], '2026-05-01', '2026-05-31') == {}
+
+
+class TestGetGroupsException:
+    def test_exception_returns_empty_list(self, test_db, monkeypatch):
+        import models.sales_daily as sd_mod
+        from contextlib import contextmanager
+
+        @contextmanager
+        def bad_conn():
+            from unittest.mock import MagicMock
+            mock = MagicMock()
+            mock.execute.side_effect = Exception("DB boom")
+            mock.__enter__ = lambda s: mock
+            mock.__exit__ = MagicMock(return_value=False)
+            yield mock
+
+        monkeypatch.setattr(sd_mod, "db_conn", bad_conn)
+        result = sd_mod.get_groups()
+        assert result == []
+
+
+class TestBackfillMovements:
+    def test_backfill_creates_movements_for_orphaned_sales(
+        self, test_db, product_barcode, db_conn
+    ):
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES ('2026-04-01', '555', 'Orphan Product', 3, 9.00)
+        """)
+        db_conn.commit()
+        sd_model.backfill_movements('555', product_barcode)
+        rows = db_conn.execute(
+            "SELECT * FROM stock_movements WHERE barcode=? AND movement_type='SALE'",
+            (product_barcode,)
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]['quantity'] == pytest.approx(-3.0)
+
+    def test_backfill_skips_already_backfilled(self, test_db, product_barcode, db_conn):
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES ('2026-04-02', '666', 'Already Done', 2, 6.00)
+        """)
+        db_conn.execute("""
+            INSERT INTO stock_movements
+                (barcode, movement_type, quantity, reference, notes, created_by)
+            VALUES (?, 'SALE', -2, 'SALE-2026-04-02-PLU666', 'already done', 'system')
+        """, (product_barcode,))
+        db_conn.commit()
+        sd_model.backfill_movements('666', product_barcode)
+        rows = db_conn.execute(
+            "SELECT * FROM stock_movements WHERE barcode=? AND reference LIKE 'SALE-2026-04-02%'",
+            (product_barcode,)
+        ).fetchall()
+        assert len(rows) == 1  # not doubled
+
+    def test_backfill_no_orphans_does_nothing(self, test_db, product_barcode):
+        sd_model.backfill_movements('777', product_barcode)  # no sales_daily rows

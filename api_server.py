@@ -231,7 +231,7 @@ def list_products():
         return _err("INVALID_PARAM", "limit and offset must be integers", 400)
 
     if search:
-        rows = product_ctrl.search_products(search, active_only=True)
+        rows = product_ctrl.search_products(search, active_only=True, limit=limit, offset=offset)
         return jsonify([dict(r) for r in rows])
 
     return jsonify(product_ctrl.get_all_for_pos(limit, offset))
