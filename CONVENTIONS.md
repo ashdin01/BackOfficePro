@@ -81,6 +81,34 @@ def create(...):
 
 Read-only functions use `try / finally` only (no rollback needed).
 
+## Controller create signatures — keyword-only params
+
+Controller `create` functions use a bare `*` after the required positional arguments
+to make every optional field **keyword-only**:
+
+```python
+# CORRECT
+def create(code, name, *, contact_name='', phone='', ...) -> None: ...
+
+# WRONG — do not use **kwargs; callers lose IDE help and can silently pass
+# positional args that land in the wrong parameter
+def create(code, name, **kwargs) -> None: ...
+```
+
+Callers **must** use keyword arguments for everything after the required fields:
+
+```python
+# CORRECT
+supplier_ctrl.create(code, name, contact_name=contact, phone=phone, ...)
+
+# WRONG — extra positional args raise TypeError at runtime ("takes 2 positional
+# arguments but N were given") because the * blocks them
+supplier_ctrl.create(code, name, contact, phone, ...)
+```
+
+This is intentional: a `TypeError` on the wrong line is far easier to diagnose
+than a silent data-corruption bug where values land in the wrong DB column.
+
 ## View base classes
 
 All views inherit from `views.base_view.BaseView` (QWidget subclass) or `BaseDialog` (QDialog subclass). Override `_load()` for data-fetch logic; call `self.load()` (not `self._load()`) from `__init__`, `showEvent`, and action handlers so failures are caught and shown via `show_error`.

@@ -477,12 +477,12 @@ class SupplierEdit(KeyboardMixin, QWidget):
             else:
                 supplier_ctrl.create(
                     code, name,
-                    self.contact.text().strip(),
-                    phone,
-                    self.account.text().strip(),
-                    self.terms.text().strip(),
-                    self.address.toPlainText().strip(),
-                    self.notes.toPlainText().strip(),
+                    contact_name=self.contact.text().strip(),
+                    phone=phone,
+                    account_number=self.account.text().strip(),
+                    payment_terms=self.terms.text().strip(),
+                    address=self.address.toPlainText().strip(),
+                    notes=self.notes.toPlainText().strip(),
                     abn=abn,
                     rep_name=self.rep_name.text().strip(),
                     rep_phone=rep_phone,
