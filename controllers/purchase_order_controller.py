@@ -85,6 +85,16 @@ def get_po_by_id(po_id) -> dict | None:
     return po_model.get_by_id(po_id)
 
 
+def get_po_by_number(po_number) -> dict | None:
+    """Look up a PO by its po_number string (case-insensitive)."""
+    return po_model.get_by_po_number(po_number)
+
+
+def get_receivable_pos() -> list[dict]:
+    """Return SENT and PARTIAL POs with line counts — for the mobile receive app."""
+    return po_model.get_receivable()
+
+
 def create_po(supplier_id, delivery_date=None, notes='', created_by='', po_type='PO') -> int:
     return po_model.create(supplier_id, delivery_date=delivery_date,
                            notes=notes, created_by=created_by, po_type=po_type)

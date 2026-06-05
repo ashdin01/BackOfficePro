@@ -199,6 +199,37 @@ def get_with_supplier(po_id):
         return dict(row) if row else None
 
 
+def get_by_po_number(po_number):
+    """Return the PO joined with supplier name, looked up by po_number (case-insensitive)."""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT po.*, s.name AS supplier_name "
+            "FROM purchase_orders po "
+            "JOIN suppliers s ON s.id = po.supplier_id "
+            "WHERE UPPER(po.po_number) = UPPER(?)",
+            (po_number.strip(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_receivable():
+    """Return SENT and PARTIAL POs with product line counts — for the mobile receive app."""
+    with db_conn() as conn:
+        rows = conn.execute("""
+            SELECT po.id, po.po_number, po.status, po.delivery_date,
+                   po.created_at, po.notes, s.name AS supplier_name,
+                   COUNT(pl.id) FILTER (WHERE pl.is_note = 0 OR pl.is_note IS NULL)
+                       AS line_count
+            FROM purchase_orders po
+            JOIN suppliers s ON s.id = po.supplier_id
+            LEFT JOIN po_lines pl ON pl.po_id = po.id
+            WHERE po.status IN ('SENT', 'PARTIAL')
+            GROUP BY po.id
+            ORDER BY po.created_at DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+
 def close_force(po_id, unreceived_line_ids, reason):
     """Mark listed lines NOT SUPPLIED and set PO status to RECEIVED atomically."""
     with db_conn() as conn:

@@ -25,6 +25,7 @@ import controllers.product_controller as product_ctrl
 import controllers.stocktake_controller as stocktake_ctrl
 import controllers.bundle_controller as bundle_ctrl
 import controllers.sales_report_controller as sales_ctrl
+import controllers.purchase_order_controller as po_ctrl
 
 app = Flask(__name__)
 
@@ -436,6 +437,153 @@ def list_bundles():
             ],
         })
     return jsonify(result)
+
+
+# ── Purchase Order receiving ──────────────────────────────────────────────────
+
+@app.route("/api/v1/purchase-orders", methods=["GET"])
+def list_purchase_orders():
+    """Return SENT and PARTIAL POs with line counts — for the mobile receive app."""
+    rows = po_ctrl.get_receivable_pos()
+    return jsonify([{
+        'id':            r['id'],
+        'po_number':     r['po_number'],
+        'supplier_name': r['supplier_name'],
+        'status':        r['status'],
+        'delivery_date': r['delivery_date'] or '',
+        'created_at':    r['created_at'],
+        'line_count':    r['line_count'],
+    } for r in rows])
+
+
+@app.route("/api/v1/purchase-orders/<po_number>", methods=["GET"])
+def get_purchase_order(po_number):
+    """Return a PO and its product lines (note lines excluded), looked up by PO number."""
+    po = po_ctrl.get_po_by_number(po_number)
+    if not po:
+        return _err("NOT_FOUND", f"Purchase order '{po_number}' not found", 404)
+
+    raw_lines = [l for l in po_ctrl.get_po_lines(po['id']) if not l['is_note']]
+    lines = []
+    for l in raw_lines:
+        pack_qty = max(1, int(l['pack_qty'] or 1))
+        lines.append({
+            'id':            l['id'],
+            'barcode':       l['barcode'],
+            'description':   l['description'],
+            'ordered_qty':   l['ordered_qty'],
+            'pack_qty':      pack_qty,
+            'ordered_units': int((l['ordered_qty'] or 0) * pack_qty),
+            'received_qty':  l['received_qty'] or 0,
+            'unit_cost':     l['unit_cost'] or 0,
+        })
+
+    return jsonify({
+        'id':             po['id'],
+        'po_number':      po['po_number'],
+        'supplier_name':  po['supplier_name'],
+        'status':         po['status'],
+        'delivery_date':  po['delivery_date'] or '',
+        'created_at':     po['created_at'],
+        'invoice_number': po.get('supplier_invoice_number') or '',
+        'notes':          po['notes'] or '',
+        'lines':          lines,
+    })
+
+
+@app.route("/api/v1/purchase-orders/<int:po_id>/receive", methods=["POST"])
+def receive_purchase_order(po_id):
+    """
+    Submit a PO receipt from the mobile app.
+
+    Body:
+        invoice_number  str   optional supplier invoice number
+        lines           list  [{line_id: int, received_qty: float}, ...]
+
+    received_qty is in cartons (matching ordered_qty units on the PO line).
+    Lines with received_qty=0 or omitted are left unchanged.
+    final_status is RECEIVED when every product line is now covered (received
+    in this call or already received from a prior partial receipt); PARTIAL otherwise.
+    """
+    po = po_ctrl.get_po_by_id(po_id)
+    if not po:
+        return _err("NOT_FOUND", "Purchase order not found", 404)
+    if po['status'] not in ('SENT', 'PARTIAL'):
+        return _err("INVALID_STATUS",
+                    f"PO {po['po_number']} cannot be received (status: {po['status']})", 409)
+
+    body = request.get_json(silent=True) or {}
+    invoice_number = str(body.get('invoice_number') or '').strip()[:100]
+    submitted = body.get('lines')
+    if not isinstance(submitted, list) or not submitted:
+        return _err("BAD_REQUEST", "'lines' must be a non-empty list", 400)
+
+    # Load all product lines for this PO (note lines excluded), keyed by id
+    all_lines = {l['id']: l for l in po_ctrl.get_po_lines(po_id)
+                 if not l['is_note']}
+    if not all_lines:
+        return _err("BAD_REQUEST", "PO has no product lines", 400)
+
+    line_receipts = []
+    seen_ids = set()
+    for item in submitted:
+        line_id = item.get('line_id')
+        if not isinstance(line_id, int):
+            return _err("BAD_REQUEST",
+                        f"line_id must be an integer, got {line_id!r}", 400)
+        if line_id not in all_lines:
+            return _err("BAD_REQUEST",
+                        f"line_id {line_id} does not belong to PO {po_id}", 400)
+        if line_id in seen_ids:
+            return _err("BAD_REQUEST", f"Duplicate line_id: {line_id}", 400)
+        seen_ids.add(line_id)
+
+        try:
+            received_qty = float(item['received_qty'])
+        except (TypeError, ValueError, KeyError):
+            return _err("BAD_REQUEST",
+                        f"line_id {line_id}: received_qty must be a number", 400)
+        if received_qty < 0:
+            return _err("BAD_REQUEST",
+                        f"line_id {line_id}: received_qty cannot be negative", 400)
+
+        if received_qty == 0:
+            continue  # nothing received for this line in this call
+
+        line = all_lines[line_id]
+        pack_qty = max(1, int(line['pack_qty'] or 1))
+        line_receipts.append({
+            'line_id':          line_id,
+            'barcode':          line['barcode'],
+            'new_received_qty': received_qty,
+            'actual_cost':      None,   # preserve existing cost; adjust on desktop if needed
+            'unit_cost':        None,
+            'is_promo':         False,
+            'qty_units':        received_qty * pack_qty,
+        })
+
+    if not line_receipts:
+        return _err("BAD_REQUEST", "No lines have received_qty > 0", 400)
+
+    # RECEIVED when every product line is covered after this call
+    already_received = {lid for lid, l in all_lines.items()
+                        if (l['received_qty'] or 0) > 0}
+    now_received     = {r['line_id'] for r in line_receipts}
+    final_status = 'RECEIVED' if (already_received | now_received) >= set(all_lines) \
+                   else 'PARTIAL'
+
+    try:
+        po_ctrl.receive_po_atomic(po_id, po['po_number'], line_receipts, final_status,
+                                  supplier_invoice_number=invoice_number)
+    except Exception as e:
+        logging.exception("PO receive failed po_id=%s", po_id)
+        return _err("RECEIVE_FAILED", str(e), 500)
+
+    return jsonify({
+        'po_number':      po['po_number'],
+        'status':         final_status,
+        'lines_received': len(line_receipts),
+    }), 200
 
 
 if __name__ == "__main__":
