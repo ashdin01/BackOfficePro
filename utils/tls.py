@@ -32,7 +32,21 @@ _CERT_VALIDITY_DAYS = 3650  # 10 years
 
 def _lan_ips() -> list[str]:
     """Return all non-loopback IPv4 addresses on this machine."""
-    ips = []
+    ips: list[str] = []
+
+    # Ask the OS which local address it would use to reach the outside
+    # world (no packets are actually sent — UDP "connect" just selects a
+    # route). This is the most reliable source: on Debian/Ubuntu, /etc/hosts
+    # typically maps the hostname to 127.0.1.1, which makes
+    # getaddrinfo(gethostname()) below resolve to a loopback address and
+    # miss the real LAN IP entirely.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            ips.append(probe.getsockname()[0])
+    except OSError:
+        pass
+
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None):
             addr = info[4][0]
