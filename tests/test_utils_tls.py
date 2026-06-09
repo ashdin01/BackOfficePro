@@ -205,6 +205,7 @@ class TestLanIps:
 
     def test_handles_socket_error_gracefully(self, monkeypatch):
         import socket
+        monkeypatch.setattr(socket, "socket", lambda *a, **kw: (_ for _ in ()).throw(OSError("no net")))
         monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: (_ for _ in ()).throw(OSError("no net")))
         result = tls_mod._lan_ips()
         assert result == []

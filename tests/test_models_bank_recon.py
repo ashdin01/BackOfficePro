@@ -200,7 +200,7 @@ class TestUnmatchTransaction:
         txn_id = recon_model.get_transactions("BATCH-U1")[0]["id"]
 
         inv_id = invoice_model.create(
-            "INV-U001", customer_id, "2026-05-01", "2026-06-07"
+            "INV-U001", customer_id, "2026-05-01", "2030-12-31"
         )
         invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=10.0)
         invoice_model.update_status(inv_id, "SENT")
