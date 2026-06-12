@@ -23,6 +23,7 @@ import controllers.user_controller as user_ctrl
 from utils.validators import validate_abn, validate_email, validate_phone
 from utils.error_dialog import show_error
 from utils.secret_store import get_secret, set_secret
+from utils.api_key import resolve_api_key, store_api_key
 
 SETTINGS_FIELDS = [
     # (db_key,              label,               placeholder)
@@ -483,11 +484,10 @@ class SettingsScreen(QWidget):
         self._load_users()
 
     def _load_api_key(self):
-        key = settings_ctrl.get_setting("api_key", "")
-        if not key:
-            key = _secrets.token_hex(32)
-            _save_setting("api_key", key)
-        self._api_key_edit.setText(key)
+        # Must resolve through utils.api_key (keyring first, DB fallback) — the
+        # API server resolves the same way, and reading only the DB here shows
+        # a key the server won't accept on machines with a working keyring.
+        self._api_key_edit.setText(resolve_api_key())
 
     def _regenerate_api_key(self):
         reply = QMessageBox.question(
@@ -499,9 +499,13 @@ class SettingsScreen(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         key = _secrets.token_hex(32)
-        _save_setting("api_key", key)
+        store_api_key(key)
         self._api_key_edit.setText(key)
-        QMessageBox.information(self, "Done", "New API key saved. Update all clients.")
+        QMessageBox.information(
+            self, "Done",
+            "New API key saved. Update all clients.\n\n"
+            "Restart BackOfficePro so the API server picks up the new key."
+        )
 
     def _save(self):
         errors = []

@@ -79,10 +79,9 @@ _api_key_lock = threading.Lock()
 def _get_api_key():
     """Return the stored API key, generating one on first use.
 
-    Primary store is the OS keychain (keyring); the settings DB is a fallback
-    for environments where keyring is unavailable (e.g. headless servers).
-    Existing installs that still have the key in plaintext DB are migrated to
-    keyring on first call and the DB copy is cleared.
+    Resolution (keyring primary, settings DB fallback, plaintext migration)
+    lives in utils.api_key so the desktop Settings screen resolves the exact
+    same key — see that module for why the two must not diverge.
     The resolved key is cached in-process so every request in the same process
     sees the same value without a keyring/DB round-trip.
 
@@ -99,30 +98,8 @@ def _get_api_key():
         if _api_key_cache:      # re-check: another thread may have initialized while we waited
             return _api_key_cache
 
-        from utils.secret_store import get_secret, set_secret
-        key = get_secret("api_key")
-
-        if not key:
-            # Migration path: key may still be in the plaintext settings table.
-            key = settings_ctrl.get_setting("api_key", "")
-            if key:
-                set_secret("api_key", key)
-                if get_secret("api_key"):
-                    settings_ctrl.set_setting("api_key", "")  # clear plaintext copy
-                else:
-                    logging.warning("Keyring unavailable — API key migrated from DB but could not be stored securely")
-            else:
-                key = secrets.token_hex(32)
-                set_secret("api_key", key)
-                if not get_secret("api_key"):
-                    # Keyring unavailable — fall back to plaintext settings table so the
-                    # key survives process restarts (better than silently going ephemeral).
-                    settings_ctrl.set_setting("api_key", key)
-                    logging.warning(
-                        "Keyring unavailable: API key stored in plaintext settings table. "
-                        "Install a keyring backend (e.g. python-keyring with SecretService) "
-                        "for better security."
-                    )
+        from utils.api_key import resolve_api_key
+        key = resolve_api_key()
 
         _api_key_cache = key
         return key
