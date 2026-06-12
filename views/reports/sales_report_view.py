@@ -18,6 +18,7 @@ from views.widgets.table_utils import make_table as _make_table
 from views.reports.sales_plu_dialogs import (
     _AddProductDialog, _MatchItemDialog,
     _ensure_plu_map_table, _save_plu_map, _backfill_sale_movements, _load_plu_map,
+    _get_all_products, _fuzzy_score, _plu_score,
 )
 
 
