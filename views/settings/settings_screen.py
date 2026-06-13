@@ -4,6 +4,7 @@ Allows editing of store details, email addresses, Microsoft Graph API configurat
 and user management (add / edit / reset PIN / deactivate).
 """
 import logging
+import os
 import secrets as _secrets
 
 from PyQt6.QtWidgets import (
@@ -303,6 +304,31 @@ class SettingsScreen(QWidget):
         backup_note.setWordWrap(True)
         backup_form.addRow("", backup_note)
 
+        # Extra backup destination — USB / external drive
+        folder_row = QHBoxLayout()
+        folder_edit = QLineEdit()
+        folder_edit.setPlaceholderText("e.g. /media/usb or E:\\Backups — leave blank to disable")
+        folder_row.addWidget(folder_edit, stretch=1)
+        btn_browse = QPushButton("Browse…")
+        btn_browse.setFixedWidth(80)
+        btn_browse.clicked.connect(self._browse_backup_folder)
+        folder_row.addWidget(btn_browse)
+        backup_form.addRow("Also back up to", folder_row)
+        self._fields["backup_local_path"] = folder_edit
+
+        folder_note = QLabel(
+            "💡 Extra copy written to this folder (e.g. a USB drive) on every app close.\n"
+            "    Keeps the most recent 30 — other files in the folder are never touched."
+        )
+        folder_note.setStyleSheet("color: grey; font-size: 8pt;")
+        folder_note.setWordWrap(True)
+        backup_form.addRow("", folder_note)
+
+        btn_backup_now = QPushButton("Backup Now to Folder")
+        btn_backup_now.setFixedHeight(30)
+        btn_backup_now.clicked.connect(self._backup_to_folder_now)
+        backup_form.addRow("", btn_backup_now)
+
         btn_test_backup = QPushButton("Send Test Backup Email")
         btn_test_backup.setFixedHeight(30)
         btn_test_backup.setStyleSheet(
@@ -504,7 +530,7 @@ class SettingsScreen(QWidget):
         QMessageBox.information(
             self, "Done",
             "New API key saved. Update all clients.\n\n"
-            "Restart BackOfficePro so the API server picks up the new key."
+            "The API server picks up the new key automatically — no restart needed."
         )
 
     def _save(self):
@@ -600,6 +626,30 @@ class SettingsScreen(QWidget):
                 QMessageBox.critical(self, "Connection Failed", message)
         except Exception as e:
             show_error(self, "Could not test Microsoft Graph connection.", e)
+
+    def _browse_backup_folder(self):
+        from PyQt6.QtWidgets import QFileDialog
+        start = self._fields["backup_local_path"].text().strip() or os.path.expanduser("~")
+        folder = QFileDialog.getExistingDirectory(self, "Choose Backup Folder", start)
+        if folder:
+            self._fields["backup_local_path"].setText(folder)
+
+    def _backup_to_folder_now(self):
+        path = self._fields["backup_local_path"].text().strip()
+        _save_setting("backup_local_path", path)
+        if not path:
+            QMessageBox.warning(self, "No Folder Selected",
+                                "Choose a backup folder first (e.g. your USB drive).")
+            return
+        try:
+            import controllers.backup_controller as backup_ctrl
+            ok, msg = backup_ctrl.backup_to_local_path()
+            if ok:
+                QMessageBox.information(self, "Backup Complete", msg)
+            else:
+                QMessageBox.critical(self, "Backup Failed", msg)
+        except Exception as e:
+            show_error(self, "Could not back up to folder.", e)
 
     def _test_backup_email(self):
         _save_setting("backup_email", self._fields["backup_email"].text().strip())

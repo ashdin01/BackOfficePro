@@ -307,3 +307,64 @@ class TestMigrateV37SellingUnitsGuard:
         ).fetchall()}
         c.close()
         assert 'product_selling_units' in tables_after
+
+
+# ── backup_to_local_path ──────────────────────────────────────────────────────
+
+class TestBackupToLocalPath:
+    """Extra backup destination (USB / external drive)."""
+
+    def _set_path(self, value):
+        import models.settings as settings_model
+        settings_model.set_setting('backup_local_path', value)
+
+    def test_unconfigured_path_fails_cleanly(self, test_db):
+        self._set_path('')
+        ok, msg = backup_ctrl.backup_to_local_path()
+        assert ok is False
+        assert "No backup folder configured" in msg
+
+    def test_missing_folder_fails_with_drive_hint(self, test_db):
+        self._set_path('/nonexistent/usb/mount')
+        ok, msg = backup_ctrl.backup_to_local_path()
+        assert ok is False
+        assert "plugged in" in msg
+
+    def test_writes_timestamped_backup_into_folder(self, test_db, tmp_path, monkeypatch):
+        monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", test_db)
+        folder = tmp_path / "usb"
+        folder.mkdir()
+        self._set_path(str(folder))
+        ok, _ = backup_ctrl.backup_to_local_path()
+        assert ok is True
+        files = list(folder.glob("supermarket_*.db"))
+        assert len(files) == 1
+        # Backup must be a readable BackOfficePro database
+        c = sqlite3.connect(files[0])
+        tables = {r[0] for r in c.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        c.close()
+        assert "products" in tables
+
+    def test_prune_keeps_recent_and_ignores_unrelated_files(self, test_db, tmp_path, monkeypatch):
+        monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", test_db)
+        folder = tmp_path / "usb"
+        folder.mkdir()
+        self._set_path(str(folder))
+        # Seed more than _KEEP_COUNT old backups plus unrelated files
+        for i in range(backup_ctrl._KEEP_COUNT + 5):
+            (folder / f"supermarket_202001{i:02d}_000000.db").write_bytes(b"old")
+        (folder / "holiday_photos.db").write_bytes(b"keep me")
+        (folder / "notes.txt").write_text("keep me too")
+
+        ok, _ = backup_ctrl.backup_to_local_path()
+        assert ok is True
+        ours = list(folder.glob("supermarket_*.db"))
+        assert len(ours) == backup_ctrl._KEEP_COUNT
+        # Unrelated files untouched even though one ends in .db
+        assert (folder / "holiday_photos.db").exists()
+        assert (folder / "notes.txt").exists()
+
+    def test_get_backup_local_path_strips_whitespace(self, test_db):
+        self._set_path('  /media/usb  ')
+        assert backup_ctrl.get_backup_local_path() == '/media/usb'

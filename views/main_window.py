@@ -356,6 +356,13 @@ class MainWindow(QMainWindow):
 
     def _silent_auto_backup(self):
         dest = backup_ctrl.silent_auto_backup()
+        if backup_ctrl.get_backup_local_path():
+            ok, msg = backup_ctrl.backup_to_local_path()
+            if ok:
+                logging.info("Extra local backup written: %s", msg.replace("\n", " "))
+            else:
+                # Never block app close on this — the drive may simply be unplugged.
+                logging.warning("Extra local backup failed: %s", msg.replace("\n", " "))
         if dest:
             return self._email_backup_async(dest)
         return None

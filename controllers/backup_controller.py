@@ -64,6 +64,45 @@ def get_backup_email() -> str:
     return (settings_model.get_setting('backup_email') or '').strip()
 
 
+def get_backup_local_path() -> str:
+    """Return the extra backup folder setting (e.g. a USB drive), or '' if not set."""
+    return (settings_model.get_setting('backup_local_path') or '').strip()
+
+
+def backup_to_local_path() -> tuple[bool, str]:
+    """Snapshot the live DB into the user-configured extra backup folder.
+
+    This is an additional destination on top of the standard ~/BackOfficeBackups
+    auto-backup — typically a USB stick or external drive. Prunes only files
+    matching the supermarket_<timestamp>.db naming pattern beyond _KEEP_COUNT,
+    so anything else the user keeps in that folder is never touched.
+
+    Returns (success, message). An unconfigured path is reported as failure so
+    callers can distinguish it; check get_backup_local_path() first if the
+    feature being disabled is not an error in your context.
+    """
+    folder = get_backup_local_path()
+    if not folder:
+        return False, "No backup folder configured."
+    if not os.path.isdir(folder):
+        return False, (f"Backup folder not found:\n{folder}\n\n"
+                       "Is the USB / external drive plugged in?")
+
+    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(folder, f"supermarket_{ts}.db")
+    ok, msg = do_backup(dest)
+    if not ok:
+        return False, msg
+
+    try:
+        ours = sorted(f for f in os.listdir(folder) if _BACKUP_RE.match(f))
+        for old in ours[:-_KEEP_COUNT]:
+            os.remove(os.path.join(folder, old))
+    except Exception:
+        logging.exception("local-path backup pruning failed")
+    return True, msg
+
+
 def get_last_backup_time() -> datetime | None:
     """
     Return the datetime of the most recent standard backup in the backup dir,
