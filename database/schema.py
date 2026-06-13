@@ -3,12 +3,17 @@ PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 
 CREATE TABLE IF NOT EXISTS departments (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    code        TEXT    NOT NULL UNIQUE,
-    name        TEXT    NOT NULL,
-    active      INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    code            TEXT    NOT NULL UNIQUE,
+    name            TEXT    NOT NULL,
+    active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    no_negative_soh INTEGER NOT NULL DEFAULT 0 CHECK (no_negative_soh IN (0,1))
 );
 
+-- Seed must not reference no_negative_soh: this script runs against existing
+-- databases BEFORE migrations, where the column does not exist yet (CREATE
+-- TABLE IF NOT EXISTS above is a no-op there). migrate_v55 sets the FRESH
+-- default instead.
 INSERT OR IGNORE INTO departments (code, name) VALUES
     ('FRESH',   'Fresh'),
     ('MEAT',    'Meat'),
@@ -419,7 +424,13 @@ ON CONFLICT(key) DO NOTHING;
 CREATE TABLE IF NOT EXISTS db_meta (
     version INTEGER NOT NULL DEFAULT 1
 );
-INSERT OR IGNORE INTO db_meta (version) VALUES (54);
+-- Seed only when the table is empty: db_meta has no unique constraint, so
+-- INSERT OR IGNORE would append a duplicate row on every startup.
+-- Seeded at 54 (not 55) so migrate_v55 also runs once on fresh installs:
+-- this script cannot set departments.no_negative_soh defaults itself, since
+-- it executes against pre-v55 databases where the column does not exist yet.
+-- migrate_v55 is replay-safe (guarded ALTER, idempotent backfill).
+INSERT INTO db_meta (version) SELECT 54 WHERE NOT EXISTS (SELECT 1 FROM db_meta);
 
 CREATE TABLE IF NOT EXISTS bank_csv_profiles (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

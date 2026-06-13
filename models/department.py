@@ -15,24 +15,28 @@ def get_by_id(dept_id):
         return dict(row) if row else None
 
 
-def create(code, name):
+def create(code, name, no_negative_soh=0):
     with db_conn() as conn:
-        conn.execute("INSERT INTO departments (code, name) VALUES (?, ?)", (code.upper(), name))
+        conn.execute(
+            "INSERT INTO departments (code, name, no_negative_soh) VALUES (?, ?, ?)",
+            (code.upper(), name, int(no_negative_soh))
+        )
         conn.commit()
 
 
-def update(dept_id, code, name, active):
+def update(dept_id, code, name, active, no_negative_soh=0):
     from models.audit_log import record_changes
     from database.audit_context import get_user
     with db_conn() as conn:
         old = conn.execute("SELECT * FROM departments WHERE id=?", (dept_id,)).fetchone()
         conn.execute(
-            "UPDATE departments SET code = ?, name = ?, active = ? WHERE id = ?",
-            (code.upper(), name, active, dept_id)
+            "UPDATE departments SET code = ?, name = ?, active = ?, no_negative_soh = ? WHERE id = ?",
+            (code.upper(), name, active, int(no_negative_soh), dept_id)
         )
         record_changes(conn, 'department', code.upper(),
                        dict(old) if old else {},
-                       dict(code=code.upper(), name=name, active=active),
+                       dict(code=code.upper(), name=name, active=active,
+                            no_negative_soh=int(no_negative_soh)),
                        get_user())
         conn.commit()
 

@@ -135,6 +135,7 @@ def reverse(po_id, reversed_by=''):
     from config.constants import MOVE_REVERSAL
     from database.audit_context import get_source, get_user
     from models.audit_log import record_changes
+    import models.stock_on_hand as stock_on_hand
 
     with db_conn() as conn:
         po = conn.execute(
@@ -175,6 +176,8 @@ def reverse(po_id, reversed_by=''):
                 f"Reversal of {po['po_number']} — {line['description']}",
                 reversed_by, src,
             ))
+            stock_on_hand.clamp_negative_soh(
+                conn, line['barcode'], reference=po['po_number'], created_by=reversed_by)
 
         conn.execute(
             "UPDATE purchase_orders SET status='REVERSED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -251,6 +254,7 @@ def close_credit_atomic(po_id, po_number, line_receipts):
     SOH is reduced by qty_units for each line; movements are RETURN type.
     """
     from database.audit_context import get_user, get_source
+    import models.stock_on_hand as stock_on_hand
     who = get_user()
     src = get_source()
     with db_conn() as conn:
@@ -271,6 +275,8 @@ def close_credit_atomic(po_id, po_number, line_receipts):
                     (barcode, movement_type, quantity, reference, notes, created_by, source)
                 VALUES (?, 'RETURN', ?, ?, '', ?, ?)
             """, (r['barcode'], -r['qty_units'], po_number, who, src))
+            stock_on_hand.clamp_negative_soh(
+                conn, r['barcode'], reference=po_number, created_by=who)
         conn.execute(
             "UPDATE purchase_orders SET status='CLOSED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (po_id,)

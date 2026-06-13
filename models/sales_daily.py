@@ -280,6 +280,10 @@ def backfill_movements(plu, barcode: str):
 
                 backfilled += 1
 
+            import models.stock_on_hand as stock_on_hand
+            stock_on_hand.clamp_negative_soh(
+                conn, barcode, reference=f"PLU{plu_str} backfill",
+                created_by='PDF Import (backfill)')
             conn.commit()
             if backfilled:
                 logging.info("Backfilled %d sale movements for PLU %s → %s",

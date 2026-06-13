@@ -27,9 +27,17 @@ class DepartmentEdit(KeyboardMixin, QWidget):
         self.name = QLineEdit()
         self.active = QCheckBox("Active")
         self.active.setChecked(True)
+        self.no_negative_soh = QCheckBox("Don't allow negative stock on hand")
+        self.no_negative_soh.setToolTip(
+            "If a sale or adjustment would take a product in this department\n"
+            "below zero stock on hand, the stock is clamped at zero instead.\n"
+            "Use for departments like Fresh where counts drift and a negative\n"
+            "figure is never meaningful."
+        )
         form.addRow("Code *", self.code)
         form.addRow("Name *", self.name)
         form.addRow("", self.active)
+        form.addRow("", self.no_negative_soh)
         layout.addLayout(form)
         layout.addSpacing(10)
         btns = QHBoxLayout()
@@ -49,6 +57,7 @@ class DepartmentEdit(KeyboardMixin, QWidget):
             self.code.setText(dept['code'])
             self.name.setText(dept['name'])
             self.active.setChecked(bool(dept['active']))
+            self.no_negative_soh.setChecked(bool(dept.get('no_negative_soh', 0)))
 
     def _save(self):
         code = self.code.text().strip()
@@ -58,9 +67,10 @@ class DepartmentEdit(KeyboardMixin, QWidget):
             return
         try:
             if self.dept_id:
-                dept_ctrl.update(self.dept_id, code, name, int(self.active.isChecked()))
+                dept_ctrl.update(self.dept_id, code, name, int(self.active.isChecked()),
+                                 int(self.no_negative_soh.isChecked()))
             else:
-                dept_ctrl.create(code, name)
+                dept_ctrl.create(code, name, int(self.no_negative_soh.isChecked()))
             if self.on_save:
                 self.on_save()
             self.close()

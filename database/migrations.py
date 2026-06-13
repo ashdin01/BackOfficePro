@@ -2446,6 +2446,59 @@ def migrate_v54(conn):
     conn.commit()
 
 
+def migrate_v55(conn):
+    """Add departments.no_negative_soh — clamp stock on hand at zero.
+
+    Fresh produce is sold by PLU/weight and its counts drift, so a negative
+    SOH is always noise rather than information. With the flag set on a
+    department, any movement that would take one of its products below zero
+    clamps the stored SOH to zero and records a compensating ADJUSTMENT_IN
+    movement (see models.stock_on_hand.clamp_negative_soh). Enabled for
+    FRESH by default.
+
+    Also repairs db_meta housekeeping: the schema seeded it with INSERT OR
+    IGNORE but the table has no unique constraint, so every startup appended
+    a duplicate row. Collapse to a single row, and remove the stale
+    settings.schema_version key that migrate_v54 would have deleted had the
+    pre-stamped db_meta row not prevented it from running.
+    """
+    cols = {r['name'] for r in conn.execute("PRAGMA table_info(departments)").fetchall()}
+    if 'no_negative_soh' not in cols:
+        conn.execute("""
+            ALTER TABLE departments ADD COLUMN no_negative_soh
+                INTEGER NOT NULL DEFAULT 0 CHECK (no_negative_soh IN (0,1))
+        """)
+    # Runs once per database (fresh installs seed db_meta at 54), so this
+    # default never overrides a later user choice to disable the flag.
+    conn.execute("UPDATE departments SET no_negative_soh = 1 WHERE code = 'FRESH'")
+
+    # Backfill: zero out SOH already negative in flagged departments, with a
+    # compensating movement per product so movement history reconciles.
+    conn.execute("""
+        INSERT INTO stock_movements
+            (barcode, movement_type, quantity, reference, notes, created_by, source)
+        SELECT s.barcode, 'ADJUSTMENT_IN', -s.quantity, 'v55-migration',
+               'Auto-clamp: department does not allow negative SOH', 'migration', ''
+        FROM stock_on_hand s
+        JOIN products p    ON p.barcode = s.barcode
+        JOIN departments d ON d.id = p.department_id
+        WHERE s.quantity < 0 AND d.no_negative_soh = 1
+    """)
+    conn.execute("""
+        UPDATE stock_on_hand
+           SET quantity = 0, last_updated = CURRENT_TIMESTAMP
+         WHERE quantity < 0
+           AND barcode IN (
+               SELECT p.barcode FROM products p
+               JOIN departments d ON d.id = p.department_id
+               WHERE d.no_negative_soh = 1
+           )
+    """)
+    conn.execute("DELETE FROM db_meta WHERE rowid NOT IN (SELECT MIN(rowid) FROM db_meta)")
+    conn.execute("DELETE FROM settings WHERE key = 'schema_version'")
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
@@ -2505,4 +2558,5 @@ _MIGRATIONS: dict[int, tuple] = {
     52: (migrate_v52, "drop unused password_hash column from users"),
     53: (migrate_v53, "backfill corrected checksums for migrate_v40 and migrate_v42"),
     54: (migrate_v54, "move schema_version from settings to dedicated db_meta table"),
+    55: (migrate_v55, "no_negative_soh flag on departments (FRESH on); db_meta dedupe"),
 }

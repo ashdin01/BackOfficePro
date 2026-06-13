@@ -10,12 +10,12 @@ def get_by_id(dept_id) -> dict | None:
     return department_model.get_by_id(dept_id)
 
 
-def create(code, name) -> None:
-    department_model.create(code, name)
+def create(code, name, no_negative_soh=0) -> None:
+    department_model.create(code, name, no_negative_soh)
 
 
-def update(dept_id, code, name, active) -> None:
-    department_model.update(dept_id, code, name, active)
+def update(dept_id, code, name, active, no_negative_soh=0) -> None:
+    department_model.update(dept_id, code, name, active, no_negative_soh)
 
 
 def deactivate(dept_id) -> None:

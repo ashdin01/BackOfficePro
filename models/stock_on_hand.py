@@ -1,7 +1,45 @@
 import sqlite3
 from datetime import datetime
 
+from config.constants import MOVE_ADJUSTMENT_IN
 from database.connection import db_conn
+
+
+def clamp_negative_soh(conn, barcode, reference='', created_by=''):
+    """Reset a negative SOH to zero for products whose department has
+    no_negative_soh set (e.g. Fresh — counts drift, so negative SOH is noise).
+
+    Records a compensating ADJUSTMENT_IN movement for the clamped amount so
+    movement-based reports still reconcile with the stored SOH.
+
+    Must run inside the caller's transaction, after the SOH write and before
+    commit. Returns the clamped quantity (0.0 if nothing was clamped).
+    """
+    row = conn.execute("""
+        SELECT s.quantity
+        FROM stock_on_hand s
+        JOIN products p    ON p.barcode = s.barcode
+        JOIN departments d ON d.id = p.department_id
+        WHERE s.barcode = ? AND s.quantity < 0 AND d.no_negative_soh = 1
+    """, (barcode,)).fetchone()
+    if not row:
+        return 0.0
+
+    shortfall = -row['quantity']
+    conn.execute(
+        "UPDATE stock_on_hand SET quantity = 0, last_updated = CURRENT_TIMESTAMP"
+        " WHERE barcode = ?",
+        (barcode,)
+    )
+    from database.audit_context import get_user, get_source
+    conn.execute("""
+        INSERT INTO stock_movements
+            (barcode, movement_type, quantity, reference, notes, created_by, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (barcode, MOVE_ADJUSTMENT_IN, shortfall, reference,
+          'Auto-clamp: department does not allow negative SOH',
+          created_by or get_user(), get_source()))
+    return shortfall
 
 
 def get_by_barcode(barcode):
@@ -68,6 +106,7 @@ def adjust(barcode, quantity, movement_type, reference='', notes='', created_by=
                 (barcode, movement_type, quantity, reference, notes, created_by, source)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (barcode, movement_type, quantity, reference, notes, who, src))
+        clamp_negative_soh(conn, barcode, reference=reference, created_by=who)
         conn.commit()
 
 
@@ -140,6 +179,8 @@ def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items:
                     (barcode, movement_type, quantity, reference, notes, created_by, source)
                 VALUES (?, 'SALE', ?, ?, ?, ?, ?)
             """, (stock_barcode, -stock_qty, reference, description, operator, src))
+
+            clamp_negative_soh(conn, stock_barcode, reference=reference, created_by=operator)
 
             plu_row = conn.execute(
                 "SELECT plu FROM products WHERE barcode = ?", (stock_barcode,)
