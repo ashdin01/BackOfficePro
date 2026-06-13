@@ -17,6 +17,7 @@ def api_client(test_db):
     api_server._sale_clients.clear()   # isolate rate-limiter state between tests
     api_server._read_clients.clear()
     api_server._api_key_cache = ""   # force key re-derivation from the fresh test DB
+    api_server._api_key_refresh_ts = 0.0   # disarm the mismatch-refresh throttle
     app = api_server.app
     app.config["TESTING"] = True
     key = api_server._get_api_key()
@@ -80,6 +81,41 @@ def test_key_via_query_param_rejected(api_client):
 def test_key_via_header_accepted(api_client):
     client, key = api_client
     r = client.get("/api/v1/store", headers=_h(key))
+    assert r.status_code == 200
+
+
+def test_regenerated_key_accepted_without_restart(api_client):
+    """A key rotated by the Settings screen (separate process) must work
+    against the already-cached server without a restart."""
+    from utils.api_key import store_api_key
+    client, old_key = api_client
+    new_key = "ab" * 32
+    store_api_key(new_key)
+
+    r = client.get("/api/v1/store", headers=_h(new_key))
+    assert r.status_code == 200
+
+    import api_server
+    api_server._api_key_refresh_ts = 0.0   # past the throttle window
+    r = client.get("/api/v1/store", headers=_h(old_key))
+    assert r.status_code == 401
+
+
+def test_mismatch_refresh_is_throttled(api_client):
+    """Within the throttle window a rotated key is still rejected — the
+    store must not be re-read on every bad request."""
+    from utils.api_key import store_api_key
+    client, old_key = api_client
+    new_key = "cd" * 32
+    store_api_key(new_key)
+
+    import api_server
+    api_server._api_key_refresh_ts = time.monotonic()   # refresh just happened
+    r = client.get("/api/v1/store", headers=_h(new_key))
+    assert r.status_code == 401
+
+    api_server._api_key_refresh_ts = 0.0   # window elapsed — now picked up
+    r = client.get("/api/v1/store", headers=_h(new_key))
     assert r.status_code == 200
 
 

@@ -74,6 +74,8 @@ def _read_rate_ok(client_ip: str) -> bool:
 
 _api_key_cache: str = ""
 _api_key_lock = threading.Lock()
+_api_key_refresh_ts: float = 0.0   # monotonic time of last store re-read on mismatch
+_API_KEY_REFRESH_MIN_S = 5.0
 
 
 def _get_api_key():
@@ -103,6 +105,27 @@ def _get_api_key():
 
         _api_key_cache = key
         return key
+
+
+def _refresh_api_key() -> str:
+    """Re-resolve the key from the keyring/DB and update the cache.
+
+    Called when a request presents a key that doesn't match the cache: the key
+    may have been regenerated in the desktop Settings screen, which runs in a
+    different process and can't invalidate our cache directly. Re-resolving
+    here lets a new key take effect without restarting the API server.
+    Throttled so a flood of bad keys can't hammer the keyring/DB.
+    """
+    global _api_key_cache, _api_key_refresh_ts
+    with _api_key_lock:
+        now = time.monotonic()
+        if now - _api_key_refresh_ts < _API_KEY_REFRESH_MIN_S:
+            return _api_key_cache
+        _api_key_refresh_ts = now
+
+        from utils.api_key import resolve_api_key
+        _api_key_cache = resolve_api_key()
+        return _api_key_cache
 
 
 @app.teardown_appcontext
@@ -144,6 +167,10 @@ def _require_api_key():
         return
     provided = request.headers.get("X-API-Key", "")
     expected = _get_api_key()
+    if provided and not hmac.compare_digest(provided, expected):
+        # Key may have been regenerated in the Settings screen (separate
+        # process) — re-resolve from the store before rejecting.
+        expected = _refresh_api_key()
     if not provided or not hmac.compare_digest(provided, expected):
         return _err("UNAUTHORIZED", "Missing or invalid API key", 401)
 
