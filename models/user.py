@@ -89,8 +89,25 @@ def set_pin(username: str, pin: str):
         conn.commit()
 
 
+def _check_cross_store_conflict(username: str):
+    """Raise ValueError if `username` is already active in another store.
+
+    Usernames now double as the lookup key for the merged cross-store
+    sign-in screen, so a collision would make login ambiguous.
+    """
+    import database.connection as _db_conn
+    from models.user_directory import find_other_store_conflict
+    conflict_store = find_other_store_conflict(username, exclude_db_path=_db_conn.DATABASE_PATH)
+    if conflict_store:
+        raise ValueError(
+            f"Username '{username}' is already in use at {conflict_store}. "
+            "Usernames must be unique across all stores."
+        )
+
+
 def create(username: str, full_name: str, role: str, pin: str):
     _validate_pin(pin)
+    _check_cross_store_conflict(username)
     from models.audit_log import record_changes
     from database.audit_context import get_user
     with db_conn() as conn:
@@ -119,6 +136,8 @@ def update(user_id: int, username: str, full_name: str, role: str):
         old = conn.execute(
             "SELECT username, full_name, role FROM users WHERE id=?", (user_id,)
         ).fetchone()
+        if not old or old['username'] != username:
+            _check_cross_store_conflict(username)
         conn.execute(
             "UPDATE users SET username=?, full_name=?, role=? WHERE id=?",
             (username, full_name, role, user_id)

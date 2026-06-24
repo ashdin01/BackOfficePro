@@ -237,6 +237,106 @@ def _start_api_server():
     return t
 
 
+def _pick_store(app):
+    """Show a store-selection dialog and patch DATABASE_PATH before DB init."""
+    import config.settings as _cfg
+    if len(_cfg.STORES) <= 1:
+        if _cfg.STORES:
+            _cfg.ACTIVE_STORE_NAME = _cfg.STORES[0]['name']
+        return
+
+    from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QFrame
+    from PyQt6.QtCore import Qt
+    import config.styles as styles
+
+    chosen = [None]
+
+    dlg = QDialog()
+    dlg.setWindowTitle("BackOfficePro — Select Store")
+    dlg.setModal(True)
+    dlg.setMinimumWidth(300)
+    dlg.setStyleSheet(
+        f"QDialog{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};}}"
+        f"QLabel{{color:{styles.CLR_TEXT};background:transparent;}}"
+        f"QPushButton{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};"
+        f"border:1px solid {styles.CLR_BORDER};border-radius:6px;"
+        "font-size:14px;padding:12px;}}"
+        f"QPushButton:hover{{background:{styles.CLR_ACCENT};color:white;"
+        f"border-color:{styles.CLR_ACCENT};}}"
+    )
+
+    layout = QVBoxLayout(dlg)
+    layout.setContentsMargins(24, 24, 24, 24)
+    layout.setSpacing(12)
+
+    title = QLabel("Select Store")
+    title.setStyleSheet("font-size:18px;font-weight:bold;")
+    title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    layout.addWidget(title)
+
+    sep = QFrame()
+    sep.setFrameShape(QFrame.Shape.HLine)
+    sep.setStyleSheet(f"color:{styles.CLR_BORDER};")
+    layout.addWidget(sep)
+
+    for store in _cfg.STORES:
+        btn = QPushButton(store['name'])
+        btn.clicked.connect(lambda _, s=store: (chosen.__setitem__(0, s), dlg.accept()))
+        layout.addWidget(btn)
+
+    if dlg.exec() != QDialog.DialogCode.Accepted or chosen[0] is None:
+        sys.exit(0)
+
+    store = chosen[0]
+    import database.connection as _db_conn
+    new_path = os.path.join(_cfg.DATA_DIR, store['db'])
+    _cfg.DATABASE_PATH = new_path
+    _cfg.ACTIVE_STORE_NAME = store['name']
+    _db_conn.DATABASE_PATH = new_path
+    os.environ['BACKOFFICE_PROFILE'] = store['name']
+    logging.info("Store selected: %s → %s", store['name'], new_path)
+
+
+def _init_all_stores(app):
+    """Run init_db + migrations against every configured store's database,
+    used by the merged cross-store login flow (see config.app_config) where
+    no single store is "active" until a user actually logs in."""
+    import config.settings as _cfg
+    import database.connection as _db_conn
+    for store in _cfg.STORES:
+        path = os.path.join(_cfg.DATA_DIR, store['db'])
+        _cfg.DATABASE_PATH = path
+        _db_conn.DATABASE_PATH = path
+        _cfg.ACTIVE_STORE_NAME = store['name']
+        logging.info("Initializing store database: %s -> %s", store['name'], path)
+        _init_db_with_lock_recovery(app)
+
+    # Leave a safe default active until login_screen switches it to whichever
+    # store the logged-in user actually belongs to.
+    if _cfg.STORES:
+        first = _cfg.STORES[0]
+        path = os.path.join(_cfg.DATA_DIR, first['db'])
+        _cfg.DATABASE_PATH = path
+        _db_conn.DATABASE_PATH = path
+        _cfg.ACTIVE_STORE_NAME = first['name']
+
+
+def _any_pin_set_anywhere() -> bool:
+    """Like models.user.has_any_pin_set(), but checks every store's database
+    rather than just the currently active one."""
+    import config.settings as _cfg
+    import database.connection as _db_conn
+    import models.user as user_model
+
+    for store in _cfg.STORES:
+        path = os.path.join(_cfg.DATA_DIR, store['db'])
+        _cfg.DATABASE_PATH = path
+        _db_conn.DATABASE_PATH = path
+        if user_model.has_any_pin_set():
+            return True
+    return False
+
+
 def _configure_app_icon(app):
     """Set the application window icon so it appears in the taskbar."""
     from PyQt6.QtGui import QIcon
@@ -253,7 +353,17 @@ def main():
     from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
     _configure_app_icon(app)
-    _init_db_with_lock_recovery(app)
+
+    import config.settings as _cfg
+    import config.app_config as _app_cfg
+    merged_login = _app_cfg.get_merged_login() and len(_cfg.STORES) > 1
+
+    if merged_login:
+        _init_all_stores(app)
+    else:
+        _pick_store(app)
+        _init_db_with_lock_recovery(app)
+
     api_thread = _start_api_server()
 
     def _stop_api():
@@ -271,7 +381,9 @@ def main():
 
     import models.user as user_model
     from views.login_screen import LoginScreen, _SetupPinDialog
-    if not user_model.has_any_pin_set():
+
+    any_pin = _any_pin_set_anywhere() if merged_login else user_model.has_any_pin_set()
+    if not any_pin:
         setup = _SetupPinDialog()
         if setup.exec() != setup.DialogCode.Accepted:
             sys.exit(0)
@@ -285,7 +397,7 @@ def main():
         login_win[0].hide()
         main_win[0] = MainWindow(current_user=user, api_thread=api_thread)
         main_win[0].show()
-    login_win[0] = LoginScreen(on_login=on_login)
+    login_win[0] = LoginScreen(on_login=on_login, merged=merged_login)
     login_win[0].show()
     sys.exit(app.exec())
 

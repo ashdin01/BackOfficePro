@@ -7,6 +7,7 @@ from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from datetime import datetime, timedelta
 import controllers.user_controller as user_ctrl
 import config.styles as styles
+import config.settings as _cfg_settings
 
 _MAX_ATTEMPTS = 5
 _LOCKOUT_SECONDS = 30
@@ -100,13 +101,18 @@ class LoginScreen(QWidget):
     Full-screen login shown before MainWindow.
     Emits login_successful signal with the user dict.
     """
-    def __init__(self, on_login):
+    def __init__(self, on_login, merged=False):
         super().__init__()
         self._on_login = on_login
+        self._merged = merged
         self._users = []
         self._selected_user = None
         self._countdown_username = None
-        self.setWindowTitle("BackOfficePro — Login")
+        if merged:
+            self.setWindowTitle("BackOfficePro — Login")
+        else:
+            _store = _cfg_settings.ACTIVE_STORE_NAME
+            self.setWindowTitle(f"BackOfficePro — {_store} — Login" if _store else "BackOfficePro — Login")
         self.setMinimumSize(500, 400)
         self.setStyleSheet(
             f"QWidget{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};}}"
@@ -116,7 +122,8 @@ class LoginScreen(QWidget):
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._tick_countdown)
-        self._load_users()
+        if not self._merged:
+            self._load_users()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -140,7 +147,8 @@ class LoginScreen(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(title)
 
-        sub = QLabel("Select your name and enter your PIN")
+        sub_text = "Enter your username and PIN" if self._merged else "Select your name and enter your PIN"
+        sub = QLabel(sub_text)
         sub.setStyleSheet(f"font-size: 12px; color: {styles.CLR_MUTED}; background: transparent;")
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(sub)
@@ -149,10 +157,29 @@ class LoginScreen(QWidget):
         sep.setStyleSheet(f"{styles.STYLE_SEPARATOR} background: transparent;")
         card_layout.addWidget(sep)
 
-        # User buttons
-        self._user_btn_area = QVBoxLayout()
-        self._user_btn_area.setSpacing(8)
-        card_layout.addLayout(self._user_btn_area)
+        if self._merged:
+            # Username entry — no store/user list shown. The correct store
+            # is resolved from the username itself at login time.
+            self.username_label = QLabel("Username")
+            self.username_label.setStyleSheet(f"{styles.STYLE_LABEL_MUTED} background: transparent;")
+            card_layout.addWidget(self.username_label)
+
+            self.username_input = QLineEdit()
+            self.username_input.setPlaceholderText("e.g. jsmith")
+            self.username_input.setFixedHeight(40)
+            self.username_input.setStyleSheet(
+                f"QLineEdit{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};"
+                f"border:2px solid {styles.CLR_BORDER};border-radius:6px;"
+                "padding:8px;font-size:14px;}"
+                f"QLineEdit:focus{{border-color:{styles.CLR_ACCENT};}}"
+            )
+            self.username_input.returnPressed.connect(lambda: self.pin_input.setFocus())
+            card_layout.addWidget(self.username_input)
+        else:
+            # User buttons
+            self._user_btn_area = QVBoxLayout()
+            self._user_btn_area.setSpacing(8)
+            card_layout.addLayout(self._user_btn_area)
 
         # PIN entry
         self.pin_label = QLabel("PIN")
@@ -198,17 +225,22 @@ class LoginScreen(QWidget):
         root.addLayout(centre)
         root.addStretch()
 
+        if self._merged:
+            self.username_input.setFocus()
+
     def _load_users(self):
         for i in reversed(range(self._user_btn_area.count())):
             w = self._user_btn_area.itemAt(i).widget()
             if w:
                 w.deleteLater()
 
-        self._users = user_ctrl.get_all_active()
+        self._users = user_ctrl.list_all_active_users() if self._merged else user_ctrl.get_all_active()
         self._selected_user = None
 
         for user in self._users:
             name = user['full_name'] or user['username']
+            if self._merged and user.get('store_name'):
+                name = f"{name} ({user['store_name']})"
             btn = QPushButton(name)
             btn.setFixedHeight(38)
             btn.setCheckable(True)
@@ -250,6 +282,12 @@ class LoginScreen(QWidget):
             self.pin_input.setFocus()
 
     def _attempt_login(self):
+        if self._merged:
+            self._attempt_login_merged()
+        else:
+            self._attempt_login_single()
+
+    def _attempt_login_single(self):
         if not self._selected_user:
             self.status_lbl.setText("Please select your name first.")
             return
@@ -272,22 +310,70 @@ class LoginScreen(QWidget):
             _lockout_until.pop(username, None)
             self._on_login(self._selected_user)
         else:
-            attempts = _failed_attempts.get(username, 0) + 1
-            _failed_attempts[username] = attempts
-            self.pin_input.clear()
+            self._record_failed_attempt(username, "Incorrect PIN.")
 
-            if attempts >= _MAX_ATTEMPTS:
-                _failed_attempts[username] = 0
-                _lockout_until[username] = datetime.now() + timedelta(seconds=_LOCKOUT_SECONDS)
-                self._start_countdown(username)
-            else:
-                remaining = _MAX_ATTEMPTS - attempts
-                self.status_lbl.setText(f"Incorrect PIN. {remaining} attempt(s) remaining.")
+    def _attempt_login_merged(self):
+        username = self.username_input.text().strip().lower()
+        pin = self.pin_input.text().strip()
+
+        if not username or not pin:
+            self.status_lbl.setText("Enter your username and PIN.")
+            return
+
+        until = _lockout_until.get(username)
+        if until and datetime.now() < until:
+            # Guard against Enter key or button click while locked
+            self._start_countdown(username)
+            return
+
+        # Look up the username before knowing whether it exists at all — the
+        # error message stays the same either way, so a typo can't be used
+        # to fish for valid usernames.
+        user = user_ctrl.find_user_for_login(username)
+        if user is None:
+            self._record_failed_attempt(username, "Invalid username or PIN.")
+            return
+
+        self._switch_to_store(user)
+
+        if user_ctrl.verify_pin(username, pin):
+            _failed_attempts.pop(username, None)
+            _lockout_until.pop(username, None)
+            self._on_login(user)
+        else:
+            self._record_failed_attempt(username, "Invalid username or PIN.")
+
+    def _record_failed_attempt(self, username: str, message: str):
+        attempts = _failed_attempts.get(username, 0) + 1
+        _failed_attempts[username] = attempts
+        self.pin_input.clear()
+
+        if attempts >= _MAX_ATTEMPTS:
+            _failed_attempts[username] = 0
+            _lockout_until[username] = datetime.now() + timedelta(seconds=_LOCKOUT_SECONDS)
+            self._start_countdown(username)
+        else:
+            remaining = _MAX_ATTEMPTS - attempts
+            self.status_lbl.setText(f"{message} {remaining} attempt(s) remaining.")
+
+    def _switch_to_store(self, user):
+        """Point the app's active database at this user's store before
+        verifying their PIN (merged cross-store login only)."""
+        db_path = user.get('db_path')
+        store_name = user.get('store_name')
+        if not db_path or not store_name:
+            return
+        import database.connection as _db_conn
+        _cfg_settings.DATABASE_PATH = db_path
+        _cfg_settings.ACTIVE_STORE_NAME = store_name
+        _db_conn.DATABASE_PATH = db_path
 
     def _start_countdown(self, username):
         self._countdown_username = username
         self.login_btn.setEnabled(False)
         self.pin_input.setEnabled(False)
+        if self._merged:
+            self.username_input.setEnabled(False)
         if not self._countdown_timer.isActive():
             self._countdown_timer.start()
         self._tick_countdown()
@@ -311,5 +397,7 @@ class LoginScreen(QWidget):
         self._countdown_username = None
         self.login_btn.setEnabled(True)
         self.pin_input.setEnabled(True)
+        if self._merged:
+            self.username_input.setEnabled(True)
         self.pin_input.setFocus()
         self.status_lbl.setText("")

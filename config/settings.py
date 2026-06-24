@@ -19,3 +19,12 @@ try:
     from version import VERSION as APP_VERSION
 except ImportError:
     APP_VERSION = "unknown"
+
+# Each entry maps a display name to its database filename inside DATA_DIR.
+# Add more stores here; a single entry skips the picker entirely.
+STORES = [
+    {"name": "Little Red Apple", "db": "backoffice.db"},
+    {"name": "Harcourt Cider",   "db": "harcourt_cider.db"},
+]
+# Set at runtime by _pick_store() in main.py before the login screen opens.
+ACTIVE_STORE_NAME = ""

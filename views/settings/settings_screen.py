@@ -12,13 +12,15 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QMessageBox,
     QGroupBox, QSizePolicy, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QDialog, QComboBox, QDialogButtonBox
+    QDialog, QComboBox, QDialogButtonBox, QCheckBox
 )
 from PyQt6.QtGui import QClipboard
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 import config.styles as styles
+import config.app_config as app_config
+import config.settings as app_settings
 import controllers.settings_controller as settings_ctrl
 import controllers.user_controller as user_ctrl
 from utils.validators import validate_abn, validate_email, validate_phone
@@ -384,6 +386,38 @@ class SettingsScreen(QWidget):
         api_layout.addLayout(key_row)
         scroll_layout.addWidget(api_group)
 
+        # ── Sign-In ────────────────────────────────────────────────────
+        signin_group = QGroupBox("Sign-In")
+        signin_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        signin_layout = QVBoxLayout(signin_group)
+        signin_layout.setContentsMargins(16, 16, 16, 16)
+        signin_layout.setSpacing(8)
+
+        self._merged_login_check = QCheckBox(
+            "Sign in directly by username (skip \"Select Store\")"
+        )
+        self._merged_login_check.setEnabled(len(app_settings.STORES) > 1)
+        signin_layout.addWidget(self._merged_login_check)
+
+        signin_note = QLabel(
+            "💡 When enabled, the sign-in screen lists everyone's name across all stores "
+            "and opens the right store's database automatically once they enter their PIN. "
+            "Requires every username to be unique across all stores."
+        )
+        signin_note.setStyleSheet("color: grey; font-size: 8pt;")
+        signin_note.setWordWrap(True)
+        signin_layout.addWidget(signin_note)
+
+        self._signin_conflict_warn = QLabel("")
+        self._signin_conflict_warn.setStyleSheet(
+            f"color: {styles.CLR_WARNING}; font-size: 8pt; font-weight: bold;"
+        )
+        self._signin_conflict_warn.setWordWrap(True)
+        self._signin_conflict_warn.setVisible(False)
+        signin_layout.addWidget(self._signin_conflict_warn)
+
+        scroll_layout.addWidget(signin_group)
+
         # ── Users ─────────────────────────────────────────────────────
         users_group = QGroupBox("Users")
         users_group.setStyleSheet("QGroupBox { font-weight: bold; }")
@@ -508,6 +542,22 @@ class SettingsScreen(QWidget):
         self._fields["graph_client_secret"].setText(keyring_secret)
         self._load_api_key()
         self._load_users()
+        self._load_signin()
+
+    def _load_signin(self):
+        conflicts = user_ctrl.find_username_conflicts()
+        if conflicts:
+            self._signin_conflict_warn.setText(
+                "⚠ These usernames exist in more than one store and must be made unique "
+                "before cross-store sign-in can be enabled: " + ", ".join(conflicts)
+            )
+            self._signin_conflict_warn.setVisible(True)
+            self._merged_login_check.setChecked(False)
+            self._merged_login_check.setEnabled(False)
+        else:
+            self._signin_conflict_warn.setVisible(False)
+            self._merged_login_check.setEnabled(len(app_settings.STORES) > 1)
+            self._merged_login_check.setChecked(app_config.get_merged_login())
 
     def _load_api_key(self):
         # Must resolve through utils.api_key (keyring first, DB fallback) — the
@@ -599,6 +649,9 @@ class SettingsScreen(QWidget):
                 _save_setting(key, email_vals[key])
             else:
                 _save_setting(key, edit.text().strip())
+
+        if self._merged_login_check.isEnabled():
+            app_config.set_merged_login(self._merged_login_check.isChecked())
 
         QMessageBox.information(self, "Saved", "Settings saved successfully.")
         self.close()
@@ -736,6 +789,7 @@ class SettingsScreen(QWidget):
             show_error(self, "Could not create user.", e)
             return
         self._load_users()
+        self._load_signin()
 
     def _edit_user(self):
         uid = self._selected_user_id()
@@ -757,6 +811,7 @@ class SettingsScreen(QWidget):
             show_error(self, "Could not update user.", e)
             return
         self._load_users()
+        self._load_signin()
 
     def _reset_pin(self):
         uid = self._selected_user_id()
@@ -793,6 +848,7 @@ class SettingsScreen(QWidget):
 
         user_ctrl.set_active(uid, going_active)
         self._load_users()
+        self._load_signin()
 
 
 # ── Simple PIN input dialog ────────────────────────────────────────────────────

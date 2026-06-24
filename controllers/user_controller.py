@@ -1,8 +1,21 @@
 import models.user as user_model
+import models.user_directory as user_directory
 
 
 def get_all_active() -> list[dict]:
     return user_model.get_all_active()
+
+
+def list_all_active_users() -> list[dict]:
+    return user_directory.list_all_active_users()
+
+
+def find_username_conflicts() -> list[str]:
+    return user_directory.find_username_conflicts()
+
+
+def find_user_for_login(username: str) -> dict | None:
+    return user_directory.find_user_for_login(username)
 
 
 def verify_pin(username, pin) -> bool:

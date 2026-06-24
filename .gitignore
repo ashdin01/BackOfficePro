@@ -2,11 +2,16 @@
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/*.db.bak-*
+data/*.db.stale-*
 data/images/
 *.db
 *.db-shm
 *.db-wal
 plu_audit*.csv
+
+# Per-install runtime config (e.g. merged-login toggle) — not source
+data/app_config.json
 
 # Backups
 backups/
