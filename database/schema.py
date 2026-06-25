@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS products (
     supplier_sku    TEXT    DEFAULT '',
     group_id        INTEGER,
     auto_reorder    INTEGER DEFAULT 0    CHECK (auto_reorder IN (0,1)),
+    online_available INTEGER NOT NULL DEFAULT 0 CHECK (online_available IN (0,1)),
+    online_notes    TEXT,
     FOREIGN KEY (department_id) REFERENCES departments(id)    ON DELETE RESTRICT,
     FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)      ON DELETE SET NULL,
     FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL
