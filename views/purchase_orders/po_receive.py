@@ -748,6 +748,7 @@ class POReceive(BaseView):
 
             qty      = qty_input.value()
             cost     = cost_input.value()
+            weight   = weight_input.value() if is_vw else 0.0
             is_promo = promo_cb.isChecked()
 
             cartons = max(1, math.ceil(qty / pack_qty)) if qty > 0 else 0
@@ -757,13 +758,14 @@ class POReceive(BaseView):
 
             if qty > 0:
                 line_receipts.append({
-                    'line_id':          line['id'],
-                    'barcode':          line['barcode'],
-                    'new_received_qty': line['received_qty'] + cartons,
-                    'actual_cost':      cost if cost > 0 else None,
-                    'unit_cost':        cost if cost > 0 else None,
-                    'is_promo':         is_promo,
-                    'qty_units':        qty,
+                    'line_id':             line['id'],
+                    'barcode':             line['barcode'],
+                    'new_received_qty':    line['received_qty'] + cartons,
+                    'new_received_weight': (line['received_weight'] or 0) + weight,
+                    'actual_cost':         cost if cost > 0 else None,
+                    'unit_cost':           cost if cost > 0 else None,
+                    'is_promo':            is_promo,
+                    'qty_units':           qty,
                 })
 
         status = PO_STATUS_RECEIVED if all_received else PO_STATUS_PARTIAL

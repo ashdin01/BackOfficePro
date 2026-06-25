@@ -526,11 +526,16 @@ class PODetail(BaseView):
                 cost_item.setFlags(cost_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, 7, cost_item)
 
-                line_val = total_units * line['unit_cost']
                 if product and product['variable_weight']:
-                    total_item = QTableWidgetItem("— variable weight")
+                    received_weight = float(line['received_weight'] or 0)
+                    line_val = received_weight * line['unit_cost']
+                    line_str = fmt_money(line_val)
+                    total_item = QTableWidgetItem(line_str)
+                    total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    total_item.setToolTip(f"{received_weight:.3f} kg × ${line['unit_cost']:.4f}/kg")
                     total_item.setForeground(QColor("#FFA500"))
                 else:
+                    line_val = total_units * line['unit_cost']
                     line_str = fmt_money(line_val)
                     total_item = QTableWidgetItem(line_str)
                     total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

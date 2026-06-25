@@ -2499,10 +2499,44 @@ def migrate_v55(conn):
     conn.commit()
 
 
+def migrate_v56(conn):
+    """Add online_available flag to products for the shop.littleredapple.com.au storefront.
+
+    Products with online_available = 1 are surfaced in the online shop.
+    Staff tag lines manually via the product list in BackOfficePro.
+    """
+    _add_column(conn, """
+        ALTER TABLE products ADD COLUMN online_available
+            INTEGER NOT NULL DEFAULT 0 CHECK (online_available IN (0,1))
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_products_online ON products(online_available)")
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
 # Never remove or reorder entries; only append new ones.
+
+def migrate_v57(conn):
+    """Add online_notes text field to products for shop.littleredapple.com.au product pages."""
+    _add_column(conn, "ALTER TABLE products ADD COLUMN online_notes TEXT")
+    conn.commit()
+
+
+def migrate_v58(conn):
+    """Add received_weight column to po_lines.
+
+    Variable-weight lines need the actual weight received (kg) persisted
+    separately from received_qty (which stays an item/carton count) so
+    line totals can be computed as weight × cost/kg after the fact.
+    """
+    _add_column(conn, """
+        ALTER TABLE po_lines ADD COLUMN received_weight
+            REAL NOT NULL DEFAULT 0
+    """)
+    conn.commit()
+
 
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
@@ -2559,4 +2593,7 @@ _MIGRATIONS: dict[int, tuple] = {
     53: (migrate_v53, "backfill corrected checksums for migrate_v40 and migrate_v42"),
     54: (migrate_v54, "move schema_version from settings to dedicated db_meta table"),
     55: (migrate_v55, "no_negative_soh flag on departments (FRESH on); db_meta dedupe"),
+    56: (migrate_v56, "online_available flag on products for shop.littleredapple.com.au"),
+    57: (migrate_v57, "online_notes text field on products for shop product pages"),
+    58: (migrate_v58, "received_weight column on po_lines for variable weight items"),
 }

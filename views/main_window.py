@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QIcon, QPixmap, QColor
 from config.settings import APP_NAME, APP_VERSION
+import config.settings as _cfg_settings
 import controllers.backup_controller as backup_ctrl
 import config.styles as styles
 from utils.role_access import user_can_access_screen, staff_allowed_screens
@@ -19,7 +20,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.current_user = current_user or {"username": "admin", "role": "ADMIN", "full_name": "Administrator"}
         self._api_thread = api_thread
-        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
+        _store = _cfg_settings.ACTIVE_STORE_NAME
+        self.setWindowTitle(f"{APP_NAME} — {_store} v{APP_VERSION}" if _store else f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1400, 850)
         self._build_ui()
         if api_thread is not None:

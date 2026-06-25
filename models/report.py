@@ -164,9 +164,11 @@ def _gst_collected(conn, d_from, d_to) -> dict:
 def _gst_paid(conn, d_from, d_to) -> dict:
     rows = conn.execute("""
         SELECT pol.received_qty,
+               pol.received_weight,
                COALESCE(NULLIF(pol.actual_cost, 0), pol.unit_cost) AS unit_cost,
                COALESCE(p.tax_rate, 0) AS tax_rate,
-               COALESCE(p.pack_qty, 1) AS pack_qty
+               COALESCE(p.pack_qty, 1) AS pack_qty,
+               COALESCE(p.variable_weight, 0) AS variable_weight
         FROM po_lines pol
         JOIN purchase_orders po ON po.id = pol.po_id
         LEFT JOIN products p    ON p.barcode = pol.barcode
@@ -177,9 +179,12 @@ def _gst_paid(conn, d_from, d_to) -> dict:
 
     taxable_purchases = exempt_purchases = gst_paid = 0.0
     for row in rows:
-        line_total = (int(row['received_qty'] or 0)
-                      * int(row['pack_qty'] or 1)
-                      * float(row['unit_cost'] or 0))
+        if row['variable_weight']:
+            line_total = float(row['received_weight'] or 0) * float(row['unit_cost'] or 0)
+        else:
+            line_total = (int(row['received_qty'] or 0)
+                          * int(row['pack_qty'] or 1)
+                          * float(row['unit_cost'] or 0))
         tax_rate = float(row['tax_rate'] or 0)
         if tax_rate > 0:
             taxable_purchases += line_total

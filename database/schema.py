@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS po_lines (
     description     TEXT    NOT NULL,
     ordered_qty     REAL    NOT NULL,
     received_qty    REAL    NOT NULL DEFAULT 0,
+    received_weight REAL    NOT NULL DEFAULT 0,
     pack_qty        INTEGER NOT NULL DEFAULT 1,
     unit_cost       REAL    NOT NULL DEFAULT 0,
     notes           TEXT,

@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox,
     QDoubleSpinBox, QLabel, QDialog, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QCheckBox, QSpinBox, QFileDialog, QScrollArea, QSizePolicy
+    QCheckBox, QSpinBox, QFileDialog, QScrollArea, QSizePolicy,
+    QPlainTextEdit
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
@@ -25,9 +26,9 @@ class ProductEdit(KeyboardMixin, QWidget):
     def __init__(self, barcode, on_save=None):
         super().__init__()
         self.setWindowTitle("Product Detail")
-        self.setMinimumWidth(900)
+        self.setMinimumWidth(1200)
         self.setMinimumHeight(700)
-        self.resize(960, 860)
+        self.resize(1280, 860)
         self.barcode = barcode
         self.on_save = on_save
         self._depts = dept_ctrl.get_all()
@@ -79,8 +80,10 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._reorder_max   = p['reorder_max'] if 'reorder_max' in p.keys() and p['reorder_max'] else 0
         self._variable_wt   = bool(p['variable_weight'])
         self._in_stocktake  = bool(p['expected'])
-        self._active        = bool(p['active'])
-        self._auto_reorder  = bool(p['auto_reorder']) if 'auto_reorder' in p.keys() else False
+        self._active            = bool(p['active'])
+        self._auto_reorder      = bool(p['auto_reorder']) if 'auto_reorder' in p.keys() else False
+        self._online_available  = bool(p['online_available'] if 'online_available' in p.keys() else 0)
+        self._online_notes      = (p['online_notes'] if 'online_notes' in p.keys() and p['online_notes'] else '')
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -131,7 +134,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             row.addStretch()
             return row
 
-        # ── Two-column field area ─────────────────────────────────────
+        # ── Three-column field area ───────────────────────────────────
         two_col = QHBoxLayout()
         two_col.setSpacing(12)
 
@@ -139,6 +142,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         left_col.setSpacing(5)
         right_col = QVBoxLayout()
         right_col.setSpacing(5)
+        third_col = QVBoxLayout()
+        third_col.setSpacing(5)
 
         # Left — identification & classification
         r, self.lbl_barcode = ro_row("Barcode", self.product['barcode'], self._edit_barcode)
@@ -198,16 +203,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_reorder_max = ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
         right_col.addLayout(r)
 
-        r, self.lbl_vw = ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
-        right_col.addLayout(r)
-
-        r, self.lbl_stocktake = ro_row("In Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
-        right_col.addLayout(r)
-
         r, self.lbl_active = ro_row("Active", "Yes" if self._active else "No", self._edit_active)
-        right_col.addLayout(r)
-
-        r, self.lbl_auto_reorder = ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
         right_col.addLayout(r)
 
         soh = product_controller.get_soh_by_barcode(self.barcode)
@@ -237,14 +233,33 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         right_col.addStretch()
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFrameShadow(QFrame.Shadow.Sunken)
-        sep.setStyleSheet(styles.STYLE_SEPARATOR)
+        # Third column — product flags
+        r, self.lbl_vw = ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
+        third_col.addLayout(r)
+
+        r, self.lbl_stocktake = ro_row("In Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
+        third_col.addLayout(r)
+
+        r, self.lbl_auto_reorder = ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
+        third_col.addLayout(r)
+
+        r, self.lbl_online = ro_row("Online Shop", "Yes" if self._online_available else "No", self._edit_online_available)
+        third_col.addLayout(r)
+
+        third_col.addStretch()
+
+        def _make_vsep():
+            s = QFrame()
+            s.setFrameShape(QFrame.Shape.VLine)
+            s.setFrameShadow(QFrame.Shadow.Sunken)
+            s.setStyleSheet(styles.STYLE_SEPARATOR)
+            return s
 
         two_col.addLayout(left_col, 1)
-        two_col.addWidget(sep)
+        two_col.addWidget(_make_vsep())
         two_col.addLayout(right_col, 1)
+        two_col.addWidget(_make_vsep())
+        two_col.addLayout(third_col, 1)
         layout.addLayout(two_col)
 
         # ── Bottom row: image + alternate barcodes ────────────────────
@@ -311,6 +326,19 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         # ── Selling Units ─────────────────────────────────────────────
         layout.addWidget(self._build_selling_units_section())
+
+        # ── Online shop description ───────────────────────────────────
+        notes_group = QGroupBox("Online Shop Description")
+        notes_lay = QVBoxLayout(notes_group)
+        notes_lay.setContentsMargins(8, 6, 8, 6)
+        self._txt_notes = QPlainTextEdit()
+        self._txt_notes.setPlaceholderText(
+            "Write a short product description for the online shop page (optional)…"
+        )
+        self._txt_notes.setPlainText(self._online_notes)
+        self._txt_notes.setFixedHeight(80)
+        notes_lay.addWidget(self._txt_notes)
+        layout.addWidget(notes_group)
 
         # ── Action buttons ────────────────────────────────────────────
         act_row = QHBoxLayout()
@@ -700,6 +728,18 @@ class ProductEdit(KeyboardMixin, QWidget):
         if val is not None:
             self._auto_reorder = (val == "Yes")
             self.lbl_auto_reorder.setText(val)
+
+    def _edit_online_available(self):
+        val = choice_popup(
+            "Online Shop",
+            "Show this product on shop.littleredapple.com.au?",
+            ["No", "Yes"],
+            "Yes" if self._online_available else "No",
+            self,
+        )
+        if val is not None:
+            self._online_available = (val == "Yes")
+            self.lbl_online.setText(val)
 
     # ── Helpers ───────────────────────────────────────────────────────
 
@@ -1249,6 +1289,8 @@ class ProductEdit(KeyboardMixin, QWidget):
                 expected=int(self._in_stocktake),
                 active=int(self._active),
                 auto_reorder=int(self._auto_reorder),
+                online_available=int(self._online_available),
+                online_notes=self._txt_notes.toPlainText().strip(),
                 product_suppliers=self._product_suppliers,
             )
             if self.on_save:

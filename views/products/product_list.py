@@ -1,10 +1,10 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QHeaderView,
-    QFileDialog, QMessageBox, QCheckBox
+    QFileDialog, QMessageBox, QCheckBox, QMenu
 )
-from PyQt6.QtCore import Qt, QObject, QEvent
-from PyQt6.QtGui import QKeySequence, QShortcut, QColor
+from PyQt6.QtCore import Qt, QObject, QEvent, QPoint
+from PyQt6.QtGui import QKeySequence, QShortcut, QColor, QAction
 from utils.keyboard_mixin import KeyboardMixin
 from views.base_view import BaseView
 from views.widgets.search_bar import SearchBar
@@ -97,10 +97,10 @@ class ProductList(KeyboardMixin, BaseView):
 
         # ── Table ─────────────────────────────────────────────────────
         self.table = QTableWidget()
-        self.table.setColumnCount(11)
+        self.table.setColumnCount(12)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "PLU", "Description", "Brand", "Department", "Supplier",
-            "Unit", "Sell Price", "Cost Price", "On Hand", "Status"
+            "Unit", "Sell Price", "Cost Price", "On Hand", "Status", "Online"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -114,6 +114,7 @@ class ProductList(KeyboardMixin, BaseView):
         self.table.setColumnWidth(8,   80)
         self.table.setColumnWidth(9,   65)
         self.table.setColumnWidth(10,  70)
+        self.table.setColumnWidth(11,  60)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setMinimumSectionSize(45)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -122,6 +123,8 @@ class ProductList(KeyboardMixin, BaseView):
         self.table.horizontalHeader().setSortIndicatorShown(True)
         self.table.horizontalHeader().setSectionsClickable(True)
         self.table.doubleClicked.connect(self._edit)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.table)
 
         self.status = QLabel("")
@@ -210,6 +213,17 @@ class ProductList(KeyboardMixin, BaseView):
             else:
                 status_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
             self.table.setItem(r, 10, status_item)
+            is_online = bool(row['online_available'] if 'online_available' in row.keys() else 0)
+            online_item = QTableWidgetItem("✓" if is_online else "—")
+            online_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            online_item.setForeground(
+                QColor(styles.CLR_BLUE) if is_online else QColor('#555555')
+            )
+            online_item.setToolTip(
+                "Listed on shop.littleredapple.com.au" if is_online
+                else "Not listed online — right-click to enable"
+            )
+            self.table.setItem(r, 11, online_item)
             if row_color:
                 for col in range(self.table.columnCount()):
                     item = self.table.item(r, col)
@@ -255,6 +269,37 @@ class ProductList(KeyboardMixin, BaseView):
         from views.products.product_edit import ProductEdit
         self.edit_win = ProductEdit(barcode=barcode, on_save=self._reload_with_search)
         self.edit_win.show()
+
+    def _context_menu(self, pos: QPoint):
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        barcode = self.table.item(row, 0).text()
+        online_item = self.table.item(row, 11)
+        is_online = online_item and online_item.text() == "✓"
+
+        menu = QMenu(self)
+        act_edit = QAction("✎  Edit product", self)
+        act_edit.triggered.connect(self._edit)
+        menu.addAction(act_edit)
+        menu.addSeparator()
+        if is_online:
+            act_toggle = QAction("🌐  Remove from Online Shop", self)
+        else:
+            act_toggle = QAction("🌐  Add to Online Shop", self)
+        act_toggle.triggered.connect(lambda: self._toggle_online(barcode, not is_online))
+        menu.addAction(act_toggle)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _toggle_online(self, barcode: str, enable: bool):
+        import controllers.product_controller as pc
+        try:
+            pc.set_online_available(barcode, enable)
+        except Exception as e:
+            from utils.error_dialog import show_error
+            show_error(self, "Could not update online status.", e)
+            return
+        self._reload_with_search()
 
     def _export_csv(self):
         row_count = self.table.rowCount()

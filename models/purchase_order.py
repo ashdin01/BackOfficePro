@@ -290,7 +290,7 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
     Apply a full PO receipt in one atomic transaction.
 
     line_receipts is a list of dicts:
-        line_id, barcode, new_received_qty,
+        line_id, barcode, new_received_qty, new_received_weight,
         actual_cost, unit_cost, is_promo,
         qty_units   (number of individual units being received, for SOH)
 
@@ -309,8 +309,8 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
     src = get_source()
     with db_conn() as conn:
         for r in line_receipts:
-            fields = ["received_qty=?"]
-            params = [r['new_received_qty']]
+            fields = ["received_qty=?", "received_weight=?"]
+            params = [r['new_received_qty'], r.get('new_received_weight', 0)]
             if r['actual_cost'] is not None:
                 fields.append("actual_cost=?")
                 params.append(r['actual_cost'])
