@@ -174,3 +174,75 @@ class TestDepartmentModel:
             "SELECT no_negative_soh FROM departments WHERE code='FLWR'"
         ).fetchone()
         assert row["no_negative_soh"] == 1
+
+    def test_enabling_flag_zeroes_existing_negative_soh(self, test_db, db_conn, supplier_id):
+        """Enabling no_negative_soh via update() immediately zeroes existing negatives."""
+        import models.department as dept_model
+        dept = db_conn.execute("SELECT * FROM departments WHERE code='GROC'").fetchone()
+        bc = "9300000099001"
+        db_conn.execute("""
+            INSERT INTO products
+                (barcode, description, department_id, supplier_id,
+                 sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+            VALUES (?, 'Test Product', ?, ?, 1.00, 0.50, 0.1, 1, 'EA', 1, 'EA')
+        """, (bc, dept["id"], supplier_id))
+        db_conn.execute(
+            "INSERT INTO stock_on_hand (barcode, quantity) VALUES (?, -8)", (bc,)
+        )
+        db_conn.commit()
+
+        dept_model.update(dept["id"], dept["code"], dept["name"], 1, no_negative_soh=1)
+
+        soh = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (bc,)
+        ).fetchone()
+        assert soh["quantity"] == 0
+        move = db_conn.execute(
+            "SELECT movement_type, quantity FROM stock_movements WHERE barcode=?", (bc,)
+        ).fetchone()
+        assert move["movement_type"] == "ADJUSTMENT_IN"
+        assert move["quantity"] == 8
+
+    def test_enabling_flag_does_not_affect_other_departments(
+            self, test_db, db_conn, supplier_id):
+        """Backfill only touches the department being updated, not other departments."""
+        import models.department as dept_model
+        # Product in DAIRY (unflagged)
+        dairy = db_conn.execute("SELECT * FROM departments WHERE code='DAIRY'").fetchone()
+        bc = "9300000099002"
+        db_conn.execute("""
+            INSERT INTO products
+                (barcode, description, department_id, supplier_id,
+                 sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+            VALUES (?, 'Milk', ?, ?, 2.50, 1.00, 0.1, 1, 'EA', 1, 'EA')
+        """, (bc, dairy["id"], supplier_id))
+        db_conn.execute(
+            "INSERT INTO stock_on_hand (barcode, quantity) VALUES (?, -5)", (bc,)
+        )
+        db_conn.commit()
+        # Enable flag on GROC (different department)
+        groc = db_conn.execute("SELECT * FROM departments WHERE code='GROC'").fetchone()
+        dept_model.update(groc["id"], groc["code"], groc["name"], 1, no_negative_soh=1)
+
+        soh = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (bc,)
+        ).fetchone()
+        assert soh["quantity"] == -5
+
+    def test_no_spurious_backfill_when_flag_already_set(
+            self, test_db, db_conn, fresh_dept_id, fresh_barcode):
+        """Saving a department that already has the flag set must not re-run the backfill."""
+        import models.department as dept_model
+        db_conn.execute(
+            "INSERT INTO stock_on_hand (barcode, quantity) VALUES (?, -3)", (fresh_barcode,)
+        )
+        db_conn.commit()
+        dept = db_conn.execute(
+            "SELECT * FROM departments WHERE id=?", (fresh_dept_id,)
+        ).fetchone()
+        dept_model.update(dept["id"], dept["code"], dept["name"], 1, no_negative_soh=1)
+
+        moves = db_conn.execute(
+            "SELECT COUNT(*) FROM stock_movements WHERE barcode=?", (fresh_barcode,)
+        ).fetchone()[0]
+        assert moves == 0
