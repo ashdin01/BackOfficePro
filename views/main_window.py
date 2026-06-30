@@ -22,7 +22,8 @@ class MainWindow(QMainWindow):
         self._api_thread = api_thread
         _store = _cfg_settings.ACTIVE_STORE_NAME
         self.setWindowTitle(f"{APP_NAME} — {_store} v{APP_VERSION}" if _store else f"{APP_NAME} v{APP_VERSION}")
-        self.setMinimumSize(1400, 850)
+        self.setMinimumSize(1650, 850)
+        self.resize(1700, 900)
         self._build_ui()
         if api_thread is not None:
             self._start_api_watchdog()
@@ -134,7 +135,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(nav_scroll, 1)
 
         # ── Settings button (admin only) ──────────────────────────────
-        if _role in ("ADMIN", "MANAGER"):
+        if _role == "ADMIN":
             settings_btn = QPushButton("⚙  Settings")
             settings_btn.setFixedHeight(34)
             settings_btn.setStyleSheet(
@@ -227,7 +228,7 @@ class MainWindow(QMainWindow):
 
         screen_classes = [
             ("HomeScreen",        lambda: HomeScreen(on_navigate=self._switch)),
-            ("ProductList",       lambda: ProductList(on_escape=lambda: self._switch(0))),
+            ("ProductList",       lambda: ProductList(on_escape=lambda: self._switch(0), current_user=self.current_user)),
             ("SupplierList",      lambda: SupplierList(current_user=self.current_user)),
             ("DepartmentList",    lambda: DepartmentList()),
             ("POList",            lambda: POList()),
@@ -264,6 +265,8 @@ class MainWindow(QMainWindow):
         self._switch(0)
 
     def _open_settings(self):
+        if self.current_user.get("role") != "ADMIN":
+            return
         from views.settings.settings_screen import SettingsScreen
         self._settings_win = SettingsScreen()
         self._settings_win.show()

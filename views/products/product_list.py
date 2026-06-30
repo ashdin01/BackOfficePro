@@ -38,9 +38,11 @@ class _SearchEscapeFilter(QObject):
 
 
 class ProductList(KeyboardMixin, BaseView):
-    def __init__(self, on_escape=None):
+    def __init__(self, on_escape=None, current_user=None):
         super().__init__()
         self._on_escape = on_escape
+        role = (current_user or {}).get("role", "STAFF")
+        self._read_only = role not in ("ADMIN", "MANAGER")
         self._build_ui()
         self.load()
 
@@ -79,6 +81,9 @@ class ProductList(KeyboardMixin, BaseView):
 
         btn_add = QPushButton("&Add Product")
         btn_add.clicked.connect(self._add)
+        if self._read_only:
+            btn_add.setEnabled(False)
+            btn_add.setToolTip("Adding products requires Manager or Admin access")
         search_row.addWidget(btn_add)
 
         btn_export = QPushButton("⬇ Export CSV")
@@ -97,9 +102,9 @@ class ProductList(KeyboardMixin, BaseView):
 
         # ── Table ─────────────────────────────────────────────────────
         self.table = QTableWidget()
-        self.table.setColumnCount(12)
+        self.table.setColumnCount(13)
         self.table.setHorizontalHeaderLabels([
-            "Barcode", "PLU", "Description", "Brand", "Department", "Supplier",
+            "Barcode", "PLU", "Description", "Brand", "Department", "Group", "Supplier",
             "Unit", "Sell Price", "Cost Price", "On Hand", "Status", "Online"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -108,13 +113,14 @@ class ProductList(KeyboardMixin, BaseView):
         self.table.setColumnWidth(1,   65)
         self.table.setColumnWidth(3,  100)
         self.table.setColumnWidth(4,   95)
-        self.table.setColumnWidth(5,  100)
-        self.table.setColumnWidth(6,   45)
-        self.table.setColumnWidth(7,   80)
+        self.table.setColumnWidth(5,   95)  # Group
+        self.table.setColumnWidth(6,  100)
+        self.table.setColumnWidth(7,   45)
         self.table.setColumnWidth(8,   80)
-        self.table.setColumnWidth(9,   65)
-        self.table.setColumnWidth(10,  70)
-        self.table.setColumnWidth(11,  60)
+        self.table.setColumnWidth(9,   80)
+        self.table.setColumnWidth(10,  65)
+        self.table.setColumnWidth(11,  70)
+        self.table.setColumnWidth(12,  60)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setMinimumSectionSize(45)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -130,7 +136,8 @@ class ProductList(KeyboardMixin, BaseView):
         self.status = QLabel("")
         layout.addWidget(self.status)
 
-        QShortcut(QKeySequence("N"), self, self._add)
+        if not self._read_only:
+            QShortcut(QKeySequence("N"), self, self._add)
         QShortcut(QKeySequence("/"), self, self._focus_search)
         self.setup_keyboard(table=self.table)
 
@@ -188,10 +195,11 @@ class ProductList(KeyboardMixin, BaseView):
             self.table.setItem(r, 2,  QTableWidgetItem(row['description']))
             self.table.setItem(r, 3,  QTableWidgetItem(row['brand'] or ''))
             self.table.setItem(r, 4,  QTableWidgetItem(row['dept_name'] or ''))
-            self.table.setItem(r, 5,  QTableWidgetItem(row['supplier_name'] or ''))
-            self.table.setItem(r, 6,  QTableWidgetItem(row['unit'] or ''))
-            self.table.setItem(r, 7,  NumItem(f"${row['sell_price']:.2f}"))
-            self.table.setItem(r, 8,  NumItem(f"${row['cost_price']:.2f}"))
+            self.table.setItem(r, 5,  QTableWidgetItem(row['group_name'] or ''))
+            self.table.setItem(r, 6,  QTableWidgetItem(row['supplier_name'] or ''))
+            self.table.setItem(r, 7,  QTableWidgetItem(row['unit'] or ''))
+            self.table.setItem(r, 8,  NumItem(f"${row['sell_price']:.2f}"))
+            self.table.setItem(r, 9,  NumItem(f"${row['cost_price']:.2f}"))
             soh_item = NumItem(str(soh_qty))
             soh_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if is_warning:
@@ -202,7 +210,7 @@ class ProductList(KeyboardMixin, BaseView):
                 soh_item.setForeground(QColor(styles.CLR_ORANGE))
             else:
                 soh_item.setForeground(QColor(styles.CLR_DANGER_ALT))
-            self.table.setItem(r, 9, soh_item)
+            self.table.setItem(r, 10, soh_item)
             status_text = "Active" if is_active else "INACTIVE"
             status_item = QTableWidgetItem(status_text)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -212,7 +220,7 @@ class ProductList(KeyboardMixin, BaseView):
                 status_item.setForeground(QColor('#666666'))
             else:
                 status_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
-            self.table.setItem(r, 10, status_item)
+            self.table.setItem(r, 11, status_item)
             is_online = bool(row['online_available'] if 'online_available' in row.keys() else 0)
             online_item = QTableWidgetItem("✓" if is_online else "—")
             online_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -223,7 +231,7 @@ class ProductList(KeyboardMixin, BaseView):
                 "Listed on shop.littleredapple.com.au" if is_online
                 else "Not listed online — right-click to enable"
             )
-            self.table.setItem(r, 11, online_item)
+            self.table.setItem(r, 12, online_item)
             if row_color:
                 for col in range(self.table.columnCount()):
                     item = self.table.item(r, col)
@@ -231,8 +239,8 @@ class ProductList(KeyboardMixin, BaseView):
                         item.setBackground(row_color)
         self.table.setSortingEnabled(True)
         active_count   = sum(1 for r in range(self.table.rowCount())
-                             if self.table.item(r, 10)
-                             and self.table.item(r, 10).text() == "Active")
+                             if self.table.item(r, 11)
+                             and self.table.item(r, 11).text() == "Active")
         inactive_count = self.table.rowCount() - active_count
         status_parts = [f"{self.table.rowCount()} products"]
         if inactive_with_stock > 0:
@@ -267,7 +275,8 @@ class ProductList(KeyboardMixin, BaseView):
             return
         barcode = self.table.item(row, 0).text()
         from views.products.product_edit import ProductEdit
-        self.edit_win = ProductEdit(barcode=barcode, on_save=self._reload_with_search)
+        self.edit_win = ProductEdit(barcode=barcode, on_save=self._reload_with_search,
+                                    read_only=self._read_only)
         self.edit_win.show()
 
     def _context_menu(self, pos: QPoint):
@@ -275,14 +284,15 @@ class ProductList(KeyboardMixin, BaseView):
         if row < 0:
             return
         barcode = self.table.item(row, 0).text()
-        online_item = self.table.item(row, 11)
+        online_item = self.table.item(row, 12)
         is_online = online_item and online_item.text() == "✓"
 
         menu = QMenu(self)
-        act_edit = QAction("✎  Edit product", self)
-        act_edit.triggered.connect(self._edit)
-        menu.addAction(act_edit)
-        menu.addSeparator()
+        if not self._read_only:
+            act_edit = QAction("✎  Edit product", self)
+            act_edit.triggered.connect(self._edit)
+            menu.addAction(act_edit)
+            menu.addSeparator()
         if is_online:
             act_toggle = QAction("🌐  Remove from Online Shop", self)
         else:

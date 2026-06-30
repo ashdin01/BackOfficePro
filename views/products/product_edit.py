@@ -23,9 +23,10 @@ from views.products.product_alias_dialog import AddAliasDialog
 
 
 class ProductEdit(KeyboardMixin, QWidget):
-    def __init__(self, barcode, on_save=None):
+    def __init__(self, barcode, on_save=None, read_only=False):
         super().__init__()
-        self.setWindowTitle("Product Detail")
+        self._read_only = read_only
+        self.setWindowTitle("Product Detail  [Read Only]" if read_only else "Product Detail")
         self.setMinimumWidth(1200)
         self.setMinimumHeight(700)
         self.resize(1280, 860)
@@ -107,7 +108,11 @@ class ProductEdit(KeyboardMixin, QWidget):
             row = QHBoxLayout()
             btn = QPushButton("✎")
             btn.setFixedSize(28, 28)
-            btn.clicked.connect(on_edit)
+            if self._read_only:
+                btn.setEnabled(False)
+                btn.setStyleSheet("background: transparent; border: none;")
+            else:
+                btn.clicked.connect(on_edit)
             key = QLabel(field_label)
             key.setMinimumWidth(130)
             key.setStyleSheet(f'color: {styles.CLR_MUTED};')
@@ -310,12 +315,13 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.alias_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         alias_layout.addWidget(self.alias_table)
         alias_btns = QHBoxLayout()
-        btn_add_alias = QPushButton("+ Add Barcode")
-        btn_add_alias.clicked.connect(self._add_alias)
-        btn_del_alias = QPushButton("Remove")
-        btn_del_alias.clicked.connect(self._remove_alias)
-        alias_btns.addWidget(btn_add_alias)
-        alias_btns.addWidget(btn_del_alias)
+        if not self._read_only:
+            btn_add_alias = QPushButton("+ Add Barcode")
+            btn_add_alias.clicked.connect(self._add_alias)
+            btn_del_alias = QPushButton("Remove")
+            btn_del_alias.clicked.connect(self._remove_alias)
+            alias_btns.addWidget(btn_add_alias)
+            alias_btns.addWidget(btn_del_alias)
         alias_btns.addStretch()
         alias_layout.addLayout(alias_btns)
 
@@ -337,6 +343,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         )
         self._txt_notes.setPlainText(self._online_notes)
         self._txt_notes.setFixedHeight(80)
+        self._txt_notes.setReadOnly(self._read_only)
         notes_lay.addWidget(self._txt_notes)
         layout.addWidget(notes_group)
 
@@ -347,13 +354,15 @@ class ProductEdit(KeyboardMixin, QWidget):
         btn_history.clicked.connect(self._view_history)
         act_row.addWidget(btn_history)
         act_row.addStretch()
-        save_btn = QPushButton("Save  [Ctrl+S]")
-        save_btn.setFixedHeight(35)
-        save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel  [Esc]")
+        if not self._read_only:
+            save_btn = QPushButton("Save  [Ctrl+S]")
+            save_btn.setFixedHeight(35)
+            save_btn.clicked.connect(self._save)
+            act_row.addWidget(save_btn)
+        close_label = "Close  [Esc]" if self._read_only else "Cancel  [Esc]"
+        cancel_btn = QPushButton(close_label)
         cancel_btn.setFixedHeight(35)
         cancel_btn.clicked.connect(self.close)
-        act_row.addWidget(save_btn)
         act_row.addWidget(cancel_btn)
         layout.addLayout(act_row)
 
@@ -1261,6 +1270,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         dlg.exec()
 
     def _save(self):
+        if self._read_only:
+            return
         default_sup = next((s for s in self._product_suppliers if s['is_default']), None)
         self._supplier_id = default_sup['supplier_id'] if default_sup else None
         # Sync products table from default supplier's per-supplier values
