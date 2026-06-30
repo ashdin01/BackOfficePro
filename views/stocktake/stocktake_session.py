@@ -156,10 +156,13 @@ class StocktakeSession(BaseView):
         session = stocktake_ctrl.get_session(self.session_id)
         self._session = session
         status = session['status']
-        dept = session['dept_name'] or 'All Departments'
+        if session['dept_name'] and session['group_name']:
+            scope = f"{session['dept_name']} > {session['group_name']}"
+        else:
+            scope = session['dept_name'] or 'All Departments'
         self.setWindowTitle(f"Stocktake: {session['label']}")
         self.header.setText(
-            f"<b>{session['label']}</b>  |  Department: {dept}  |  "
+            f"<b>{session['label']}</b>  |  Scope: {scope}  |  "
             f"Status: <b style='color:{'green' if status == 'OPEN' else 'grey'}'>{status}</b>"
         )
 

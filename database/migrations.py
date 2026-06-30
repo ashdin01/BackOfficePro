@@ -2538,6 +2538,15 @@ def migrate_v58(conn):
     conn.commit()
 
 
+def migrate_v59(conn):
+    """Add group_id to stocktake_sessions for sub-department stocktake filtering."""
+    _add_column(conn, """
+        ALTER TABLE stocktake_sessions ADD COLUMN group_id INTEGER
+            REFERENCES product_groups(id) ON DELETE SET NULL
+    """)
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2596,4 +2605,5 @@ _MIGRATIONS: dict[int, tuple] = {
     56: (migrate_v56, "online_available flag on products for shop.littleredapple.com.au"),
     57: (migrate_v57, "online_notes text field on products for shop product pages"),
     58: (migrate_v58, "received_weight column on po_lines for variable weight items"),
+    59: (migrate_v59, "group_id on stocktake_sessions for sub-department filtering"),
 }

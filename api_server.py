@@ -222,6 +222,12 @@ def get_departments():
     return jsonify([{'id': r['id'], 'code': r['code'], 'name': r['name']} for r in rows])
 
 
+@app.route("/api/v1/departments/<int:dept_id>/groups")
+def get_department_groups(dept_id):
+    rows = department_ctrl.get_groups_by_department(dept_id, active_only=True)
+    return jsonify([{'id': r['id'], 'code': r['code'], 'name': r['name']} for r in rows])
+
+
 @app.route("/api/v1/products")
 def list_products():
     """
@@ -271,9 +277,10 @@ def create_session():
     if not label:
         return _err("MISSING_FIELD", "label required", 400)
     dept_id    = data.get("department_id")
+    group_id   = data.get("group_id")
     notes      = data.get("notes", "")
     created_by = data.get("created_by", "Android")
-    session_id = stocktake_ctrl.create_session(label, dept_id, notes, created_by)
+    session_id = stocktake_ctrl.create_session(label, dept_id, group_id, notes, created_by)
     return jsonify({"id": session_id}), 201
 
 

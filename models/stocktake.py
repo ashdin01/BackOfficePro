@@ -9,9 +9,11 @@ def get_all_sessions():
     with db_conn() as conn:
         return conn.execute("""
             SELECT st.*, d.name as dept_name,
+                   pg.name as group_name,
                    COUNT(sc.id) as line_count
             FROM stocktake_sessions st
-            LEFT JOIN departments d  ON st.department_id = d.id
+            LEFT JOIN departments d     ON st.department_id = d.id
+            LEFT JOIN product_groups pg ON st.group_id = pg.id
             LEFT JOIN stocktake_counts sc ON sc.session_id = st.id
             GROUP BY st.id
             ORDER BY st.started_at DESC
@@ -21,19 +23,20 @@ def get_all_sessions():
 def get_session(session_id):
     with db_conn() as conn:
         return conn.execute("""
-            SELECT st.*, d.name as dept_name
+            SELECT st.*, d.name as dept_name, pg.name as group_name
             FROM stocktake_sessions st
-            LEFT JOIN departments d ON st.department_id = d.id
+            LEFT JOIN departments d     ON st.department_id = d.id
+            LEFT JOIN product_groups pg ON st.group_id = pg.id
             WHERE st.id = ?
         """, (session_id,)).fetchone()
 
 
-def create_session(label, department_id=None, notes='', created_by=''):
+def create_session(label, department_id=None, group_id=None, notes='', created_by=''):
     with db_conn() as conn:
         cur = conn.execute("""
-            INSERT INTO stocktake_sessions (label, department_id, notes, created_by)
-            VALUES (?, ?, ?, ?)
-        """, (label, department_id, notes, created_by))
+            INSERT INTO stocktake_sessions (label, department_id, group_id, notes, created_by)
+            VALUES (?, ?, ?, ?, ?)
+        """, (label, department_id, group_id, notes, created_by))
         session_id = cur.lastrowid
         conn.commit()
         return session_id
@@ -303,11 +306,14 @@ def get_variance_report(session_id):
         session = conn.execute(
             "SELECT * FROM stocktake_sessions WHERE id=?", (session_id,)
         ).fetchone()
-        dept_filter  = ""
-        params_base  = []
+        extra_filters = []
+        params_base   = []
         if session and session['department_id']:
-            dept_filter = "AND p.department_id = ?"
-            params_base = [session['department_id']]
+            extra_filters.append("AND p.department_id = ?")
+            params_base.append(session['department_id'])
+        if session and session['group_id']:
+            extra_filters.append("AND p.group_id = ?")
+            params_base.append(session['group_id'])
 
         return conn.execute(f"""
             SELECT
@@ -325,7 +331,7 @@ def get_variance_report(session_id):
                 ON sc.barcode = p.barcode AND sc.session_id = ?
             WHERE p.active = 1
               AND p.expected = 1
-              {dept_filter}
+              {' '.join(extra_filters)}
             ORDER BY d.name, p.description
         """, [session_id] + params_base).fetchall()
 

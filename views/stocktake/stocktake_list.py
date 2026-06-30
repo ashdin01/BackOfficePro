@@ -33,7 +33,7 @@ class StocktakeList(BaseView):
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            "ID", "Label", "Department", "Status", "Lines", "Started"
+            "ID", "Label", "Scope", "Status", "Lines", "Started"
         ])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -61,7 +61,10 @@ class StocktakeList(BaseView):
             self.table.insertRow(r)
             self.table.setItem(r, 0, QTableWidgetItem(str(row['id'])))
             self.table.setItem(r, 1, QTableWidgetItem(row['label']))
-            self.table.setItem(r, 2, QTableWidgetItem(row['dept_name'] or 'All Departments'))
+            scope = row['dept_name'] or 'All Departments'
+            if row['dept_name'] and row['group_name']:
+                scope = f"{row['dept_name']} > {row['group_name']}"
+            self.table.setItem(r, 2, QTableWidgetItem(scope))
             status_item = QTableWidgetItem(row['status'])
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if row['status'] == 'OPEN':
@@ -100,7 +103,7 @@ class NewSessionDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("New Stocktake Session")
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(420)
         self.created_id = None
         self._depts = dept_ctrl.get_all()
         self._build_ui()
@@ -118,13 +121,20 @@ class NewSessionDialog(QDialog):
         for d in self._depts:
             self.dept.addItem(d['name'], d['id'])
 
+        self.group = QComboBox()
+        self.group.addItem("All Groups", None)
+        self.group.setEnabled(False)
+
+        self.dept.currentIndexChanged.connect(self._on_dept_changed)
+
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(60)
         self.notes.setPlaceholderText("Optional notes...")
 
-        form.addRow("Label *", self.label)
+        form.addRow("Label *",    self.label)
         form.addRow("Department", self.dept)
-        form.addRow("Notes", self.notes)
+        form.addRow("Group",      self.group)
+        form.addRow("Notes",      self.notes)
         layout.addLayout(form)
 
         layout.addSpacing(8)
@@ -143,6 +153,19 @@ class NewSessionDialog(QDialog):
         QShortcut(QKeySequence("Escape"), self, self.reject)
         self.label.setFocus()
 
+    def _on_dept_changed(self):
+        dept_id = self.dept.currentData()
+        self.group.clear()
+        if dept_id is None:
+            self.group.addItem("All Groups", None)
+            self.group.setEnabled(False)
+        else:
+            groups = dept_ctrl.get_groups_by_department(dept_id)
+            self.group.addItem("All Groups", None)
+            for g in groups:
+                self.group.addItem(g['name'], g['id'])
+            self.group.setEnabled(bool(groups))
+
     def _create(self):
         label = self.label.text().strip()
         if not label:
@@ -152,6 +175,7 @@ class NewSessionDialog(QDialog):
             self.created_id = stocktake_ctrl.create_session(
                 label=label,
                 department_id=self.dept.currentData(),
+                group_id=self.group.currentData(),
                 notes=self.notes.toPlainText(),
             )
             self.accept()

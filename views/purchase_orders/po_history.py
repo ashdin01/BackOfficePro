@@ -88,24 +88,25 @@ class POHistory(QWidget):
         layout.addWidget(line_lbl)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(9)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "Description", "Pack Size",
-            "Ordered", "Received",
+            "Ordered", "Received", "Weight (kg)",
             "Cost ex. GST", "Tax %", "Line ex. GST", "Line inc. GST",
         ])
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for ci in [0, 2, 3, 4, 5, 6, 7, 8]:
+        for ci in [0, 2, 3, 4, 5, 6, 7, 8, 9]:
             hdr.setSectionResizeMode(ci, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(0, 120)   # Barcode
         self.table.setColumnWidth(2,  90)   # Pack Size
         self.table.setColumnWidth(3,  80)   # Ordered
         self.table.setColumnWidth(4,  80)   # Received
-        self.table.setColumnWidth(5, 110)   # Cost ex. GST
-        self.table.setColumnWidth(6,  65)   # Tax %
-        self.table.setColumnWidth(7, 115)   # Line ex. GST
-        self.table.setColumnWidth(8, 120)   # Line inc. GST
+        self.table.setColumnWidth(5,  90)   # Weight (kg)
+        self.table.setColumnWidth(6, 110)   # Cost ex. GST
+        self.table.setColumnWidth(7,  65)   # Tax %
+        self.table.setColumnWidth(8, 115)   # Line ex. GST
+        self.table.setColumnWidth(9, 120)   # Line inc. GST
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -191,17 +192,20 @@ class POHistory(QWidget):
             promo_colour = styles.CLR_AMBER if ld.is_promo else None
             desc = ld.description + ("  ★ promo" if ld.is_promo else "")
 
+            weight_str = f"{ld.recv_weight:.3f} kg" if ld.is_variable_weight else "—"
             self.table.setItem(r, 0, _item(ld.barcode, _CENTER))
             self.table.setItem(r, 1, _item(desc, colour=promo_colour))
             self.table.setItem(r, 2, _item(ld.pack_str, _CENTER))
             self.table.setItem(r, 3, _item(str(ld.ordered_disp), _CENTER))
             self.table.setItem(r, 4, _item(str(ld.recv_units), _CENTER, colour=recv_colour))
-            self.table.setItem(r, 5, _item(f"${ld.cost:.4f}", _RIGHT))
-            self.table.setItem(r, 6, _item(
+            self.table.setItem(r, 5, _item(weight_str, _RIGHT,
+                                           colour=recv_colour if ld.is_variable_weight else '#555'))
+            self.table.setItem(r, 6, _item(f"${ld.cost:.4f}", _RIGHT))
+            self.table.setItem(r, 7, _item(
                 f"{ld.tax_rate:.0f}%" if ld.tax_rate > 0 else "Free", _CENTER,
                 colour=styles.CLR_SUCCESS_ALT if ld.tax_rate > 0 else '#555'))
-            self.table.setItem(r, 7, _item(fmt_money(ld.line_ex), _RIGHT))
-            self.table.setItem(r, 8, _item(fmt_money(ld.line_inc), _RIGHT,
+            self.table.setItem(r, 8, _item(fmt_money(ld.line_ex), _RIGHT))
+            self.table.setItem(r, 9, _item(fmt_money(ld.line_inc), _RIGHT,
                                            colour=styles.CLR_SUCCESS_ALT if ld.tax_rate > 0 else None))
 
         if self.charges_table is not None:
@@ -257,21 +261,22 @@ class POHistory(QWidget):
 
             w.writerow([
                 "Barcode", "Description", "Pack Size",
-                "Ordered (units)", "Received (units)",
+                "Ordered (units)", "Received (units)", "Weight (kg)",
                 "Cost ex. GST", "Tax %", "Promo",
                 "Line Total ex. GST", "Line Total inc. GST",
             ] if data.unit_mode else [
                 "Barcode", "Description", "Pack Size",
-                "Ordered (cartons)", "Received (cartons)", "Received (units)",
+                "Ordered (cartons)", "Received (cartons)", "Received (units)", "Weight (kg)",
                 "Cost ex. GST", "Tax %", "Promo",
                 "Line Total ex. GST", "Line Total inc. GST",
             ])
 
             for ld in data.lines:
+                weight_csv = f"{ld.recv_weight:.3f}" if ld.is_variable_weight else ""
                 if data.unit_mode:
                     w.writerow([
                         ld.barcode, ld.description, ld.pack_str,
-                        ld.ordered_disp, ld.recv_units,
+                        ld.ordered_disp, ld.recv_units, weight_csv,
                         f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
                         "Yes" if ld.is_promo else "No",
                         f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
@@ -279,7 +284,7 @@ class POHistory(QWidget):
                 else:
                     w.writerow([
                         ld.barcode, ld.description, ld.pack_str,
-                        ld.ordered_qty_raw, ld.recv_raw, ld.recv_units,
+                        ld.ordered_qty_raw, ld.recv_raw, ld.recv_units, weight_csv,
                         f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
                         "Yes" if ld.is_promo else "No",
                         f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
@@ -406,15 +411,16 @@ class POHistory(QWidget):
         story.append(Paragraph("Order Lines", _s(10, bold=True)))
         story.append(Spacer(1, 2*mm))
 
-        col_w = [28*mm, 70*mm, 18*mm, 16*mm, 16*mm, 18*mm, 22*mm, 12*mm, 12*mm, 25*mm, 25*mm]
+        col_w = [28*mm, 60*mm, 16*mm, 14*mm, 14*mm, 16*mm, 18*mm, 22*mm, 12*mm, 12*mm, 25*mm, 25*mm]
         hdrs  = [
             "Barcode", "Description", "Pack Size",
-            "Ordered", "Received", "Rcvd Units", "Cost ex. GST",
+            "Ordered", "Received", "Rcvd Units", "Weight (kg)", "Cost ex. GST",
             "Tax %", "Promo", "Line ex. GST", "Line inc. GST",
         ]
         tbl_data = [[Paragraph(h, _s(8, bold=True, align=TA_CENTER)) for h in hdrs]]
 
         for ld in data.lines:
+            weight_pdf = f"{ld.recv_weight:.3f}" if ld.is_variable_weight else "—"
             tbl_data.append([
                 Paragraph(ld.barcode,                          _s(8, align=TA_CENTER)),
                 Paragraph(ld.description,                      _s(8)),
@@ -422,6 +428,7 @@ class POHistory(QWidget):
                 Paragraph(str(ld.ordered_disp),                _s(8, align=TA_CENTER)),
                 Paragraph(str(ld.recv_raw),                    _s(8, align=TA_CENTER)),
                 Paragraph(str(ld.recv_units),                  _s(8, align=TA_CENTER)),
+                Paragraph(weight_pdf,                          _s(8, align=TA_RIGHT)),
                 Paragraph(f"${ld.cost:.4f}",                   _s(8, align=TA_RIGHT)),
                 Paragraph(f"{ld.tax_rate:.0f}%",               _s(8, align=TA_CENTER)),
                 Paragraph("Yes" if ld.is_promo else "No",      _s(8, align=TA_CENTER)),
