@@ -203,7 +203,8 @@ def auto_populate_po_lines(po_id, supplier_id) -> str:
     milk_barcodes = set()
     if milk_recs:
         first        = milk_recs[0]
-        delivery_str = first['next_delivery'].strftime('%a %-d %b')
+        nd           = first['next_delivery']
+        delivery_str = f"{nd.strftime('%a')} {nd.day} {nd.strftime('%b')}"
         safety       = first['cover_days'] - first['days_to_delivery']
         for r in milk_recs:
             on_order_str = f"  |  On order: {int(r['on_order'])}" if r['on_order'] > 0 else ""
