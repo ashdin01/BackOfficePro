@@ -267,8 +267,8 @@ class MainWindow(QMainWindow):
     def _open_settings(self):
         if self.current_user.get("role") != "ADMIN":
             return
-        from views.settings.settings_screen import SettingsScreen
-        self._settings_win = SettingsScreen()
+        from views.settings.settings_hub import SettingsHub
+        self._settings_win = SettingsHub()
         self._settings_win.show()
 
     def _lock(self):

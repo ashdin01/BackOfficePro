@@ -67,7 +67,7 @@ def find_user_for_login(username: str) -> dict | None:
     Returns the matching user dict (tagged with store_name/db_path) or None.
     Username matching is exact against the stored (lowercase) value — callers
     should normalise input the same way usernames are normalised at creation
-    (see views/settings/settings_screen.py:_UserDialog._validate).
+    (see views/settings/settings_users.py:_UserDialog._validate).
     """
     for user in list_all_active_users():
         if user['username'] == username:
