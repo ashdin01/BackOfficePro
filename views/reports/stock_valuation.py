@@ -2,10 +2,11 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton, QComboBox,
-    QFileDialog, QMessageBox
+    QFileDialog, QMessageBox, QCheckBox,
+    QDateEdit
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, QDate
+import config.styles as styles
 import controllers.report_controller as report_ctrl
 from views.base_view import BaseView
 from views.widgets.table_items import right_item as _right
@@ -19,6 +20,73 @@ def _make_table(headers, stretch_col=1):
     return t
 
 
+class _DeptMultiSelect(QWidget):
+    """Checkbox list of departments, shown as a borderless popup under a filter button.
+
+    Uses Qt.WindowType.Popup directly rather than QMenu + QWidgetAction — the
+    native Windows style ('windowsvista') is known to fail to paint custom
+    widgets embedded in a QMenu, leaving the checkboxes invisible even though
+    they're present. A plain Popup window sidesteps that entirely and still
+    auto-closes on outside click / Escape like a normal dropdown.
+    """
+
+    def __init__(self, departments, on_change, parent=None):
+        super().__init__(parent, Qt.WindowType.Popup)
+        self.setStyleSheet(
+            f"background:{styles.CLR_BG_PANEL}; border:1px solid {styles.CLR_BORDER};"
+        )
+        self._on_change = on_change
+        self._boxes = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(2)
+
+        select_row = QHBoxLayout()
+        all_btn = QPushButton("All")
+        none_btn = QPushButton("None")
+        all_btn.clicked.connect(lambda: self._set_all(True))
+        none_btn.clicked.connect(lambda: self._set_all(False))
+        select_row.addWidget(all_btn)
+        select_row.addWidget(none_btn)
+        layout.addLayout(select_row)
+
+        for d in departments:
+            cb = QCheckBox(d['name'])
+            cb.setChecked(True)
+            cb.setProperty("dept_id", d['id'])
+            cb.stateChanged.connect(self._on_change)
+            layout.addWidget(cb)
+            self._boxes.append(cb)
+
+    def _set_all(self, checked):
+        for cb in self._boxes:
+            cb.blockSignals(True)
+            cb.setChecked(checked)
+            cb.blockSignals(False)
+        self._on_change()
+
+    def selected_ids(self):
+        return [cb.property("dept_id") for cb in self._boxes if cb.isChecked()]
+
+    def is_all_selected(self):
+        return all(cb.isChecked() for cb in self._boxes)
+
+    def summary_text(self):
+        total = len(self._boxes)
+        checked = sum(cb.isChecked() for cb in self._boxes)
+        if checked == total:
+            return "All Departments"
+        if checked == 0:
+            return "No Departments"
+        return f"{checked} of {total} Departments"
+
+    def show_below(self, anchor_widget):
+        pos = anchor_widget.mapToGlobal(anchor_widget.rect().bottomLeft())
+        self.move(pos)
+        self.show()
+
+
 class StockValuationReport(BaseView):
     def __init__(self):
         super().__init__()
@@ -30,12 +98,22 @@ class StockValuationReport(BaseView):
 
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("Department:"))
-        self.dept_filter = QComboBox()
-        self.dept_filter.addItem("All Departments", None)
-        for d in report_ctrl.get_all_departments():
-            self.dept_filter.addItem(d['name'], d['id'])
-        self.dept_filter.currentIndexChanged.connect(self._load)
-        filter_row.addWidget(self.dept_filter)
+
+        depts = report_ctrl.get_all_departments()
+        self.dept_select = _DeptMultiSelect(depts, on_change=self._on_dept_change, parent=self)
+
+        self.dept_btn = QPushButton("All Departments ▾")
+        self.dept_btn.clicked.connect(lambda: self.dept_select.show_below(self.dept_btn))
+        filter_row.addWidget(self.dept_btn)
+
+        filter_row.addWidget(QLabel("As of:"))
+        self.as_of_date = QDateEdit()
+        self.as_of_date.setCalendarPopup(True)
+        self.as_of_date.setDisplayFormat("dd/MM/yyyy")
+        self.as_of_date.setMaximumDate(QDate.currentDate())
+        self.as_of_date.setDate(QDate.currentDate())
+        self.as_of_date.dateChanged.connect(self._load)
+        filter_row.addWidget(self.as_of_date)
 
         self.view_toggle = QComboBox()
         self.view_toggle.addItem("Summary by Department", "summary")
@@ -69,15 +147,32 @@ class StockValuationReport(BaseView):
         footer.addWidget(self.total_label)
         layout.addLayout(footer)
 
+    def _on_dept_change(self, *_):
+        self.dept_btn.setText(f"{self.dept_select.summary_text()} ▾")
+        self._load()
+
+    def _selected_dept_ids(self):
+        return None if self.dept_select.is_all_selected() else self.dept_select.selected_ids()
+
+    def _selected_as_of_date(self):
+        """Returns None for 'today' (live SOH), else 'YYYY-MM-DD'."""
+        d = self.as_of_date.date()
+        if d == QDate.currentDate():
+            return None
+        return d.toString("yyyy-MM-dd")
+
     def _load(self):
-        dept_id = self.dept_filter.currentData()
+        dept_ids = self._selected_dept_ids()
+        as_of_date = self._selected_as_of_date()
         mode = self.view_toggle.currentData()
+
+        as_of_note = f" (as of {self.as_of_date.date().toString('dd/MM/yyyy')})" if as_of_date else ""
 
         if mode == "summary":
             self.summary_table.show()
             self.detail_table.hide()
             self.summary_table.setSortingEnabled(False)
-            rows = report_ctrl.get_stock_valuation_summary(dept_id)
+            rows = report_ctrl.get_stock_valuation_summary(dept_ids, as_of_date)
             self.summary_table.setRowCount(0)
             total_cost = total_sell = 0
             for row in rows:
@@ -93,13 +188,13 @@ class StockValuationReport(BaseView):
             self.summary_table.setSortingEnabled(True)
             self.total_label.setText(
                 f"<b>Total Cost Value: ${total_cost:,.2f}</b> &nbsp;&nbsp; "
-                f"<b>Total Sell Value: ${total_sell:,.2f}</b>"
+                f"<b>Total Sell Value: ${total_sell:,.2f}</b>{as_of_note}"
             )
         else:
             self.summary_table.hide()
             self.detail_table.show()
             self.detail_table.setSortingEnabled(False)
-            rows = report_ctrl.get_stock_valuation_detail(dept_id)
+            rows = report_ctrl.get_stock_valuation_detail(dept_ids, as_of_date)
             self.detail_table.setRowCount(0)
             total_cost = total_sell = 0
             for row in rows:
@@ -117,15 +212,17 @@ class StockValuationReport(BaseView):
             self.detail_table.setSortingEnabled(True)
             self.total_label.setText(
                 f"<b>Total Cost Value: ${total_cost:,.2f}</b> &nbsp;&nbsp; "
-                f"<b>Total Sell Value: ${total_sell:,.2f}</b>"
+                f"<b>Total Sell Value: ${total_sell:,.2f}</b>{as_of_note}"
             )
 
     def _export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), "stock_valuation.csv"), "CSV (*.csv)")
+        as_of_date = self._selected_as_of_date()
+        default_name = f"stock_valuation_{as_of_date or 'current'}.csv"
+        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", os.path.join(os.path.expanduser("~/Downloads"), default_name), "CSV (*.csv)")
         if not path:
             return
-        dept_id = self.dept_filter.currentData()
-        rows = report_ctrl.get_stock_valuation_detail(dept_id)
+        dept_ids = self._selected_dept_ids()
+        rows = report_ctrl.get_stock_valuation_detail(dept_ids, as_of_date)
         with open(path, 'w', newline='') as f:
             w = csv.writer(f)
             w.writerow(["Barcode", "Description", "Department", "Unit", "Qty", "Cost Value", "Sell Value"])

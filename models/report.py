@@ -6,45 +6,87 @@ from utils.calculations import week_bounds, fy_bounds
 
 # ── Stock Valuation ───────────────────────────────────────────────────────────
 
-def get_stock_valuation_summary(dept_id=None):
-    """Department summary: product count, total units, cost and sell values."""
-    sql = """
+def _as_of_qty_expr(as_of_date, params):
+    """
+    Build the SQL quantity expression and JOIN clause for a stock valuation
+    query. If as_of_date is set, reconstructs historical quantity by
+    subtracting movements recorded after that date from the current SOH
+    (movements are signed, so this reverses them cleanly). Uses today's
+    cost_price/sell_price either way — no price history is kept.
+    """
+    if not as_of_date:
+        return "COALESCE(s.quantity,0)", ""
+    params.append(as_of_date)
+    join = """
+        LEFT JOIN (
+            SELECT barcode, SUM(quantity) as qty_after
+            FROM stock_movements
+            WHERE date(created_at) > ?
+            GROUP BY barcode
+        ) future ON future.barcode = p.barcode
+    """
+    return "(COALESCE(s.quantity,0) - COALESCE(future.qty_after,0))", join
+
+
+def get_stock_valuation_summary(dept_ids=None, as_of_date=None):
+    """Department summary: product count, total units, cost and sell values.
+
+    dept_ids: optional list of department ids to include (None = all).
+    as_of_date: optional 'YYYY-MM-DD' string to reconstruct historical
+    quantities as of that date (None = current stock on hand).
+    """
+    if dept_ids is not None and len(dept_ids) == 0:
+        return []
+    params = []
+    qty_expr, future_join = _as_of_qty_expr(as_of_date, params)
+    sql = f"""
         SELECT d.name as dept_name,
                COUNT(p.barcode) as product_count,
-               SUM(COALESCE(s.quantity,0)) as total_units,
-               SUM(COALESCE(s.quantity,0) * p.cost_price) as cost_value,
-               SUM(COALESCE(s.quantity,0) * p.sell_price) as sell_value
+               SUM({qty_expr}) as total_units,
+               SUM({qty_expr} * p.cost_price) as cost_value,
+               SUM({qty_expr} * p.sell_price) as sell_value
         FROM products p
         LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
         LEFT JOIN departments d ON p.department_id = d.id
+        {future_join}
         WHERE p.active = 1
     """
-    params = []
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
+    if dept_ids:
+        placeholders = ",".join("?" * len(dept_ids))
+        sql += f" AND p.department_id IN ({placeholders})"
+        params.extend(dept_ids)
     sql += " GROUP BY d.name ORDER BY d.name"
     with db_conn() as conn:
         return conn.execute(sql, params).fetchall()
 
 
-def get_stock_valuation_detail(dept_id=None):
-    """Full product detail: barcode, description, qty, cost and sell values."""
-    sql = """
+def get_stock_valuation_detail(dept_ids=None, as_of_date=None):
+    """Full product detail: barcode, description, qty, cost and sell values.
+
+    dept_ids: optional list of department ids to include (None = all).
+    as_of_date: optional 'YYYY-MM-DD' string to reconstruct historical
+    quantities as of that date (None = current stock on hand).
+    """
+    if dept_ids is not None and len(dept_ids) == 0:
+        return []
+    params = []
+    qty_expr, future_join = _as_of_qty_expr(as_of_date, params)
+    sql = f"""
         SELECT p.barcode, p.description, d.name as dept_name,
                p.unit, p.cost_price, p.sell_price,
-               COALESCE(s.quantity,0) as quantity,
-               COALESCE(s.quantity,0) * p.cost_price as cost_value,
-               COALESCE(s.quantity,0) * p.sell_price as sell_value
+               {qty_expr} as quantity,
+               {qty_expr} * p.cost_price as cost_value,
+               {qty_expr} * p.sell_price as sell_value
         FROM products p
         LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
         LEFT JOIN departments d ON p.department_id = d.id
+        {future_join}
         WHERE p.active = 1
     """
-    params = []
-    if dept_id:
-        sql += " AND p.department_id = ?"
-        params.append(dept_id)
+    if dept_ids:
+        placeholders = ",".join("?" * len(dept_ids))
+        sql += f" AND p.department_id IN ({placeholders})"
+        params.extend(dept_ids)
     sql += " ORDER BY d.name, p.description"
     with db_conn() as conn:
         return conn.execute(sql, params).fetchall()

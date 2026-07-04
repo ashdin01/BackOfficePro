@@ -44,8 +44,11 @@ class TestGetStockValuationSummary:
 
     def test_dept_filter(self, stocked_product, dept_id):
         all_rows = report_model.get_stock_valuation_summary()
-        filtered = report_model.get_stock_valuation_summary(dept_id=dept_id)
+        filtered = report_model.get_stock_valuation_summary(dept_ids=[dept_id])
         assert len(filtered) <= len(all_rows)
+
+    def test_empty_dept_ids_returns_nothing(self, stocked_product):
+        assert report_model.get_stock_valuation_summary(dept_ids=[]) == []
 
 
 class TestGetStockValuationDetail:
@@ -70,9 +73,31 @@ class TestGetStockValuationDetail:
         assert row["quantity"] == 50
 
     def test_dept_filter_restricts_results(self, stocked_product, dept_id):
-        filtered = report_model.get_stock_valuation_detail(dept_id=dept_id)
+        filtered = report_model.get_stock_valuation_detail(dept_ids=[dept_id])
         for r in filtered:
             assert r["dept_name"] is not None
+
+    def test_empty_dept_ids_returns_nothing(self, stocked_product):
+        assert report_model.get_stock_valuation_detail(dept_ids=[]) == []
+
+    def test_as_of_date_reconstructs_historical_quantity(self, db_conn, stocked_product):
+        """50 units on hand today; a +20 movement was recorded today, so
+        as-of-yesterday should reverse it back to 30."""
+        db_conn.execute(
+            "INSERT INTO stock_movements (barcode, movement_type, quantity, created_at) "
+            "VALUES (?, 'ADJUSTMENT_IN', 20, datetime('now'))",
+            (stocked_product,)
+        )
+        db_conn.commit()
+
+        yesterday = "2020-01-01"  # any date before the movement above
+        rows = report_model.get_stock_valuation_detail(as_of_date=yesterday)
+        row = next(r for r in rows if r["barcode"] == stocked_product)
+        assert row["quantity"] == 30
+
+        rows_today = report_model.get_stock_valuation_detail()
+        row_today = next(r for r in rows_today if r["barcode"] == stocked_product)
+        assert row_today["quantity"] == 50
 
 
 class TestGetReorderItems:

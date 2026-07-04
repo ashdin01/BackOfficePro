@@ -35,14 +35,16 @@ def get_setting(key, default='') -> str:
 
 # ── Stock Valuation ───────────────────────────────────────────────────────────
 
-def get_stock_valuation_summary(dept_id=None) -> list[dict]:
-    """Department summary: product count, total units, cost and sell values."""
-    return report_model.get_stock_valuation_summary(dept_id)
+def get_stock_valuation_summary(dept_ids=None, as_of_date=None) -> list[dict]:
+    """Department summary: product count, total units, cost and sell values.
+    as_of_date ('YYYY-MM-DD') reconstructs historical quantities from
+    stock_movements; prices used are always today's (no price history kept)."""
+    return report_model.get_stock_valuation_summary(dept_ids, as_of_date)
 
 
-def get_stock_valuation_detail(dept_id=None) -> list[dict]:
+def get_stock_valuation_detail(dept_ids=None, as_of_date=None) -> list[dict]:
     """Full product detail: barcode, description, qty, cost and sell values."""
-    return report_model.get_stock_valuation_detail(dept_id)
+    return report_model.get_stock_valuation_detail(dept_ids, as_of_date)
 
 
 # ── Reorder Report ────────────────────────────────────────────────────────────
