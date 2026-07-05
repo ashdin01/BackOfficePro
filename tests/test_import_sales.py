@@ -6,6 +6,35 @@ import pytest
 from datetime import date
 
 import scripts.import_sales as import_sales
+import models.stock_on_hand as soh_model
+
+
+# ── Fresh-department fixtures (mirrors tests/test_negative_soh_clamp.py) ──────
+
+@pytest.fixture()
+def fresh_dept_id(db_conn):
+    """The FRESH department with no_negative_soh enabled."""
+    db_conn.execute("UPDATE departments SET no_negative_soh=1 WHERE code='FRESH'")
+    db_conn.commit()
+    row = db_conn.execute("SELECT id FROM departments WHERE code='FRESH'").fetchone()
+    return row["id"]
+
+
+@pytest.fixture()
+def fresh_barcode(db_conn, fresh_dept_id, supplier_id):
+    """A product in the Fresh department, mapped to PLU 55555."""
+    bc = "9300000000079"
+    db_conn.execute("""
+        INSERT INTO products
+            (barcode, description, department_id, supplier_id,
+             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+        VALUES (?, 'Fresh Bananas', ?, ?, 3.50, 1.50, 0.0, 1, 'KG', 1, 'KG')
+    """, (bc, fresh_dept_id, supplier_id))
+    db_conn.execute(
+        "INSERT INTO plu_barcode_map (plu, barcode) VALUES (55555, ?)", (bc,)
+    )
+    db_conn.commit()
+    return bc
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -192,6 +221,62 @@ def test_import_rows_unmatched_plu_counted(test_db):
     assert upserted == 1
     assert movements == 0
     assert unmatched == 1
+
+
+class TestImportRowsClamp:
+    def test_import_clamps_fresh_product_to_zero(self, test_db, db_conn, fresh_barcode):
+        soh_model.adjust(fresh_barcode, 2, "RECEIPT", "PO-001", "", "admin")
+        rows = [{
+            'sale_date': '2026-05-08', 'plu': '55555', 'plu_name': 'BANANAS',
+            'sub_group': '', 'weight_kg': 0.0, 'quantity': 5.0,
+            'nominal_price': 3.50, 'discount': 0.0, 'rounding': 0.0,
+            'sales_dollars': 17.50, 'sales_pct': 0.0,
+        }]
+        import_sales._import_rows(rows, source='test')
+        soh = soh_model.get_by_barcode(fresh_barcode)
+        assert soh["quantity"] == pytest.approx(0.0)
+
+    def test_import_clamp_records_compensating_movement(self, test_db, db_conn, fresh_barcode):
+        soh_model.adjust(fresh_barcode, 2, "RECEIPT", "PO-001", "", "admin")
+        rows = [{
+            'sale_date': '2026-05-08', 'plu': '55555', 'plu_name': 'BANANAS',
+            'sub_group': '', 'weight_kg': 0.0, 'quantity': 5.0,
+            'nominal_price': 3.50, 'discount': 0.0, 'rounding': 0.0,
+            'sales_dollars': 17.50, 'sales_pct': 0.0,
+        }]
+        import_sales._import_rows(rows, source='test')
+        moves = db_conn.execute(
+            "SELECT movement_type, quantity FROM stock_movements"
+            " WHERE barcode=? ORDER BY id",
+            (fresh_barcode,),
+        ).fetchall()
+        assert [(m["movement_type"], m["quantity"]) for m in moves] == [
+            ("RECEIPT", 2), ("SALE", -5), ("ADJUSTMENT_IN", 3),
+        ]
+
+    def test_import_non_fresh_product_can_go_negative(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        bc = "9300000000080"
+        db_conn.execute("""
+            INSERT INTO products
+                (barcode, description, department_id, supplier_id,
+                 sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+            VALUES (?, 'Test Product 2', ?, ?, 3.50, 2.00, 10.0, 1, 'EA', 1, 'EA')
+        """, (bc, dept_id, supplier_id))
+        db_conn.execute(
+            "INSERT INTO plu_barcode_map (plu, barcode) VALUES (66666, ?)", (bc,)
+        )
+        db_conn.commit()
+        rows = [{
+            'sale_date': '2026-05-08', 'plu': '66666', 'plu_name': 'TEST PRODUCT 2',
+            'sub_group': '', 'weight_kg': 0.0, 'quantity': 5.0,
+            'nominal_price': 3.50, 'discount': 0.0, 'rounding': 0.0,
+            'sales_dollars': 17.50, 'sales_pct': 0.0,
+        }]
+        import_sales._import_rows(rows, source='test')
+        soh = soh_model.get_by_barcode(bc)
+        assert soh["quantity"] == pytest.approx(-5.0)
 
 
 def test_import_rows_creates_stock_movement_when_plu_mapped(test_db, db_conn, dept_id, supplier_id):

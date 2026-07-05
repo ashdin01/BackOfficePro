@@ -69,7 +69,7 @@ class AddLineDialog(QDialog):
         self.unit_cost = QDoubleSpinBox()
         self.unit_cost.setMaximum(99999)
         self.unit_cost.setPrefix("$")
-        self.unit_cost.setDecimals(2)
+        self.unit_cost.setDecimals(4)
         self.unit_cost.installEventFilter(self)
 
         self.notes = QLineEdit()

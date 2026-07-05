@@ -6,6 +6,31 @@ import models.stocktake as stocktake_model
 import models.stock_on_hand as soh_model
 
 
+# ── Fresh-department fixtures (mirrors tests/test_negative_soh_clamp.py) ──────
+
+@pytest.fixture()
+def fresh_dept_id(db_conn):
+    """The FRESH department with no_negative_soh enabled."""
+    db_conn.execute("UPDATE departments SET no_negative_soh=1 WHERE code='FRESH'")
+    db_conn.commit()
+    row = db_conn.execute("SELECT id FROM departments WHERE code='FRESH'").fetchone()
+    return row["id"]
+
+
+@pytest.fixture()
+def fresh_barcode(db_conn, fresh_dept_id, supplier_id):
+    """A product in the Fresh department."""
+    bc = "9300000000078"
+    db_conn.execute("""
+        INSERT INTO products
+            (barcode, description, department_id, supplier_id,
+             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+        VALUES (?, 'Fresh Pears', ?, ?, 4.50, 2.00, 0.0, 1, 'KG', 1, 'KG')
+    """, (bc, fresh_dept_id, supplier_id))
+    db_conn.commit()
+    return bc
+
+
 # ── Local fixture ─────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -153,6 +178,42 @@ class TestApplySession:
     def test_apply_session_nonexistent_raises(self, test_db):
         with pytest.raises(ValueError):
             stocktake_model.apply_session(99999)
+
+
+# ── TestApplySessionClamp ─────────────────────────────────────────────────────
+
+class TestApplySessionClamp:
+    def test_apply_session_clamps_fresh_product_to_zero(
+        self, test_db, db_conn, session_id, fresh_barcode
+    ):
+        # A counted qty below zero (e.g. a correction entry) is written
+        # straight to stock_on_hand by apply_session, so it must be clamped.
+        stocktake_model.upsert_count(session_id, fresh_barcode, -4.0)
+        stocktake_model.apply_session(session_id)
+        soh = soh_model.get_by_barcode(fresh_barcode)
+        assert soh["quantity"] == pytest.approx(0.0)
+
+    def test_apply_session_clamp_records_compensating_movement(
+        self, test_db, db_conn, session_id, fresh_barcode
+    ):
+        stocktake_model.upsert_count(session_id, fresh_barcode, -4.0)
+        stocktake_model.apply_session(session_id)
+        moves = db_conn.execute(
+            "SELECT movement_type, quantity FROM stock_movements"
+            " WHERE barcode=? ORDER BY id",
+            (fresh_barcode,),
+        ).fetchall()
+        assert [(m["movement_type"], m["quantity"]) for m in moves] == [
+            ("STOCKTAKE", -4), ("ADJUSTMENT_IN", 4),
+        ]
+
+    def test_apply_session_non_fresh_product_can_go_negative(
+        self, test_db, session_id, product_barcode
+    ):
+        stocktake_model.upsert_count(session_id, product_barcode, -3.0)
+        stocktake_model.apply_session(session_id)
+        soh = soh_model.get_by_barcode(product_barcode)
+        assert soh["quantity"] == pytest.approx(-3.0)
 
 
 # ── TestVarianceReport ────────────────────────────────────────────────────────

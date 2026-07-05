@@ -19,6 +19,7 @@ if _BASE not in sys.path:
     sys.path.insert(0, _BASE)
 
 from database.connection import get_connection
+from models.stock_on_hand import clamp_negative_soh
 from datetime import datetime
 
 
@@ -182,6 +183,8 @@ def _create_sale_movement(conn, barcode, quantity, sale_date, plu, plu_name, sou
             quantity     = quantity + excluded.quantity,
             last_updated = CURRENT_TIMESTAMP
     """, (barcode, -quantity))
+
+    clamp_negative_soh(conn, barcode, reference=reference, created_by=source)
 
     return True
 

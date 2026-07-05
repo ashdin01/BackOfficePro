@@ -80,7 +80,7 @@ class ProductAdd(KeyboardMixin, QWidget):
 
         self.cost_price = QDoubleSpinBox()
         self.cost_price.setMaximum(99999)
-        self.cost_price.setDecimals(2)
+        self.cost_price.setDecimals(4)
         self.cost_price.valueChanged.connect(self._update_gp)
         self.cost_price.valueChanged.connect(self._update_cost_inc)
 

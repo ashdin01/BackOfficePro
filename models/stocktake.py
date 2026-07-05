@@ -1,6 +1,7 @@
 import logging
 
 from database.connection import db_conn
+from models.stock_on_hand import clamp_negative_soh
 
 
 # ── Sessions ─────────────────────────────────────────────────────────────────
@@ -376,6 +377,7 @@ def apply_session(session_id):
                     (barcode, movement_type, quantity, reference, notes, created_by, source)
                 VALUES (?, 'STOCKTAKE', ?, ?, ?, ?, ?)
             """, (barcode, diff, f"Stocktake #{session_id}", "Applied from stocktake", who, src))
+            clamp_negative_soh(conn, barcode, reference=f"Stocktake #{session_id}", created_by=who)
         conn.execute("""
             UPDATE stocktake_sessions
             SET status='CLOSED', closed_at=CURRENT_TIMESTAMP
