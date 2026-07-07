@@ -2547,6 +2547,25 @@ def migrate_v59(conn):
     conn.commit()
 
 
+def migrate_v60(conn):
+    """Add atria_import_log table to track daily ATRIA sales import attempts.
+
+    Records every attempt, including zero-sale days (e.g. store closed), so
+    the startup catch-up sync can tell "already checked, nothing to import"
+    apart from "never attempted" and doesn't keep retrying closed days.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS atria_import_log (
+            sale_date     TEXT    PRIMARY KEY,
+            imported_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+            row_count     INTEGER NOT NULL DEFAULT 0,
+            status        TEXT    NOT NULL DEFAULT 'OK' CHECK (status IN ('OK', 'ERROR')),
+            error_message TEXT
+        )
+    """)
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2606,4 +2625,5 @@ _MIGRATIONS: dict[int, tuple] = {
     57: (migrate_v57, "online_notes text field on products for shop product pages"),
     58: (migrate_v58, "received_weight column on po_lines for variable weight items"),
     59: (migrate_v59, "group_id on stocktake_sessions for sub-department filtering"),
+    60: (migrate_v60, "atria_import_log table for startup Atria sync tracking"),
 }

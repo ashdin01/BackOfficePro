@@ -1,219 +1,405 @@
 """
-Atria POS — automated daily sales fetcher for BackOfficePro.
+ATRIA Daily PLU Sales report auto-downloader for BackOfficePro.
 
-Logs into the Atria web interface, navigates to the PLU sales report,
-downloads yesterday's CSV, and passes it straight into import_sales.py.
+Logs into the ATRIA reporting system (Telerik/Progress report server under
+the hood), requests yesterday's "DailyPluSales" report as CSV, saves it to
+OUTPUT_DIR, then imports it into BackOfficePro (stock movements +
+sales_daily) via import_sales.py.
 
-Usage (manual / test):
-    python3 scripts/fetch_atria_sales.py
+Designed to be run once a day (e.g. via Windows Task Scheduler, early each
+morning) to pull and apply the previous day's sales automatically, with no
+manual step.
 
-Scheduled (cron, runs every morning):
-    0 7 * * * cd /home/ashley/BackOfficePro && python3 scripts/fetch_atria_sales.py
+Credentials are stored in the OS keystore (Windows Credential Manager, via
+utils/secret_store.py) rather than hardcoded. Set them once with:
 
-Dependencies:
-    pip install requests beautifulsoup4
+    python scripts/fetch_atria_sales.py --set-credentials
+
+--------------------------------------------------------------------------
+ONE THING THAT ISN'T FULLY VERIFIED:
+The captured browser traffic showed the *requests* sent to /api/rptsvr/...
+but never the *response bodies* (Chrome's Network tab was only shared via
+the Headers/Payload tabs, not Response). So the exact JSON key names the
+server uses for "client id", "instance id" and "document id" in its
+responses are inferred, not confirmed. The extract_id() helper below tries
+several common key spellings and will raise a clear error showing the raw
+response if none match -- if that happens on first run, open the printed
+JSON, find the right key, and add it to the relevant candidates list.
+--------------------------------------------------------------------------
+
+Requires: pip install requests keyring
 """
 
-import os
-import sys
-import tempfile
+import datetime
+import getpass
 import logging
-from datetime import date, timedelta
+import os
+import re
+import sys
+import time
+from pathlib import Path
 
 import requests
-from bs4 import BeautifulSoup
 
-# ── Config ─────────────────────────────────────────────────────────────────────
-ATRIA_BASE   = "http://192.168.1.107/ATRIA"
-LOGIN_URL    = f"{ATRIA_BASE}/Account/Login"
+if getattr(sys, "frozen", False):
+    _BASE = sys._MEIPASS
+else:
+    _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _BASE not in sys.path:
+    sys.path.insert(0, _BASE)
 
-# TODO: fill in your Atria login credentials
-ATRIA_USER   = "your_username_here"
-ATRIA_PASS   = "your_password_here"
+from utils.secret_store import get_secret, set_secret
+from database.connection import get_connection
+import scripts.import_sales as import_sales
 
-# TODO: set the correct report URL and date parameters after inspecting
-# the network traffic on the report page (see instructions below).
-#
-# REPORT_URL is the URL of the page or endpoint that returns (or lets you
-# download) the PLU sales CSV.  Set REPORT_IS_DOWNLOAD = True if that URL
-# returns the file directly; False if it returns an HTML page with a
-# download link you need to click.
-#
-# Examples of what this might look like in Atria:
-#   REPORT_URL = f"{ATRIA_BASE}/Reports/DailySales"
-#   REPORT_URL = f"{ATRIA_BASE}/Reports/PLUSalesExport"
-REPORT_URL        = f"{ATRIA_BASE}/REPLACE_WITH_REPORT_PATH"
-REPORT_IS_DOWNLOAD = False   # set True if the URL itself serves the CSV file
+# ---------------- Configuration ----------------
 
-# Date to fetch — defaults to yesterday.
-TARGET_DATE = date.today() - timedelta(days=1)
+BASE_URL = "http://192.168.1.107/ATRIA"
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+STORE_ID = 1  # matches the StoreId / AllowedStores value seen in captured traffic
+REPORT_NAME = "DailyPluSales.trdx"
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
-log = logging.getLogger(__name__)
+OUTPUT_DIR = Path.home() / "Downloads" / "ATRIA_Reports"
+LOG_DIR = OUTPUT_DIR / "logs"
+
+REQUEST_TIMEOUT = 30
+DOWNLOAD_RETRY_ATTEMPTS = 8
+DOWNLOAD_RETRY_DELAY_SECONDS = 2
+
+_CRED_USER_KEY = "atria_username"
+_CRED_PASS_KEY = "atria_password"
+
+# -------------------------------------------------
 
 
-def _get_token(session, url):
-    """Fetch a page and extract the ASP.NET anti-forgery token."""
-    resp = session.get(url, timeout=15)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-    token_input = soup.find("input", {"name": "__RequestVerificationToken"})
-    if not token_input:
+def setup_logging() -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LOG_DIR / f"{datetime.date.today().isoformat()}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
+def get_atria_credentials() -> tuple:
+    """Read ATRIA credentials from the OS keystore, falling back to env vars."""
+    username = get_secret(_CRED_USER_KEY) or os.environ.get("ATRIA_USERNAME", "")
+    password = get_secret(_CRED_PASS_KEY) or os.environ.get("ATRIA_PASSWORD", "")
+    if not username or not password:
         raise RuntimeError(
-            "Could not find __RequestVerificationToken on login page.\n"
-            "Open DevTools → Network, log in manually, and check the POST payload\n"
-            "to confirm the field name, then update this script."
+            "ATRIA credentials not set. Run:\n"
+            "    python scripts/fetch_atria_sales.py --set-credentials\n"
+            "or set the ATRIA_USERNAME / ATRIA_PASSWORD environment variables."
         )
-    return token_input["value"]
+    return username, password
 
 
-def login(session):
-    """
-    Log into Atria.  Returns True on success.
+def set_credentials_interactive() -> None:
+    """One-time interactive setup: store ATRIA credentials in the OS keystore."""
+    print("Storing ATRIA credentials in the OS keystore (Windows Credential Manager).")
+    username = input("ATRIA username: ").strip()
+    password = getpass.getpass("ATRIA password: ")
+    set_secret(_CRED_USER_KEY, username)
+    set_secret(_CRED_PASS_KEY, password)
+    print("Saved. You can now run this script normally.")
 
-    ASP.NET MVC login flow:
-      1. GET login page  → grab anti-forgery token
-      2. POST credentials + token  → server sets auth cookie
-    """
-    log.info("Fetching login page …")
-    token = _get_token(session, LOGIN_URL)
 
-    # TODO: confirm the exact field names by right-clicking the login page
-    # → View Page Source and finding the <form> tag.  Common names are
-    # 'UserName'/'Password' or 'Email'/'Password'.
+def extract_id(data: dict, candidates: list) -> str:
+    for key in candidates:
+        if key in data:
+            return data[key]
+    raise KeyError(
+        f"None of the expected keys {candidates} were found in response: {data}"
+    )
+
+
+def get_login_token(session: requests.Session) -> str:
+    """GET the login page and pull the anti-forgery token out of the HTML."""
+    resp = session.get(
+        f"{BASE_URL}/Account/Login",
+        params={"ReturnUrl": "/ATRIA/"},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    match = re.search(
+        r'name="__RequestVerificationToken"[^>]*value="([^"]+)"', resp.text
+    )
+    if not match:
+        raise RuntimeError(
+            "Could not find __RequestVerificationToken on the login page. "
+            "The login page HTML may have changed."
+        )
+    return match.group(1)
+
+
+def login(session: requests.Session, username: str, password: str) -> None:
+    logging.info("Logging in as %s", username)
+    token = get_login_token(session)
+    resp = session.post(
+        f"{BASE_URL}/Account/Login",
+        params={"ReturnUrl": "/ATRIA/"},
+        data={
+            "__RequestVerificationToken": token,
+            "UserName": username,
+            "Password": password,
+            "RememberMe": "false",
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    if "Account/Login" in resp.url:
+        raise RuntimeError(
+            "Login appears to have failed - still on the login page after POST. "
+            "Check the username/password (python scripts/fetch_atria_sales.py --set-credentials)."
+        )
+    logging.info("Login OK")
+
+
+def create_client(session: requests.Session) -> str:
+    resp = session.post(
+        f"{BASE_URL}/api/rptsvr/clients",
+        json={"timeStamp": int(time.time() * 1000)},
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    client_id = extract_id(
+        resp.json(), ["clientID", "ClientID", "clientId", "id", "Id"]
+    )
+    logging.info("Created report client %s", client_id)
+    return client_id
+
+
+def create_instance(session: requests.Session, client_id: str, target_date: datetime.date) -> str:
+    date_str = f"{target_date.isoformat()}T00:00:00.000Z"
     payload = {
-        "__RequestVerificationToken": token,
-        "UserName": ATRIA_USER,          # ← change if field name differs
-        "Password": ATRIA_PASS,
-        "RememberMe": "false",
+        "report": REPORT_NAME,
+        "parameterValues": {
+            "DateSelector": "Y",
+            "FromDate": date_str,
+            "ToDate": date_str,
+            "StoreId": [STORE_ID],
+            "SortBy": "plua",
+            "FirstPluCode": 1,
+            "LastPluCode": 999999,
+            "AllowedStores": [STORE_ID],
+        },
     }
-
-    log.info("Posting credentials …")
-    resp = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
+    resp = session.post(
+        f"{BASE_URL}/api/rptsvr/clients/{client_id}/instances",
+        json=payload,
+        timeout=REQUEST_TIMEOUT,
+    )
     resp.raise_for_status()
-
-    # A successful ASP.NET login redirects to the home page.
-    # If we're still on /Account/Login after the POST, credentials were rejected.
-    if "/Account/Login" in resp.url:
-        raise RuntimeError(
-            "Login failed — still on login page after POST.\n"
-            "Check ATRIA_USER / ATRIA_PASS, or inspect the form field names."
-        )
-
-    log.info("Login successful (redirected to %s)", resp.url)
-    return True
+    instance_id = extract_id(
+        resp.json(), ["instanceID", "InstanceID", "instanceId", "id", "Id"]
+    )
+    logging.info("Created report instance %s for %s", instance_id, target_date)
+    return instance_id
 
 
-def _build_report_params():
-    """
-    Return the query-string / POST parameters needed to request yesterday's
-    PLU sales report.
-
-    TODO: navigate to the report manually, change the date to yesterday,
-    click Generate / Export, then open DevTools → Network and look at the
-    request that fetches (or downloads) the data.  Copy the parameters here.
-
-    Example — replace with what you observe in DevTools:
-        return {
-            "ReportDate": TARGET_DATE.strftime("%d/%m/%Y"),
-            "ExportFormat": "CSV",
-        }
-    """
-    return {
-        "ReportDate": TARGET_DATE.strftime("%d/%m/%Y"),
-        # add more parameters as needed
+def request_csv_document(session: requests.Session, client_id: str, instance_id: str) -> str:
+    payload = {
+        "format": "CSV",
+        "deviceInfo": {
+            "enableSearch": True,
+            "BasePath": "/ATRIA/api/rptsvr",
+        },
+        "useCache": True,
     }
+    resp = session.post(
+        f"{BASE_URL}/api/rptsvr/clients/{client_id}/instances/{instance_id}/documents",
+        json=payload,
+        timeout=REQUEST_TIMEOUT,
+    )
+    resp.raise_for_status()
+    document_id = extract_id(
+        resp.json(), ["documentID", "DocumentID", "documentId", "id", "Id"]
+    )
+    logging.info("Requested CSV document %s", document_id)
+    return document_id
 
 
-def fetch_csv(session):
-    """
-    Download the PLU sales CSV for TARGET_DATE.
-    Returns the raw CSV bytes.
-    """
-    params = _build_report_params()
-    log.info("Fetching report for %s …", TARGET_DATE.strftime("%d/%m/%Y"))
-
-    if REPORT_IS_DOWNLOAD:
-        # The URL returns the CSV file directly
-        resp = session.get(REPORT_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.content
-    else:
-        # The URL returns an HTML page — find the download link and follow it
-        resp = session.get(REPORT_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # TODO: inspect the report page HTML and update this selector to match
-        # the Export / Download CSV link or button.
-        # Examples:
-        #   download_link = soup.find("a", string=lambda t: t and "Export" in t)
-        #   download_link = soup.find("a", id="lnkExportCSV")
-        #   download_link = soup.find("a", {"class": "export-link"})
-        download_link = soup.find("a", string=lambda t: t and "CSV" in (t or ""))
-
-        if not download_link:
-            raise RuntimeError(
-                "Could not find a CSV download link on the report page.\n"
-                "Open the report page in a browser, right-click the Export/Download\n"
-                "button → Inspect, and update the soup.find() call above to match."
+def download_document(
+    session: requests.Session, client_id: str, instance_id: str, document_id: str
+) -> bytes:
+    url = (
+        f"{BASE_URL}/api/rptsvr/clients/{client_id}/instances/{instance_id}"
+        f"/documents/{document_id}"
+    )
+    last_error = None
+    for attempt in range(1, DOWNLOAD_RETRY_ATTEMPTS + 1):
+        try:
+            resp = session.get(
+                url,
+                params={"response-content-disposition": "attachment"},
+                timeout=REQUEST_TIMEOUT,
             )
+            if resp.status_code == 200 and resp.content:
+                logging.info("Downloaded document on attempt %d", attempt)
+                return resp.content
+            last_error = f"status={resp.status_code}, len={len(resp.content)}"
+        except requests.RequestException as exc:
+            last_error = str(exc)
 
-        href = download_link.get("href", "")
-        if href.startswith("/"):
-            href = f"http://192.168.1.107{href}"
-        elif not href.startswith("http"):
-            href = f"{ATRIA_BASE}/{href}"
+        logging.info(
+            "Document not ready yet (attempt %d/%d): %s",
+            attempt,
+            DOWNLOAD_RETRY_ATTEMPTS,
+            last_error,
+        )
+        time.sleep(DOWNLOAD_RETRY_DELAY_SECONDS)
 
-        log.info("Following download link: %s", href)
-        dl_resp = session.get(href, timeout=30)
-        dl_resp.raise_for_status()
-        return dl_resp.content
+    raise RuntimeError(f"Gave up waiting for document after {DOWNLOAD_RETRY_ATTEMPTS} attempts: {last_error}")
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Import-log bookkeeping ────────────────────────────────────────────────────
+#
+# atria_import_log records every attempt, including zero-sale days (e.g. store
+# closed), so the startup catch-up sync can tell "already checked" apart from
+# "never attempted" and doesn't keep retrying closed days forever.
 
-def run():
-    # Add project root to path so import_sales can find database/ etc.
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
+def _record_import_result(sale_date: str, row_count: int, status: str, error_message: str = '') -> None:
+    conn = get_connection()
+    try:
+        conn.execute("""
+            INSERT INTO atria_import_log (sale_date, row_count, status, error_message)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(sale_date) DO UPDATE SET
+                imported_at   = datetime('now', 'localtime'),
+                row_count     = excluded.row_count,
+                status        = excluded.status,
+                error_message = excluded.error_message
+        """, (sale_date, row_count, status, error_message))
+        conn.commit()
+    finally:
+        conn.release()
 
-    import import_sales  # local sibling script
 
-    session = requests.Session()
-    session.headers["User-Agent"] = "BackOfficePro/1.4 SalesFetcher"
+def _missing_dates(days: int) -> list:
+    """Return the past `days` calendar days (not including today) that have
+    no atria_import_log entry yet, oldest first."""
+    today = datetime.date.today()
+    candidates = [today - datetime.timedelta(days=i) for i in range(1, days + 1)]
 
-    login(session)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT sale_date FROM atria_import_log WHERE sale_date >= ?",
+            (min(candidates).isoformat(),)
+        ).fetchall()
+    finally:
+        conn.release()
 
-    csv_bytes = fetch_csv(session)
-    if not csv_bytes:
-        raise RuntimeError("Downloaded file is empty — check report parameters.")
+    done = {r['sale_date'] for r in rows}
+    missing = [d for d in candidates if d.isoformat() not in done]
+    missing.sort()
+    return missing
 
-    log.info("Downloaded %d bytes", len(csv_bytes))
 
-    # Write to a temp file and pass to the existing importer
-    suffix = f"_atria_{TARGET_DATE.strftime('%Y%m%d')}.csv"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="wb") as tmp:
-        tmp.write(csv_bytes)
-        tmp_path = tmp.name
+def _fetch_and_import_one_day(session: requests.Session, target_date: datetime.date) -> int:
+    """Download + import the ATRIA PLU sales report for a single date.
 
-    log.info("Saved to temp file: %s", tmp_path)
+    Returns the number of sales_daily rows upserted. Raises on failure —
+    callers are responsible for recording the outcome via _record_import_result.
+    """
+    client_id = create_client(session)
+    instance_id = create_instance(session, client_id, target_date)
+    document_id = request_csv_document(session, client_id, instance_id)
+    content = download_document(session, client_id, instance_id, document_id)
+
+    out_file = OUTPUT_DIR / f"DailyPluSales_{target_date.isoformat()}.csv"
+    out_file.write_bytes(content)
+    logging.info("Saved report to %s (%d bytes)", out_file, len(content))
+
+    import_sales.ensure_tables()
+    upserted, movements, unmatched = import_sales.import_csv(str(out_file))
+    logging.info(
+        "Import complete for %s — %d rows, %d movements, %d unmatched PLUs",
+        target_date, upserted, movements, unmatched,
+    )
+    return upserted
+
+
+def sync_missing_days(days: int = 7) -> dict:
+    """Catch up any of the last `days` calendar days not yet recorded in
+    atria_import_log, downloading and importing each one.
+
+    Safe to call from a background thread: never raises. A missing-credential
+    or login failure is logged once and skips the whole run; a failure on an
+    individual day is logged and recorded, and the loop continues with the
+    remaining days.
+
+    Returns {"imported": [...dates], "failed": [...dates], "skipped_reason": str|None}.
+    """
+    setup_logging()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    result = {"imported": [], "failed": [], "skipped_reason": None}
+
+    missing = _missing_dates(days)
+    if not missing:
+        logging.info("Atria sync: last %d days already accounted for", days)
+        return result
 
     try:
-        import_sales.ensure_tables()
-        upserted, movements, unmatched = import_sales.import_csv(tmp_path)
-        log.info("Import complete — %d rows, %d movements, %d unmatched PLUs",
-                 upserted, movements, unmatched)
-    finally:
-        os.unlink(tmp_path)
+        username, password = get_atria_credentials()
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) atria-auto-download/1.0",
+            }
+        )
+        login(session, username, password)
+    except Exception as exc:
+        logging.warning("Atria sync skipped: %s", exc)
+        result["skipped_reason"] = str(exc)
+        return result
+
+    for target_date in missing:
+        try:
+            row_count = _fetch_and_import_one_day(session, target_date)
+            _record_import_result(target_date.isoformat(), row_count, "OK")
+            result["imported"].append(target_date.isoformat())
+        except Exception as exc:
+            logging.exception("Atria sync: failed to import %s", target_date)
+            _record_import_result(target_date.isoformat(), 0, "ERROR", str(exc))
+            result["failed"].append(target_date.isoformat())
+
+    return result
+
+
+def main() -> int:
+    setup_logging()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    yesterday = datetime.date.today() - datetime.timedelta(days=1)
+
+    try:
+        username, password = get_atria_credentials()
+
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) atria-auto-download/1.0",
+            }
+        )
+
+        login(session, username, password)
+        row_count = _fetch_and_import_one_day(session, yesterday)
+        _record_import_result(yesterday.isoformat(), row_count, "OK")
+        return 0
+
+    except Exception as exc:
+        logging.exception("Daily report download failed")
+        _record_import_result(yesterday.isoformat(), 0, "ERROR", str(exc))
+        return 1
 
 
 if __name__ == "__main__":
-    try:
-        run()
-    except Exception as exc:
-        log.error("fetch_atria_sales failed: %s", exc, exc_info=True)
-        sys.exit(1)
+    if "--set-credentials" in sys.argv:
+        set_credentials_interactive()
+        sys.exit(0)
+    sys.exit(main())

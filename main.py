@@ -237,6 +237,25 @@ def _start_api_server():
     return t
 
 
+def _start_atria_sync():
+    """Best-effort background catch-up of the last week's ATRIA sales.
+
+    Runs in a daemon thread so a slow or unreachable ATRIA server never
+    delays app startup; any failure (missing credentials, network down,
+    login rejected) is logged only and never surfaces to the user.
+    """
+    import threading
+
+    def _run():
+        try:
+            from scripts.fetch_atria_sales import sync_missing_days
+            sync_missing_days(days=7)
+        except Exception:
+            logging.exception("Atria sync thread crashed")
+
+    threading.Thread(target=_run, daemon=True, name="atria-sync").start()
+
+
 def _pick_store(app):
     """Show a store-selection dialog and patch DATABASE_PATH before DB init."""
     import config.settings as _cfg
@@ -393,6 +412,7 @@ def main():
         logging.info(f"Login successful: {user.get('username')} ({user.get('role')})")
         from database.audit_context import set_context
         set_context(user.get('username', ''), 'UI')
+        _start_atria_sync()
         from views.main_window import MainWindow
         login_win[0].hide()
         main_win[0] = MainWindow(current_user=user, api_thread=api_thread)
