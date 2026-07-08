@@ -100,6 +100,25 @@ class TestValidateBackupFile:
         assert ok is False
         assert backup_ctrl._REQUIRED_TABLES.issubset(missing)
 
+    def test_missing_version_marker_detected(self, tmp_path):
+        """All required tables present but neither db_meta nor a settings
+        schema_version row exists — reported as a missing version marker."""
+        db = str(tmp_path / "no_version.db")
+        conn = sqlite3.connect(db)
+        for tbl in backup_ctrl._REQUIRED_TABLES:
+            conn.execute(f"CREATE TABLE {tbl} (id INTEGER PRIMARY KEY)")
+        conn.commit()
+        conn.close()
+        ok, missing = backup_ctrl.validate_backup_file(db)
+        assert ok is False
+        assert missing == {'schema version marker'}
+
+    def test_unreadable_path_raises_runtime_error(self, tmp_path):
+        """A path sqlite3 genuinely cannot open (e.g. a directory) raises
+        RuntimeError wrapping the underlying error, rather than propagating it."""
+        with pytest.raises(RuntimeError, match="Could not read file"):
+            backup_ctrl.validate_backup_file(str(tmp_path))
+
 
 # ── get_last_backup_time ──────────────────────────────────────────────────────
 
@@ -196,6 +215,29 @@ class TestSilentAutoBackup:
         monkeypatch.setattr(backup_ctrl, "_BACKUP_DIR", str(tmp_path / "backups"))
         result = backup_ctrl.silent_auto_backup()
         assert result is None
+
+    def test_pruning_failure_does_not_prevent_success_return(self, tmp_path, monkeypatch):
+        """A backup that succeeds but fails to prune old files still returns
+        the new backup's path — pruning errors are logged, not surfaced."""
+        src = self._make_src_db(tmp_path)
+        backup_dir = str(tmp_path / "backups")
+        os.makedirs(backup_dir)
+        monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", src)
+        monkeypatch.setattr(backup_ctrl, "_BACKUP_DIR", backup_dir)
+        monkeypatch.setattr(
+            os, "remove",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("disk error")),
+        )
+        # _KEEP_COUNT=0 would slice as files[:-0] == files[:0] == [] (Python's
+        # -0 == 0 quirk), never attempting a removal — use 1 so pruning
+        # actually tries to remove the pre-existing file below.
+        monkeypatch.setattr(backup_ctrl, "_KEEP_COUNT", 1)
+        (tmp_path / "backups" / "supermarket_20250101_000000.db").write_text("")
+
+        result = backup_ctrl.silent_auto_backup()
+
+        assert result is not None
+        assert os.path.exists(result)
 
 
 # ── restore_backup ────────────────────────────────────────────────────────────
@@ -308,6 +350,43 @@ class TestMigrateV37SellingUnitsGuard:
         c.close()
         assert 'product_selling_units' in tables_after
 
+    def test_migrate_v37_skips_creation_when_already_present(self, tmp_path, monkeypatch):
+        """When product_selling_units already exists (the normal case on any
+        schema created after the table was introduced), migrate_v37 must skip
+        the create-empty-table guard and proceed straight to the rename/copy."""
+        import database.connection as conn_mod
+        from database.schema import SCHEMA
+        from database.migrations import migrate_v37
+
+        db_path = str(tmp_path / "with_selling_units.db")
+        monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
+
+        c = sqlite3.connect(db_path)
+        c.executescript(SCHEMA)
+        dept_id = c.execute("SELECT id FROM departments LIMIT 1").fetchone()[0]
+        c.execute("""
+            INSERT INTO products (barcode, description, department_id,
+                sell_price, cost_price, tax_rate, active, unit)
+            VALUES ('123', 'Master Product', ?, 5.00, 2.00, 10.0, 1, 'EA')
+        """, (dept_id,))
+        c.execute("INSERT INTO product_selling_units (master_barcode, barcode, label, unit_qty) "
+                   "VALUES ('123', '456', 'Test Unit', 1)")
+        c.commit()
+        c.close()
+
+        conn = conn_mod.get_connection()
+        try:
+            migrate_v37(conn)  # must not raise, and must not touch existing rows
+        finally:
+            conn.release()
+
+        c = sqlite3.connect(db_path)
+        row = c.execute(
+            "SELECT COUNT(*) FROM product_selling_units WHERE barcode='456'"
+        ).fetchone()
+        c.close()
+        assert row[0] == 1
+
 
 # ── backup_to_local_path ──────────────────────────────────────────────────────
 
@@ -364,6 +443,39 @@ class TestBackupToLocalPath:
         # Unrelated files untouched even though one ends in .db
         assert (folder / "holiday_photos.db").exists()
         assert (folder / "notes.txt").exists()
+
+    def test_do_backup_failure_propagates_message(self, test_db, tmp_path, monkeypatch):
+        """If the underlying do_backup() fails (e.g. source DB unreadable),
+        backup_to_local_path returns its (False, message) unchanged."""
+        folder = tmp_path / "usb"
+        folder.mkdir()
+        self._set_path(str(folder))
+        monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", "/nonexistent/source.db")
+
+        ok, msg = backup_ctrl.backup_to_local_path()
+
+        assert ok is False
+        assert msg
+        assert not list(folder.glob("supermarket_*.db"))
+
+    def test_pruning_failure_does_not_prevent_success(self, test_db, tmp_path, monkeypatch):
+        monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", test_db)
+        folder = tmp_path / "usb"
+        folder.mkdir()
+        self._set_path(str(folder))
+        # _KEEP_COUNT=0 would slice as ours[:-0] == ours[:0] == [] (Python's
+        # -0 == 0 quirk), never attempting a removal — use 1 instead.
+        monkeypatch.setattr(backup_ctrl, "_KEEP_COUNT", 1)
+        (folder / "supermarket_20250101_000000.db").write_bytes(b"old")
+        monkeypatch.setattr(
+            os, "remove",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("disk error")),
+        )
+
+        ok, msg = backup_ctrl.backup_to_local_path()
+
+        assert ok is True
+        assert msg
 
     def test_get_backup_local_path_strips_whitespace(self, test_db):
         self._set_path('  /media/usb  ')

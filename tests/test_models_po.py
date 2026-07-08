@@ -53,6 +53,9 @@ class TestPoStatus:
         po_model.update_status(po_id, "RECEIVED")
         assert po_model.get_by_id(po_id)["status"] == "RECEIVED"
 
+    def test_update_status_on_nonexistent_po_does_not_raise(self, test_db):
+        po_model.update_status(99999, "SENT")
+
     def test_cancel_sets_cancelled_status(self, test_db, supplier_id):
         po_id = po_model.create(supplier_id, "2026-06-01", "", "admin")
         po_model.cancel(po_id)
@@ -159,6 +162,26 @@ class TestPoReverse:
     def test_reverse_nonexistent_po_raises(self, test_db):
         with pytest.raises(ValueError):
             po_model.reverse(99999, "admin")
+
+    def test_reverse_skips_unreceived_line(
+        self, test_db, supplier_id, product_barcode, gst_free_barcode
+    ):
+        """A line still at received_qty=0 (e.g. backordered) alongside a
+        received one must be skipped, not reversed as a negative receipt."""
+        po_id = self._setup_received_po(supplier_id, product_barcode)
+        # Add a second line that was never received.
+        lines_model.add(po_id, gst_free_barcode, "Backordered Product", 3, 1.50, "")
+
+        po_model.reverse(po_id, "admin")
+
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT * FROM stock_movements WHERE barcode=? AND movement_type='REVERSAL'",
+            (gst_free_barcode,)
+        ).fetchall()
+        conn.close()
+        assert rows == []
+        assert po_model.get_by_id(po_id)["status"] == "REVERSED"
 
 
 # ── po_lines.receive() optional params ────────────────────────────────────────

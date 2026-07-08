@@ -352,3 +352,39 @@ class TestClosePOForce:
         line = _get_lines(po_id)[0]
         close_po_force(po_id, [line['id']], reason='No stock')
         assert get_po_by_id(po_id)['status'] == 'RECEIVED'
+
+
+# ── Thin model wrapper delegation ───────────────────────────────────────────────
+# (full behavior for these is tested at the model level in test_models_po.py /
+# test_models_po_atomic.py — these just confirm the controller wires through)
+
+class TestModelWrapperDelegation:
+    def test_cleanup_old_pos_delegates(self, test_db, supplier_id, db_conn):
+        from controllers.purchase_order_controller import cleanup_old_pos
+        po_id = _make_po(supplier_id)
+        update_po_status(po_id, "CANCELLED")
+        db_conn.execute(
+            "UPDATE purchase_orders SET updated_at = datetime('now', '-2 days') WHERE id=?",
+            (po_id,)
+        )
+        db_conn.commit()
+        assert cleanup_old_pos() == 1
+
+    def test_reverse_po_delegates(self, test_db, supplier_id, product_barcode):
+        from controllers.purchase_order_controller import reverse_po
+        po_id = _make_po(supplier_id)
+        _add_line(po_id, product_barcode, qty=5, cost=2.00)
+        line = _get_lines(po_id)[0]
+        po = get_po_by_id(po_id)
+        receive_po_atomic(
+            po_id, po['po_number'],
+            [{'line_id': line['id'], 'barcode': product_barcode, 'new_received_qty': 5,
+              'actual_cost': 2.00, 'unit_cost': 2.00, 'is_promo': False, 'qty_units': 5}],
+            final_status='RECEIVED',
+        )
+        reverse_po(po_id, reversed_by='admin')
+        assert get_po_by_id(po_id)['status'] == 'REVERSED'
+
+    def test_get_setting_delegates(self, test_db):
+        from controllers.purchase_order_controller import get_setting
+        assert get_setting('nonexistent_key_xyz', default='fallback') == 'fallback'

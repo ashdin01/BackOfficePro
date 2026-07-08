@@ -355,3 +355,40 @@ def test_receive_requires_auth(api_client, sent_po):
     r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/receive",
                     json={"lines": [{"line_id": sent_po['line']['id'], "received_qty": 1}]})
     assert r.status_code == 401
+
+
+def test_receive_po_with_only_note_lines_returns_400(api_client, test_db, supplier_id):
+    """A SENT PO whose only line is a note (no product lines) has nothing
+    to receive against — all_lines is empty after filtering out notes."""
+    po_id = po_ctrl.create_po(supplier_id)
+    po_ctrl.update_po_status(po_id, "SENT")
+    lines_model.add_note(po_id, "Note only, no products")
+    client, key = api_client
+    r = client.post(f"/api/v1/purchase-orders/{po_id}/receive",
+                    json={"lines": [{"line_id": 1, "received_qty": 1}]},
+                    headers=_h(key))
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "BAD_REQUEST"
+
+
+def test_receive_non_integer_line_id_returns_400(api_client, sent_po):
+    client, key = api_client
+    r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/receive",
+                    json={"lines": [{"line_id": "abc", "received_qty": 5}]},
+                    headers=_h(key))
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "BAD_REQUEST"
+
+
+def test_receive_atomic_failure_returns_500(api_client, sent_po, monkeypatch):
+    monkeypatch.setattr(
+        po_ctrl, "receive_po_atomic",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("db exploded")),
+    )
+    line_id = sent_po["line"]["id"]
+    client, key = api_client
+    r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/receive",
+                    json={"lines": [{"line_id": line_id, "received_qty": 10}]},
+                    headers=_h(key))
+    assert r.status_code == 500
+    assert r.get_json()["error"] == "RECEIVE_FAILED"

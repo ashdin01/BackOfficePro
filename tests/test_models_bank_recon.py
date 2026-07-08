@@ -183,6 +183,12 @@ class TestSetStatus:
         conn.close()
         assert row["status"] == "IGNORED"
 
+    def test_set_matched_unknown_txn_does_not_raise(self, test_db):
+        recon_model.set_matched(99999, 1, 1)
+
+    def test_set_ignored_unknown_txn_does_not_raise(self, test_db):
+        recon_model.set_ignored(99999)
+
 
 # ── unmatch_transaction ───────────────────────────────────────────────────────
 
@@ -240,6 +246,29 @@ class TestUnmatchTransaction:
     def test_unmatch_unknown_txn_is_noop(self, test_db):
         recon_model.unmatch_transaction(99999)  # should not raise
 
+    def test_unmatch_txn_with_no_invoice_or_payment_link_is_safe(self, test_db):
+        """A MATCHED txn with no invoice/payment link (edge case) unmatches
+        cleanly, skipping both the payment delete and invoice recompute."""
+        pid = recon_model.save_profile(
+            name="Orphan Bank", delimiter=",", has_header=1, skip_rows=0,
+            date_format="%d/%m/%Y", amount_type="single",
+            col_date=0, col_amount=3, col_description=2,
+        )
+        recon_model.insert_transactions(pid, "BATCH-ORPHAN", [
+            {"txn_date": "2026-05-01", "amount": 10.00, "description": "Orphan"}
+        ])
+        txn_id = recon_model.get_transactions("BATCH-ORPHAN")[0]["id"]
+        from database.connection import get_connection
+        conn = get_connection()
+        conn.execute("UPDATE bank_transactions SET status='MATCHED' WHERE id=?", (txn_id,))
+        conn.commit()
+        conn.close()
+
+        recon_model.unmatch_transaction(txn_id)
+
+        row = recon_model.get_transactions("BATCH-ORPHAN")[0]
+        assert row["status"] == "UNMATCHED"
+
     def test_partial_payment_status_after_unmatch(self, test_db, customer_id):
         """After unmatching one of two payments the invoice reverts to PARTIAL."""
         pid = recon_model.save_profile(
@@ -268,3 +297,35 @@ class TestUnmatchTransaction:
         inv = invoice_model.get_by_id(inv_id)
         assert inv["amount_paid"] == pytest.approx(60.00)
         assert inv["status"] == "PARTIAL"
+
+    def test_unmatch_leaves_status_paid_when_other_payment_still_covers(
+        self, test_db, customer_id
+    ):
+        """If a remaining payment alone still covers the total, status stays
+        PAID after unmatching a different (extra) matched payment."""
+        inv_id = invoice_model.create(
+            "INV-U010", customer_id, "2026-05-01", "2026-06-07"
+        )
+        invoice_model.add_line(inv_id, "Goods", 1, 100.00, gst_rate=0.0)
+        invoice_model.update_status(inv_id, "SENT")
+
+        # A direct payment (not reconciled) that alone fully covers the invoice.
+        invoice_model.apply_payment(inv_id, customer_id, "2026-05-01", 100.00)
+        assert invoice_model.get_by_id(inv_id)["status"] == "PAID"
+
+        # A second, extra reconciled payment on top.
+        pid = recon_model.save_profile(
+            name="Extra Bank", delimiter=",", has_header=1, skip_rows=0,
+            date_format="%d/%m/%Y", amount_type="single",
+            col_date=0, col_amount=3, col_description=2,
+        )
+        recon_model.insert_transactions(pid, "BATCH-EXTRA", [
+            {"txn_date": "2026-05-02", "amount": 50.00, "description": "Extra"}
+        ])
+        txn_id = recon_model.get_transactions("BATCH-EXTRA")[0]["id"]
+        extra_pay_id, _, _ = invoice_model.apply_payment(inv_id, customer_id, "2026-05-02", 50.00)
+        recon_model.set_matched(txn_id, inv_id, extra_pay_id)
+
+        recon_model.unmatch_transaction(txn_id)
+
+        assert invoice_model.get_by_id(inv_id)["status"] == "PAID"

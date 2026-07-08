@@ -245,6 +245,27 @@ class TestGetAgedDebtors:
         bucket_sum = row["current"] + row["days_30"] + row["days_60"] + row["days_90plus"]
         assert bucket_sum == pytest.approx(row["total"])
 
+    def test_zero_outstanding_invoice_excluded_even_if_not_paid_status(
+        self, test_db, customer_id, db_conn
+    ):
+        """Defensive: an invoice whose amount_paid already equals its total but
+        whose status wasn't transitioned to PAID/VOID is still excluded."""
+        inv_id = self._make_invoice_with_balance(customer_id, "INV-A008", "2026-04-15")
+        db_conn.execute("UPDATE ar_invoices SET amount_paid = total WHERE id=?", (inv_id,))
+        db_conn.commit()
+        result = ar_ctrl.get_aged_debtors("2026-05-15")
+        assert result == []
+
+    def test_multiple_invoices_for_same_customer_accumulate_into_one_bucket(
+        self, test_db, customer_id
+    ):
+        self._make_invoice_with_balance(customer_id, "INV-A010", "2026-04-15", total=110.00)
+        self._make_invoice_with_balance(customer_id, "INV-A011", "2026-04-20", total=55.00)
+        result = ar_ctrl.get_aged_debtors("2026-05-15")
+        assert len(result) == 1
+        assert len(result[0]["invoices"]) == 2
+        assert result[0]["total"] == pytest.approx(165.00)
+
 
 # ── Invoice line management ───────────────────────────────────────────────────
 
@@ -447,6 +468,31 @@ class TestGenerateInvoicePdf:
         with pytest.raises(ValueError):
             ar_ctrl.generate_invoice_pdf(99999, output_path="/tmp/nope.pdf")
 
+    def test_default_path_uses_configured_pdf_dir(self, test_db, customer_id, tmp_path):
+        import models.settings as settings_model
+        settings_model.set_setting('ar_invoice_pdf_path', str(tmp_path))
+        inv_id, inv_num = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        invoice_model.add_line(inv_id, "Goods", 2, 10.00, gst_rate=10.0)
+
+        result = ar_ctrl.generate_invoice_pdf(inv_id)
+
+        assert result == os.path.join(str(tmp_path), f"{inv_num}.pdf")
+        assert os.path.exists(result)
+
+    def test_default_path_falls_back_to_home_when_unconfigured(
+        self, test_db, customer_id, tmp_path, monkeypatch
+    ):
+        import models.settings as settings_model
+        settings_model.set_setting('ar_invoice_pdf_path', '')
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path))
+        inv_id, inv_num = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        invoice_model.add_line(inv_id, "Goods", 2, 10.00, gst_rate=10.0)
+
+        result = ar_ctrl.generate_invoice_pdf(inv_id)
+
+        assert result == os.path.join(str(tmp_path), f"{inv_num}.pdf")
+        assert os.path.exists(result)
+
 
 # ── generate_statement_pdf ────────────────────────────────────────────────────
 
@@ -463,6 +509,29 @@ class TestGenerateStatementPdf:
     def test_unknown_customer_raises(self, test_db):
         with pytest.raises(ValueError):
             ar_ctrl.generate_statement_pdf(99999, "2026-01-01", "2026-12-31", output_path="/tmp/nope.pdf")
+
+    def test_default_path_uses_configured_pdf_dir(self, test_db, customer_id, tmp_path):
+        import models.settings as settings_model
+        settings_model.set_setting('ar_invoice_pdf_path', str(tmp_path))
+        customer = ar_ctrl.get_customer_by_id(customer_id)
+
+        result = ar_ctrl.generate_statement_pdf(customer_id, "2026-01-01", "2026-12-31")
+
+        assert result == os.path.join(str(tmp_path), f"STMT-{customer['code']}-2026-12-31.pdf")
+        assert os.path.exists(result)
+
+    def test_default_path_falls_back_to_home_when_unconfigured(
+        self, test_db, customer_id, tmp_path, monkeypatch
+    ):
+        import models.settings as settings_model
+        settings_model.set_setting('ar_invoice_pdf_path', '')
+        monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path))
+        customer = ar_ctrl.get_customer_by_id(customer_id)
+
+        result = ar_ctrl.generate_statement_pdf(customer_id, "2026-01-01", "2026-12-31")
+
+        assert result == os.path.join(str(tmp_path), f"STMT-{customer['code']}-2026-12-31.pdf")
+        assert os.path.exists(result)
 
 
 # ── create_invoice edge cases ─────────────────────────────────────────────────
@@ -690,6 +759,25 @@ class TestReconWrappers:
         txn_id = txns[0]["id"]
         ar_ctrl.set_recon_ignored(txn_id)
         ar_ctrl.unmatch_recon_transaction(txn_id)
+
+    def test_set_recon_matched(self, test_db, customer_id):
+        inv_id, _ = ar_ctrl.create_invoice(customer_id, "2026-05-15")
+        payment_id = ar_ctrl.record_payment(inv_id, 50.00)
+        pid = ar_ctrl.save_recon_profile(
+            name="MATCH CSV", delimiter=",", has_header=1, skip_rows=0,
+            date_format="%d/%m/%Y", amount_type="signed",
+        )
+        ar_ctrl.insert_recon_transactions(pid, "B4", [
+            {"txn_date": "2026-05-01", "amount": -50.0, "description": "Payment"}
+        ])
+        txn_id = ar_ctrl.get_recon_transactions("B4")[0]["id"]
+
+        ar_ctrl.set_recon_matched(txn_id, inv_id, payment_id)
+
+        matched = ar_ctrl.get_recon_transactions("B4")[0]
+        assert matched["status"] == "MATCHED"
+        assert matched["invoice_id"] == inv_id
+        assert matched["payment_id"] == payment_id
 
     def test_get_credit_note_by_id_none(self, test_db):
         assert ar_ctrl.get_credit_note_by_id(99999) is None

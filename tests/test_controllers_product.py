@@ -351,3 +351,146 @@ class TestProductControllerWrappers:
         )
         row = product_ctrl.get_product_by_barcode(product_barcode)
         assert row['sell_price'] == pytest.approx(9.99)
+
+    def test_save_product_blank_description_raises(self, test_db, product_barcode, dept_id, supplier_id):
+        with pytest.raises(ValueError, match="Description is required"):
+            product_ctrl.save_product(
+                barcode=product_barcode, description='   ', brand='', plu='',
+                supplier_sku='', pack_qty=1, pack_unit='EA', group_id=None,
+                department_id=dept_id, supplier_id=supplier_id, unit='EA',
+                sell_price=9.99, cost_price=5.00, tax_rate=10.0,
+                reorder_point=0, reorder_max=0, variable_weight=0, expected=1,
+                active=1, auto_reorder=0, product_suppliers=[],
+            )
+
+    def test_add_product_blank_description_raises(self, test_db, dept_id, supplier_id):
+        with pytest.raises(ValueError, match="Description is required"):
+            product_ctrl.add_product(
+                '9300000088883', '  ', dept_id,
+                supplier_id=supplier_id, sell_price=5.0, cost_price=3.0, tax_rate=10.0
+            )
+
+    def test_set_online_available_toggles_flag(self, test_db, product_barcode):
+        product_ctrl.set_online_available(product_barcode, True)
+        row = product_ctrl.get_product_by_barcode(product_barcode)
+        assert row['online_available'] == 1
+
+        product_ctrl.set_online_available(product_barcode, False)
+        row = product_ctrl.get_product_by_barcode(product_barcode)
+        assert row['online_available'] == 0
+
+    def test_get_product_suppliers_returns_junction_rows(
+        self, test_db, product_barcode, dept_id, supplier_id
+    ):
+        product_ctrl.save_product(
+            barcode=product_barcode, description='Test Product', brand='', plu='',
+            supplier_sku='', pack_qty=1, pack_unit='EA', group_id=None,
+            department_id=dept_id, supplier_id=supplier_id, unit='EA',
+            sell_price=9.99, cost_price=5.00, tax_rate=10.0,
+            reorder_point=0, reorder_max=0, variable_weight=0, expected=1,
+            active=1, auto_reorder=0,
+            product_suppliers=[{
+                'supplier_id': supplier_id, 'is_default': True,
+                'supplier_sku': 'SKU-1', 'pack_qty': 6, 'pack_unit': 'CTN',
+            }],
+        )
+        rows = product_ctrl.get_product_suppliers(product_barcode)
+        assert len(rows) == 1
+        assert rows[0]['supplier_id'] == supplier_id
+        assert rows[0]['is_default'] is True
+        assert rows[0]['supplier_sku'] == 'SKU-1'
+        assert rows[0]['pack_qty'] == 6
+
+    def test_get_product_suppliers_fallback_when_no_junction_rows(
+        self, test_db, product_barcode, supplier_id
+    ):
+        rows = product_ctrl.get_product_suppliers(
+            product_barcode, fallback_supplier_id=supplier_id,
+            fallback_sku='FBSKU', fallback_pack_qty=3, fallback_pack_unit='CTN',
+        )
+        assert len(rows) == 1
+        assert rows[0]['supplier_id'] == supplier_id
+        assert rows[0]['is_default'] is True
+        assert rows[0]['supplier_sku'] == 'FBSKU'
+        assert rows[0]['pack_qty'] == 3
+
+    def test_find_product_image_returns_path_when_present(
+        self, test_db, product_barcode, tmp_path, monkeypatch
+    ):
+        import config.settings as cfg
+        monkeypatch.setattr(cfg, 'DATA_DIR', str(tmp_path))
+        img_dir = tmp_path / 'images'
+        img_dir.mkdir()
+        img_path = img_dir / f'{product_barcode}.jpg'
+        img_path.write_bytes(b'fake-jpg-bytes')
+
+        result = product_ctrl.find_product_image(product_barcode)
+        assert result == str(img_path)
+
+    def test_prepare_image_destination_removes_alternate_extension_file(
+        self, test_db, product_barcode, tmp_path, monkeypatch
+    ):
+        import config.settings as cfg
+        monkeypatch.setattr(cfg, 'DATA_DIR', str(tmp_path))
+        img_dir = tmp_path / 'images'
+        img_dir.mkdir()
+        old_png = img_dir / f'{product_barcode}.png'
+        old_png.write_bytes(b'old-png-bytes')
+
+        path = product_ctrl.prepare_image_destination(product_barcode)
+
+        assert not old_png.exists()
+        assert path.endswith('.jpg')
+
+    def test_delete_product_image_removes_existing_file(
+        self, test_db, product_barcode, tmp_path, monkeypatch
+    ):
+        import config.settings as cfg
+        monkeypatch.setattr(cfg, 'DATA_DIR', str(tmp_path))
+        img_dir = tmp_path / 'images'
+        img_dir.mkdir()
+        img_path = img_dir / f'{product_barcode}.jpg'
+        img_path.write_bytes(b'fake-jpg-bytes')
+
+        product_ctrl.delete_product_image(product_barcode)
+
+        assert not img_path.exists()
+
+    def test_get_product_by_plu_found_via_plu_barcode_map(
+        self, test_db, db_conn, product_barcode
+    ):
+        db_conn.execute(
+            "INSERT INTO plu_barcode_map (plu, barcode) VALUES (5000, ?)", (product_barcode,)
+        )
+        db_conn.commit()
+        result = product_ctrl.get_product_by_plu(5000)
+        assert result is not None
+        assert result['barcode'] == product_barcode
+
+    def test_get_product_by_plu_found_via_products_plu_column(
+        self, test_db, product_barcode
+    ):
+        product_ctrl.set_product_plu(product_barcode, '6000')
+        result = product_ctrl.get_product_by_plu(6000)
+        assert result is not None
+        assert result['barcode'] == product_barcode
+
+    def test_get_product_by_plu_found_via_selling_unit_plu(
+        self, test_db, product_barcode
+    ):
+        su_barcode = '9300000099778'
+        product_ctrl.add_selling_unit(product_barcode, su_barcode, '7000', 'Half', 0.5, 2.00)
+        result = product_ctrl.get_product_by_plu(7000)
+        assert result is not None
+        assert result['barcode'] == su_barcode
+
+    def test_get_product_for_pos_selling_unit_branch(self, test_db, product_barcode):
+        su_barcode = '9300000099779'
+        product_ctrl.add_selling_unit(product_barcode, su_barcode, '7001', 'Half', 0.5, 2.00)
+        product_ctrl.adjust_soh(product_barcode, 4, 'RECEIPT')
+
+        result = product_ctrl.get_product_for_pos(su_barcode)
+
+        assert result is not None
+        assert result['master_barcode'] == product_barcode
+        assert result['soh_qty'] == 8  # 4 units / 0.5 unit_qty per selling unit

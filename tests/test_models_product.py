@@ -86,6 +86,26 @@ def test_get_all_includes_inactive(test_db, db_conn, dept_id, supplier_id):
     assert 'Inactive B' in descriptions
 
 
+def test_get_all_active_only_with_nonzero_inactive_included(test_db, db_conn, dept_id, supplier_id):
+    """active_only=True + include_nonzero_inactive=True: an inactive product
+    still shows up if it has nonzero stock (e.g. needs a stocktake write-off
+    before it can be safely deactivated), but a zero-stock inactive one doesn't."""
+    _add_product(db_conn, '8888888888881', 'Active C', dept_id, supplier_id, active=1)
+    _add_product(db_conn, '8888888888882', 'Inactive With Stock', dept_id, supplier_id, active=0)
+    _add_product(db_conn, '8888888888883', 'Inactive No Stock', dept_id, supplier_id, active=0)
+    db_conn.execute(
+        "INSERT INTO stock_on_hand (barcode, quantity) VALUES ('8888888888882', 5)"
+    )
+    db_conn.commit()
+
+    rows = product_model.get_all(active_only=True, include_nonzero_inactive=True)
+    descriptions = [r['description'] for r in rows]
+
+    assert 'Active C' in descriptions
+    assert 'Inactive With Stock' in descriptions
+    assert 'Inactive No Stock' not in descriptions
+
+
 # ── add ───────────────────────────────────────────────────────────────────────
 
 def test_add_product(test_db, dept_id, supplier_id):

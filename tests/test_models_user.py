@@ -48,6 +48,16 @@ class TestVerifyPin:
     def test_nonexistent_user_returns_false(self, test_db):
         assert user_model.verify_pin("nobody", "1234") is False
 
+    def test_user_with_no_pin_set_returns_false(self, test_db):
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO users (username, full_name, role, pin, active) "
+            "VALUES ('nopin', 'No Pin User', 'STAFF', NULL, 1)"
+        )
+        conn.commit()
+        conn.close()
+        assert user_model.verify_pin("nopin", "1234") is False
+
     def test_legacy_plaintext_pin_authenticates(self, test_db):
         """A plaintext PIN stored in the DB (pre-hash era) must still work."""
         conn = get_connection()
@@ -89,6 +99,29 @@ class TestVerifyPin:
         user = user_model.get_by_username("sha2user")
         assert user["pin"].startswith("pbkdf2:")
         assert user_model.verify_pin("sha2user", "7777") is True
+
+    def test_legacy_plaintext_pin_wrong_guess_returns_false(self, test_db):
+        """A legacy (non-pbkdf2) stored PIN that doesn't match sha256 or
+        plaintext falls through to the final `return False`."""
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO users (username, full_name, role, pin, active) "
+            "VALUES ('legacy', 'Legacy User', 'STAFF', '5678', 1)"
+        )
+        conn.commit()
+        conn.close()
+        assert user_model.verify_pin("legacy", "0000") is False
+
+    def test_malformed_pbkdf2_hash_returns_false_without_raising(self, test_db):
+        """A corrupted pbkdf2:-prefixed stored value must not raise — just fail closed."""
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO users (username, full_name, role, pin, active) "
+            "VALUES ('corrupt', 'Corrupt User', 'STAFF', 'pbkdf2:not-valid-hex', 1)"
+        )
+        conn.commit()
+        conn.close()
+        assert user_model.verify_pin("corrupt", "1234") is False
 
 
 class TestSetPin:
@@ -160,6 +193,68 @@ class TestUpdate:
         updated = user_model.get_by_username("jdoe")
         assert updated["full_name"] == "Jane Doe"
         assert updated["role"] == "MANAGER"
+
+    def test_update_nonexistent_user_id_does_not_raise(self, test_db):
+        """No matching row -> `if old:` is falsy, record_changes is skipped."""
+        user_model.update(99999, "ghost", "Ghost User", "STAFF")
+
+    def test_update_with_unchanged_username_skips_conflict_check(self, test_db, monkeypatch):
+        """Same username -> _check_cross_store_conflict must not even be called."""
+        import models.user as um
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        called = []
+        monkeypatch.setattr(um, "_check_cross_store_conflict", lambda u: called.append(u))
+        user_model.update(user["id"], "jdoe", "Jane Doe", "MANAGER")
+        assert called == []
+
+    def test_update_renaming_username_checks_cross_store_conflict(self, test_db, monkeypatch):
+        import models.user as um
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        called = []
+        monkeypatch.setattr(um, "_check_cross_store_conflict", lambda u: called.append(u))
+        user_model.update(user["id"], "jdoe2", "Jane Doe", "MANAGER")
+        assert called == ["jdoe2"]
+
+    def test_update_renamed_username_raises_on_cross_store_conflict(self, test_db, monkeypatch):
+        import models.user_directory as ud
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        monkeypatch.setattr(
+            ud, "find_other_store_conflict",
+            lambda username, exclude_db_path=None: "Other Store",
+        )
+        with pytest.raises(ValueError, match="already in use"):
+            user_model.update(user["id"], "taken_username", "Jane Doe", "MANAGER")
+
+
+class TestCrossStoreConflict:
+    def test_create_raises_when_username_used_at_other_store(self, test_db, monkeypatch):
+        import models.user_directory as ud
+        monkeypatch.setattr(
+            ud, "find_other_store_conflict",
+            lambda username, exclude_db_path=None: "Other Store",
+        )
+        with pytest.raises(ValueError, match="already in use at Other Store"):
+            user_model.create("taken", "Someone", "STAFF", "1234")
+
+    def test_create_succeeds_when_no_conflict(self, test_db, monkeypatch):
+        import models.user_directory as ud
+        monkeypatch.setattr(
+            ud, "find_other_store_conflict",
+            lambda username, exclude_db_path=None: None,
+        )
+        user_model.create("free_user", "Someone", "STAFF", "1234")
+        assert user_model.get_by_username("free_user") is not None
+
+
+class TestSetActiveAndSetPinByIdNonexistent:
+    def test_set_active_nonexistent_user_id_does_not_raise(self, test_db):
+        user_model.set_active(99999, True)
+
+    def test_set_pin_by_id_nonexistent_user_id_does_not_raise(self, test_db):
+        user_model.set_pin_by_id(99999, "1234")
 
 
 # ── PIN validation ────────────────────────────────────────────────────────────

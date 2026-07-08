@@ -391,6 +391,39 @@ class TestApplyPaymentDuplicate:
         )
         assert status == "PARTIAL"
 
+    def test_zero_amount_payment_leaves_status_none(self, test_db, customer_id, invoice_id):
+        """A $0 payment (bypassing the controller's amount>0 validation, at
+        the model layer directly) leaves total_paid at 0 and status None."""
+        invoice_model.add_line(invoice_id, "Item", 1, 100.00, gst_rate=10.0)
+        _, total, status = invoice_model.apply_payment(
+            invoice_id, customer_id, "2026-05-20", 0.0
+        )
+        assert total == pytest.approx(0.0)
+        assert status is None
+
+    def test_non_payment_ref_integrity_error_is_reraised(self, test_db, invoice_id):
+        """A genuine constraint failure unrelated to payment_ref (e.g. a bad
+        customer_id FK) must propagate, not be swallowed as a 'duplicate'."""
+        import sqlite3
+        with pytest.raises(sqlite3.IntegrityError):
+            invoice_model.apply_payment(invoice_id, 99999, "2026-05-20", 50.00)
+
+
+# ── Missing-id no-op branches ───────────────────────────────────────────────────
+
+class TestOperationsOnMissingId:
+    def test_update_status_on_missing_invoice_does_not_raise(self, test_db):
+        invoice_model.update_status(99999, "SENT")
+
+    def test_void_invoice_on_missing_invoice_does_not_raise(self, test_db):
+        invoice_model.void_invoice(99999)
+
+    def test_update_line_on_missing_line_does_not_raise(self, test_db):
+        invoice_model.update_line(99999, "Ghost", 1, 10.00)
+
+    def test_delete_line_on_missing_line_does_not_raise(self, test_db):
+        invoice_model.delete_line(99999)
+
 
 # ── TestGetUnpaidForAgedDebtors ────────────────────────────────────────────────
 

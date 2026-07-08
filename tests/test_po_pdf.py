@@ -200,3 +200,135 @@ def test_pdf_returns_output_path_unchanged(tmp_path, _po):
     os.makedirs(os.path.dirname(explicit_path), exist_ok=True)
     result = generate_po_pdf(po_id, explicit_path)
     assert result == explicit_path
+
+
+# ── Missing PO ─────────────────────────────────────────────────────────────────
+
+def test_missing_po_raises_value_error(tmp_path, test_db):
+    with pytest.raises(ValueError, match="not found"):
+        generate_po_pdf(99999, str(tmp_path / "nope.pdf"))
+
+
+# ── Store details header line ───────────────────────────────────────────────────
+
+def test_pdf_renders_store_address_phone_and_abn(tmp_path, test_db, db_conn, _po):
+    db_conn.executemany(
+        "UPDATE settings SET value=? WHERE key=?",
+        [
+            ("1 Test Street, Testville", "store_address"),
+            ("03 5555 5555", "store_phone"),
+            ("12 345 678 901", "store_abn"),
+        ],
+    )
+    db_conn.commit()
+    po_id = _po("PO")
+    out = str(tmp_path / "smoke_store_details.pdf")
+    result = generate_po_pdf(po_id, out)
+    assert result == out
+    assert os.path.getsize(out) > 0
+
+
+# ── Supplier payment terms ───────────────────────────────────────────────────────
+
+def test_pdf_renders_supplier_payment_terms(tmp_path, test_db, db_conn, supplier_id, _po):
+    db_conn.execute(
+        "UPDATE suppliers SET payment_terms='Net 30' WHERE id=?", (supplier_id,)
+    )
+    db_conn.commit()
+    po_id = _po("PO")
+    out = str(tmp_path / "smoke_terms.pdf")
+    result = generate_po_pdf(po_id, out)
+    assert result == out
+    assert os.path.getsize(out) > 0
+
+
+# ── PO notes ──────────────────────────────────────────────────────────────────
+
+def test_pdf_renders_po_notes(tmp_path, test_db, db_conn, supplier_id, product_barcode):
+    db_conn.execute(
+        "INSERT INTO purchase_orders (po_number, supplier_id, status, po_type, notes)"
+        " VALUES ('SMOKE-NOTES-001', ?, 'DRAFT', 'PO', 'Deliver to back door')",
+        (supplier_id,),
+    )
+    db_conn.commit()
+    po_id = db_conn.execute(
+        "SELECT id FROM purchase_orders WHERE po_number='SMOKE-NOTES-001'"
+    ).fetchone()["id"]
+    db_conn.execute(
+        "INSERT INTO po_lines"
+        " (po_id, barcode, description, ordered_qty, unit_cost, pack_qty)"
+        " VALUES (?, ?, 'Test Product', 2, 1.50, 1)",
+        (po_id, product_barcode),
+    )
+    db_conn.commit()
+
+    out = str(tmp_path / "smoke_notes.pdf")
+    result = generate_po_pdf(po_id, out)
+    assert result == out
+    assert os.path.getsize(out) > 0
+
+
+# ── Non-numeric unit cost ────────────────────────────────────────────────────────
+
+def test_pdf_handles_non_numeric_unit_cost(tmp_path, test_db, db_conn, supplier_id, product_barcode):
+    """A line with a corrupt/non-numeric unit_cost renders with placeholder text
+    instead of crashing (the except TypeError/ValueError branch)."""
+    db_conn.execute(
+        "INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)"
+        " VALUES ('SMOKE-BADCOST-001', ?, 'DRAFT', 'PO')",
+        (supplier_id,),
+    )
+    db_conn.commit()
+    po_id = db_conn.execute(
+        "SELECT id FROM purchase_orders WHERE po_number='SMOKE-BADCOST-001'"
+    ).fetchone()["id"]
+    db_conn.execute(
+        "INSERT INTO po_lines"
+        " (po_id, barcode, description, ordered_qty, unit_cost, pack_qty)"
+        " VALUES (?, ?, 'Test Product', 2, 'N/A', 1)",
+        (po_id, product_barcode),
+    )
+    db_conn.commit()
+
+    out = str(tmp_path / "smoke_badcost.pdf")
+    result = generate_po_pdf(po_id, out)
+    assert result == out
+    assert os.path.getsize(out) > 0
+
+
+# ── Carton-mode line with pack_qty > 1 ───────────────────────────────────────────
+
+def test_pdf_carton_mode_with_pack_qty_shows_carton_and_unit_count(
+    tmp_path, test_db, db_conn, dept_id, supplier_id
+):
+    """PO (carton-mode) line for a product with pack_qty > 1 shows both the
+    carton count and the converted unit count (qty_str's pack_qty>1 branch).
+    The product_barcode fixture pins pack_qty=1, so this needs its own product."""
+    bc = "9300000077001"
+    db_conn.execute("""
+        INSERT INTO products
+            (barcode, description, department_id, supplier_id,
+             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
+        VALUES (?, 'Carton Product', ?, ?, 5.00, 3.00, 10.0, 6, 'CTN', 1, 'EA')
+    """, (bc, dept_id, supplier_id))
+    db_conn.execute(
+        "INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)"
+        " VALUES ('SMOKE-PACKQTY-001', ?, 'DRAFT', 'PO')",
+        (supplier_id,),
+    )
+    db_conn.commit()
+    po_id = db_conn.execute(
+        "SELECT id FROM purchase_orders WHERE po_number='SMOKE-PACKQTY-001'"
+    ).fetchone()["id"]
+    db_conn.execute(
+        "INSERT INTO po_lines"
+        " (po_id, barcode, description, ordered_qty, unit_cost, pack_qty)"
+        " VALUES (?, ?, 'Carton Product', 3, 12.00, 6)",
+        (po_id, bc),
+    )
+    db_conn.commit()
+
+    out = str(tmp_path / "smoke_packqty.pdf")
+    result = generate_po_pdf(po_id, out)
+    assert result == out
+    assert os.path.getsize(out) > 0

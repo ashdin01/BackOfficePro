@@ -170,6 +170,28 @@ def test_departments_have_required_fields(api_client):
         assert "name" in dept
 
 
+def test_department_groups_returns_created_group(api_client, db_conn, dept_id):
+    client, key = api_client
+    db_conn.execute(
+        "INSERT INTO product_groups (department_id, code, name) VALUES (?, 'FRUIT', 'Fruit')",
+        (dept_id,)
+    )
+    db_conn.commit()
+
+    r = client.get(f"/api/v1/departments/{dept_id}/groups", headers=_h(key))
+
+    assert r.status_code == 200
+    groups = r.get_json()
+    assert any(g["code"] == "FRUIT" and g["name"] == "Fruit" for g in groups)
+
+
+def test_department_groups_empty_for_unknown_department(api_client):
+    client, key = api_client
+    r = client.get("/api/v1/departments/99999/groups", headers=_h(key))
+    assert r.status_code == 200
+    assert r.get_json() == []
+
+
 # ── Products list ─────────────────────────────────────────────────────────────
 
 def test_products_list_returns_list(api_client):
@@ -221,6 +243,19 @@ def test_product_by_plu_not_found(api_client):
     assert r.status_code == 404
 
 
+def test_product_by_plu_found(api_client, db_conn, product_barcode):
+    client, key = api_client
+    db_conn.execute(
+        "INSERT INTO plu_barcode_map (plu, barcode) VALUES (12345, ?)", (product_barcode,)
+    )
+    db_conn.commit()
+
+    r = client.get("/api/v1/products/plu/12345", headers=_h(key))
+
+    assert r.status_code == 200
+    assert r.get_json()["barcode"] == product_barcode
+
+
 # ── Product image ─────────────────────────────────────────────────────────────
 
 def test_product_image_not_found(api_client, product_barcode):
@@ -240,6 +275,12 @@ def test_product_image_delete_nonexistent_returns_ok(api_client, product_barcode
     r = client.delete(f"/api/v1/products/{product_barcode}/image", headers=_h(key))
     assert r.status_code == 200
     assert r.get_json()["ok"] is False   # file did not exist
+
+
+def test_product_image_delete_invalid_barcode_returns_400(api_client):
+    client, key = api_client
+    r = client.delete("/api/v1/products/bad!barcode/image", headers=_h(key))
+    assert r.status_code == 400
 
 
 # ── Stocktake sessions ────────────────────────────────────────────────────────
@@ -293,6 +334,18 @@ def test_add_count_missing_fields_is_400(api_client):
     sid = client.post("/api/v1/sessions", json={"label": "Count Test"}, headers=_h(key)).get_json()["id"]
     r = client.post(f"/api/v1/sessions/{sid}/counts", json={}, headers=_h(key))
     assert r.status_code == 400
+
+
+def test_add_count_non_numeric_qty_is_400(api_client):
+    client, key = api_client
+    sid = client.post("/api/v1/sessions", json={"label": "Count Test"}, headers=_h(key)).get_json()["id"]
+    r = client.post(
+        f"/api/v1/sessions/{sid}/counts",
+        json={"barcode": "0000000000000", "qty": "not-a-number"},
+        headers=_h(key),
+    )
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "INVALID_PARAM"
 
 
 def test_add_count_unknown_barcode_is_404(api_client):
@@ -513,6 +566,19 @@ def test_read_rate_limit(api_client):
     assert r.status_code == 429
 
 
+def test_rate_limiter_prunes_expired_entries(api_client):
+    """An entry older than the sliding window must be pruned (popleft), not
+    just left to count against the limit forever."""
+    from collections import deque
+    import api_server
+
+    expired = time.monotonic() - api_server._SALE_WINDOW - 1
+    api_server._sale_clients["9.9.9.9"] = deque([expired])
+
+    assert api_server._sale_rate_ok("9.9.9.9") is True
+    assert len(api_server._sale_clients["9.9.9.9"]) == 1  # only the fresh entry remains
+
+
 def test_read_rate_limit_does_not_affect_pos_sale(api_client, product_barcode):
     """Filling the read window must not block /pos/sale, which has its own limiter."""
     from collections import deque
@@ -633,6 +699,30 @@ def test_pos_sale_generic_error_returns_500(api_client, product_barcode, monkeyp
     assert r.status_code == 500
 
 
+def test_pos_sale_non_lock_operational_error_returns_500(api_client, product_barcode, monkeypatch):
+    """An sqlite3.OperationalError NOT about a lock (e.g. schema drift) is a
+    distinct branch from the 'database is locked' 503 path — also 500."""
+    import sqlite3
+    import controllers.sales_report_controller as sr
+    monkeypatch.setattr(
+        sr, "record_pos_sale",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            sqlite3.OperationalError("no such table: sales_daily")
+        ),
+    )
+    client, key = api_client
+    payload = {
+        "reference": "ERR-SCHEMA-001",
+        "sale_date": "2026-05-01",
+        "operator": "test",
+        "items": [{"barcode": product_barcode, "qty": 1,
+                   "unit_price": 3.50, "line_total": 3.50, "description": "X"}],
+    }
+    r = client.post("/api/v1/pos/sale", json=payload, headers=_h(key))
+    assert r.status_code == 500
+    assert r.get_json()["error"] == "SALE_ERROR"
+
+
 # ── add_count edge cases ──────────────────────────────────────────────────────
 
 def test_add_count_qty_over_limit_returns_400(api_client, db_conn, supplier_id, product_barcode):
@@ -682,3 +772,63 @@ def test_bundles_with_eligible_items(api_client, db_conn, product_barcode):
     b = next((b for b in bundles if b["id"] == bundle_id), None)
     assert b is not None
     assert len(b["eligible"]) == 1
+
+
+# ── Internals: API key double-checked locking, teardown ───────────────────────
+
+def test_teardown_closes_thread_connection_when_not_testing(api_client, monkeypatch):
+    """In real (non-TESTING) operation, the teardown handler must release the
+    per-request DB connection via close_thread_connection()."""
+    import api_server
+    import database.connection as conn_mod
+
+    called = []
+    monkeypatch.setattr(conn_mod, "close_thread_connection", lambda: called.append(1))
+
+    client, key = api_client
+    api_server.app.config["TESTING"] = False
+    try:
+        r = client.get("/api/v1/health", headers=_h(key))
+        assert r.status_code == 200
+    finally:
+        api_server.app.config["TESTING"] = True
+
+    assert called == [1]
+
+
+def test_concurrent_api_key_resolution_only_resolves_once(test_db, monkeypatch):
+    """Double-checked locking: a second thread arriving while the first is
+    still resolving the key must see the cache already populated (hit the
+    inner re-check) rather than resolving it again."""
+    import threading
+    import api_server
+    import utils.api_key as api_key_mod
+
+    api_server._api_key_cache = ""
+    call_count = {"n": 0}
+    started  = threading.Event()
+    proceed  = threading.Event()
+
+    def slow_resolve():
+        call_count["n"] += 1
+        started.set()
+        proceed.wait(timeout=2)
+        return "resolved-key-123"
+
+    monkeypatch.setattr(api_key_mod, "resolve_api_key", slow_resolve)
+
+    results = []
+    t1 = threading.Thread(target=lambda: results.append(api_server._get_api_key()))
+    t1.start()
+    assert started.wait(timeout=2), "thread 1 never entered resolve_api_key"
+
+    t2 = threading.Thread(target=lambda: results.append(api_server._get_api_key()))
+    t2.start()
+    time.sleep(0.05)  # give thread 2 a moment to block on the lock
+    proceed.set()
+
+    t1.join(timeout=2)
+    t2.join(timeout=2)
+
+    assert results == ["resolved-key-123", "resolved-key-123"]
+    assert call_count["n"] == 1, "resolve_api_key should only run once for concurrent callers"

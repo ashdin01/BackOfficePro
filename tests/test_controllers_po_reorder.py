@@ -129,6 +129,20 @@ class TestGetReorderRecommendations:
         assert recs == []
 
 
+# ── get_sales_for_barcode / get_sales_for_barcode_range wrappers ──────────────
+
+class TestSalesWrappers:
+    def test_get_sales_for_barcode_returns_none_when_unmapped(self, test_db):
+        from controllers.po_reorder_controller import get_sales_for_barcode
+        assert get_sales_for_barcode('0000000000000') is None
+
+    def test_get_sales_for_barcode_range_returns_none_when_unmapped(self, test_db):
+        from controllers.po_reorder_controller import get_sales_for_barcode_range
+        assert get_sales_for_barcode_range(
+            '0000000000000', '2026-01-01', '2026-01-31'
+        ) is None
+
+
 # ── get_auto_reorder_items ─────────────────────────────────────────────────────
 
 class TestGetAutoReorderItems:
@@ -279,6 +293,48 @@ class TestAutoPopulatePoLines:
         ).fetchall()
         assert len(lines) >= 1
 
+    def test_auto_reorder_item_added_when_not_already_on_po(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        """A product flagged auto_reorder=1 that is NOT also caught by the
+        reorder-point pass gets its own line, and the banner mentions it."""
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011160001',
+                             'Auto Reorder Product', reorder_point=0, reorder_max=0,
+                             auto_reorder=1, pack_qty=6)
+        _set_soh(db_conn, bc, 5)  # above reorder_point=0, so excluded from reorder-point pass
+        _link_supplier(db_conn, bc, supplier_id)
+        po_id = create_po(supplier_id)
+
+        banner = auto_populate_po_lines(po_id, supplier_id)
+
+        lines = db_conn.execute(
+            "SELECT * FROM po_lines WHERE po_id=? AND barcode=?", (po_id, bc)
+        ).fetchall()
+        assert len(lines) == 1
+        assert lines[0]['ordered_qty'] == 1
+        assert 'on-reorder item' in banner
+
+    def test_auto_reorder_item_already_on_po_is_not_duplicated(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        """An auto_reorder=1 item manually added to the PO beforehand must be
+        skipped by the auto-reorder pass, not duplicated."""
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011160002',
+                             'Auto Reorder Already Added', reorder_point=0, reorder_max=0,
+                             auto_reorder=1, pack_qty=1)
+        _set_soh(db_conn, bc, 5)
+        _link_supplier(db_conn, bc, supplier_id)
+        po_id = create_po(supplier_id)
+        add_po_line(po_id, bc, 'Auto Reorder Already Added', ordered_qty=3, unit_cost=2.00)
+
+        auto_populate_po_lines(po_id, supplier_id)
+
+        lines = db_conn.execute(
+            "SELECT * FROM po_lines WHERE po_id=? AND barcode=?", (po_id, bc)
+        ).fetchall()
+        assert len(lines) == 1
+        assert lines[0]['ordered_qty'] == 3
+
 
 # ── reload_reorder_recommendations ────────────────────────────────────────────
 
@@ -304,6 +360,22 @@ class TestReloadReorderRecommendations:
         result = reload_reorder_recommendations(po_id, supplier_id)
         # Returns None (no recs at all) or 0 (all already on PO) — either is correct
         assert result in (None, 0)
+
+    def test_returns_zero_deterministically_when_still_below_reorder_point(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        """A very high reorder_point guarantees the product stays in recs
+        even after the on-order line is added, forcing the real `return 0`
+        (all recs already on PO) rather than the None (no recs at all) branch."""
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011140099',
+                             'Reload Deterministic', reorder_point=1000, reorder_max=2000)
+        _set_soh(db_conn, bc, 1)
+        po_id = create_po(supplier_id)
+        add_po_line(po_id, bc, 'Reload Deterministic', ordered_qty=1, unit_cost=2.00)
+
+        result = reload_reorder_recommendations(po_id, supplier_id)
+
+        assert result == 0
 
     def test_returns_count_of_newly_added_lines(self, test_db, db_conn, dept_id, supplier_id):
         bc = _insert_product(db_conn, dept_id, supplier_id, '9300011140002',
@@ -361,6 +433,34 @@ class TestLookupProductForPO:
         po_id = create_po(supplier_id)
         result = lookup_product_for_po(bc, po_id, supplier_id, unit_mode=True)
         assert result['suggested_qty'] == 1
+
+    def test_loop_continues_past_non_matching_existing_lines(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        """An existing line for a *different* barcode must not short-circuit
+        the already-on-po check — the loop should continue past it."""
+        bc_other = _insert_product(db_conn, dept_id, supplier_id, '9300011150010',
+                                   'Other Product')
+        bc_target = _insert_product(db_conn, dept_id, supplier_id, '9300011150011',
+                                    'Target Product')
+        _link_supplier(db_conn, bc_target, supplier_id)
+        po_id = create_po(supplier_id)
+        add_po_line(po_id, bc_other, 'Other Product', ordered_qty=1, unit_cost=2.00)
+
+        result = lookup_product_for_po(bc_target, po_id, supplier_id, unit_mode=False)
+
+        assert result is not None
+
+    def test_no_supplier_id_skips_link_check(self, test_db, db_conn, dept_id, supplier_id):
+        """supplier_id=None (falsy) must skip the product_suppliers link check
+        entirely, rather than raising not_linked."""
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011150012',
+                             'No Supplier Filter')
+        po_id = create_po(supplier_id)
+
+        result = lookup_product_for_po(bc, po_id, None, unit_mode=False)
+
+        assert result is not None
 
 
 # ── Milk forecast path ────────────────────────────────────────────────────────
@@ -485,3 +585,52 @@ class TestMilkForecastPath:
         ).fetchall()
         # Without delivery_days, get_milk_order_recommendations returns []
         assert len(lines) == 0
+
+    def test_milk_product_uses_sku_fallback_when_not_plu_mapped(
+        self, test_db, db_conn, supplier_id
+    ):
+        """A milk product with no plu_barcode_map row but a products.sku value
+        falls back to the sku as its PLU key (still renders fine with no
+        sales history found under that key)."""
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        db_conn.execute("UPDATE products SET sku='SKU999' WHERE barcode=?", (bc,))
+        db_conn.commit()
+        po_id = create_po(supplier_id)
+
+        banner = auto_populate_po_lines(po_id, supplier_id)
+
+        lines = db_conn.execute(
+            "SELECT * FROM po_lines WHERE po_id=? AND barcode=?", (po_id, bc)
+        ).fetchall()
+        assert len(lines) == 1
+
+    def test_milk_line_no_warning_when_sales_history_exists(
+        self, test_db, db_conn, supplier_id
+    ):
+        import datetime
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        db_conn.execute(
+            "INSERT INTO plu_barcode_map (plu, barcode) VALUES (12345, ?)", (bc,)
+        )
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES (?, '12345', 'Full Cream Milk 2L', 10, 30.00)
+        """, (datetime.date.today().isoformat(),))
+        db_conn.commit()
+        po_id = create_po(supplier_id)
+
+        auto_populate_po_lines(po_id, supplier_id)
+
+        lines = db_conn.execute(
+            "SELECT notes FROM po_lines WHERE po_id=? AND barcode=?", (po_id, bc)
+        ).fetchall()
+        assert len(lines) == 1
+        assert 'no sales history' not in (lines[0]['notes'] or '').lower()

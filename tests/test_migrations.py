@@ -66,6 +66,104 @@ class TestCheckIntegrity:
 
         assert any("gap" in r.message.lower() for r in caplog.records)
 
+    def test_returns_when_db_meta_has_no_version_row(self, tmp_path, monkeypatch):
+        self._fresh_db(tmp_path, monkeypatch)
+        conn = conn_mod.get_connection()
+        conn.execute("DELETE FROM db_meta")
+        conn.commit()
+        mig._check_integrity(conn)  # must not raise, just return early
+        conn.release()
+
+    def test_skips_drift_check_when_frozen(self, tmp_path, monkeypatch):
+        """A corrupted checksum would normally raise, but the drift check is
+        skipped entirely for frozen (PyInstaller) builds."""
+        import sys
+        db_path = self._fresh_db(tmp_path, monkeypatch)
+        mig.apply_migrations()
+
+        c = sqlite3.connect(db_path)
+        c.execute("UPDATE migration_log SET checksum='deadbeef' WHERE version=2")
+        c.commit()
+        c.close()
+        conn_mod.invalidate_all_connections()
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        conn = conn_mod.get_connection()
+        mig._check_integrity(conn)  # must not raise despite corrupted checksum
+        conn.release()
+
+    def test_skips_logged_version_no_longer_in_registry(self, tmp_path, monkeypatch):
+        """A migration_log entry for a version number removed from _MIGRATIONS
+        (e.g. old history) is skipped rather than crashing the drift check."""
+        db_path = self._fresh_db(tmp_path, monkeypatch)
+        mig.apply_migrations()
+
+        c = sqlite3.connect(db_path)
+        c.execute("""
+            INSERT INTO migration_log (version, applied_at, description, checksum)
+            VALUES (99999, datetime('now'), 'no longer registered', 'whatever')
+        """)
+        c.commit()
+        c.close()
+        conn_mod.invalidate_all_connections()
+
+        conn = conn_mod.get_connection()
+        mig._check_integrity(conn)  # must not raise
+        conn.release()
+
+
+# ── _add_column ──────────────────────────────────────────────────────────────
+
+class TestAddColumn:
+    def test_reraises_non_duplicate_column_error(self, tmp_path, monkeypatch):
+        db_path = str(tmp_path / "addcol.db")
+        monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
+        c = sqlite3.connect(db_path)
+        c.executescript(SCHEMA)
+        c.close()
+        conn = conn_mod.get_connection()
+        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+            mig._add_column(conn, "ALTER TABLE nonexistent_table ADD COLUMN x TEXT")
+        conn.release()
+
+
+# ── _fn_checksum ─────────────────────────────────────────────────────────────
+
+class TestFnChecksum:
+    def test_falls_back_to_bytecode_when_source_unavailable(self):
+        """A function with no retrievable source (e.g. exec()'d) must still
+        produce a stable checksum via the marshalled-bytecode fallback."""
+        ns = {}
+        exec("def _dynamic_fn(conn): pass", ns)
+        fn = ns["_dynamic_fn"]
+        checksum = mig._fn_checksum(fn)
+        assert isinstance(checksum, str)
+        assert len(checksum) == 64  # sha256 hex digest length
+
+
+# ── apply_migrations failure path ─────────────────────────────────────────────
+
+class TestApplyMigrationsFailure:
+    def test_logs_critical_and_reraises_on_failure(self, tmp_path, monkeypatch, caplog):
+        import logging
+        self._fresh_db_for_failure(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            mig, "_ensure_migration_log",
+            lambda conn: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        with caplog.at_level(logging.CRITICAL):
+            with pytest.raises(RuntimeError, match="boom"):
+                mig.apply_migrations()
+        assert any("Migration failed" in r.message for r in caplog.records)
+
+    def _fresh_db_for_failure(self, tmp_path, monkeypatch):
+        db_path = str(tmp_path / "failure.db")
+        monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
+        c = sqlite3.connect(db_path)
+        c.executescript(SCHEMA)
+        c.close()
+        return db_path
+
 
 # ── Full migration chain ───────────────────────────────────────────────────────
 

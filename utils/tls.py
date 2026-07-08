@@ -126,7 +126,14 @@ def _cert_expires_soon(cert_path: Path) -> bool:
         from cryptography import x509
         data = cert_path.read_bytes()
         cert = x509.load_pem_x509_certificate(data)
-        remaining = cert.not_valid_after_utc - datetime.datetime.now(datetime.timezone.utc)
+        try:
+            # cryptography>=42.0 — timezone-aware, preferred.
+            not_after = cert.not_valid_after_utc
+        except AttributeError:
+            # cryptography<42.0 (e.g. the 41.x pinned by requirements.txt) has
+            # no not_valid_after_utc — the naive not_valid_after is always UTC.
+            not_after = cert.not_valid_after.replace(tzinfo=datetime.timezone.utc)
+        remaining = not_after - datetime.datetime.now(datetime.timezone.utc)
         return remaining.days < _CERT_RENEW_DAYS
     except Exception:
         return False

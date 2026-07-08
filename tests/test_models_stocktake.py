@@ -279,6 +279,55 @@ class TestVarianceReportDeptFilter:
         assert not any(r["barcode"] == product_barcode for r in rows)
 
 
+class TestVarianceReportGroupFilter:
+    def test_group_filtered_session_includes_matching_product(
+        self, test_db, db_conn, dept_id, product_barcode
+    ):
+        db_conn.execute(
+            "INSERT INTO product_groups (department_id, code, name) VALUES (?, 'MILK', 'Milk')",
+            (dept_id,)
+        )
+        db_conn.commit()
+        group_id = db_conn.execute(
+            "SELECT id FROM product_groups WHERE code='MILK'"
+        ).fetchone()["id"]
+        db_conn.execute(
+            "UPDATE products SET group_id=? WHERE barcode=?", (group_id, product_barcode)
+        )
+        db_conn.commit()
+
+        sid = stocktake_model.create_session("Group Session", group_id=group_id)
+        rows = stocktake_model.get_variance_report(sid)
+        assert any(r["barcode"] == product_barcode for r in rows)
+
+    def test_group_filtered_session_excludes_other_group_product(
+        self, test_db, db_conn, dept_id, product_barcode
+    ):
+        db_conn.execute(
+            "INSERT INTO product_groups (department_id, code, name) VALUES (?, 'MILK', 'Milk')",
+            (dept_id,)
+        )
+        db_conn.execute(
+            "INSERT INTO product_groups (department_id, code, name) VALUES (?, 'BREAD', 'Bread')",
+            (dept_id,)
+        )
+        db_conn.commit()
+        milk_id = db_conn.execute(
+            "SELECT id FROM product_groups WHERE code='MILK'"
+        ).fetchone()["id"]
+        bread_id = db_conn.execute(
+            "SELECT id FROM product_groups WHERE code='BREAD'"
+        ).fetchone()["id"]
+        db_conn.execute(
+            "UPDATE products SET group_id=? WHERE barcode=?", (bread_id, product_barcode)
+        )
+        db_conn.commit()
+
+        sid = stocktake_model.create_session("Milk Session", group_id=milk_id)
+        rows = stocktake_model.get_variance_report(sid)
+        assert not any(r["barcode"] == product_barcode for r in rows)
+
+
 # ── TestImportFromCsv ─────────────────────────────────────────────────────────
 
 class TestImportFromCsv:
@@ -409,6 +458,17 @@ class TestImportFromSqlite:
         conn.close()
         with pytest.raises(ValueError, match="No suitable table"):
             stocktake_model.import_from_sqlite(session_id, str(tmp_path / "nomap.db"))
+
+    def test_table_name_with_bracket_raises_value_error(self, test_db, session_id, tmp_path):
+        """A table name containing ']' would break the bracket-quoted SQL
+        used to read it — rejected before any query is built."""
+        ext_path = tmp_path / "evil.db"
+        conn = _sqlite3.connect(str(ext_path))
+        conn.execute('CREATE TABLE "my]table" (barcode TEXT, qty REAL)')
+        conn.commit()
+        conn.close()
+        with pytest.raises(ValueError, match="Unsafe identifier"):
+            stocktake_model.import_from_sqlite(session_id, str(ext_path))
 
     def test_unknown_barcode_is_skipped(self, test_db, session_id, tmp_path):
         _make_ext_db(tmp_path / "ext.db", [("9999999999999", 5.0)])

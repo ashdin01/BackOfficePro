@@ -243,3 +243,22 @@ class TestSupplierBankFields:
         assert (s['bank_account_name'] or '') == ''
         assert (s['bank_bsb'] or '') == ''
         assert (s['bank_account_number'] or '') == ''
+
+
+# ── get_delivery_days ────────────────────────────────────────────────────────
+
+class TestGetDeliveryDays:
+    def test_returns_none_for_unknown_supplier(self, test_db):
+        assert supplier_model.get_delivery_days(99999) is None
+
+    def test_returns_none_when_not_set(self, test_db, db_conn):
+        sid = _add(db_conn, 'DD1', 'Delivery Days Supplier')
+        assert supplier_model.get_delivery_days(sid) is None
+
+    def test_returns_stripped_value_when_set(self, test_db, db_conn):
+        sid = _add(db_conn, 'DD2', 'Delivery Days Supplier 2')
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days=' MON,WED,FRI ' WHERE id=?", (sid,)
+        )
+        db_conn.commit()
+        assert supplier_model.get_delivery_days(sid) == 'MON,WED,FRI'

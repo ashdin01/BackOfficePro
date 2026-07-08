@@ -193,6 +193,68 @@ class TestGetGstReport:
         result = report_model.get_gst_report("2026-05-01", "2026-05-01")
         assert result["sales"]["exempt_sales"] == pytest.approx(10.00)
 
+    def test_taxable_sale_counted_and_gst_calculated(self, test_db, db_conn, product_barcode):
+        # product_barcode fixture has tax_rate=10.0
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (500, ?)",
+            (product_barcode,)
+        )
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES ('2026-05-01', '500', 'Taxable Item', 2, 11.00)
+        """)
+        db_conn.commit()
+        result = report_model.get_gst_report("2026-05-01", "2026-05-01")
+        assert result["sales"]["taxable_sales"] == pytest.approx(11.00)
+        assert result["sales"]["gst_collected"] == pytest.approx(1.00)
+
+
+class TestGstPaid:
+    def _make_received_po(self, db_conn, supplier_id, barcode, received_qty=10, pack_qty=1,
+                          unit_cost=5.0, actual_cost=0, received_weight=0):
+        po_number = f"PO-GST-{barcode}"
+        db_conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, status, po_type, received_at)
+            VALUES (?, ?, 'RECEIVED', 'PO', '2026-05-01 10:00:00')
+        """, (po_number, supplier_id))
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number=?", (po_number,)
+        ).fetchone()["id"]
+        db_conn.execute("""
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty,
+                                   received_weight, pack_qty, unit_cost, actual_cost)
+            VALUES (?, ?, 'Test Line', ?, ?, ?, ?, ?, ?)
+        """, (po_id, barcode, received_qty, received_qty, received_weight,
+              pack_qty, unit_cost, actual_cost))
+        db_conn.commit()
+        return po_id
+
+    def test_taxable_purchase_counted(self, test_db, db_conn, supplier_id, product_barcode):
+        # product_barcode fixture has tax_rate=10.0
+        self._make_received_po(db_conn, supplier_id, product_barcode,
+                               received_qty=10, pack_qty=1, unit_cost=1.10)
+        result = report_model.get_gst_report("2026-05-01", "2026-05-01")
+        assert result["purchases"]["taxable_purchases"] == pytest.approx(11.00)
+        assert result["purchases"]["gst_paid"] == pytest.approx(1.00)
+
+    def test_exempt_purchase_counted(self, test_db, db_conn, supplier_id, gst_free_barcode):
+        self._make_received_po(db_conn, supplier_id, gst_free_barcode,
+                               received_qty=5, pack_qty=1, unit_cost=2.00)
+        result = report_model.get_gst_report("2026-05-01", "2026-05-01")
+        assert result["purchases"]["exempt_purchases"] == pytest.approx(10.00)
+
+    def test_variable_weight_purchase_uses_weight_times_cost(
+        self, test_db, db_conn, supplier_id, product_barcode
+    ):
+        db_conn.execute("UPDATE products SET variable_weight=1 WHERE barcode=?", (product_barcode,))
+        db_conn.commit()
+        self._make_received_po(db_conn, supplier_id, product_barcode, received_qty=1, pack_qty=1,
+                               unit_cost=5.00, received_weight=3.0)
+        result = report_model.get_gst_report("2026-05-01", "2026-05-01")
+        # line_total = weight(3.0) * unit_cost(5.00) = 15.00, taxable at 10%
+        assert result["purchases"]["taxable_purchases"] == pytest.approx(15.00)
+
 
 class TestGetStockMovementsDateFilters:
     def test_filter_by_date_from(self, test_db, db_conn, product_barcode):

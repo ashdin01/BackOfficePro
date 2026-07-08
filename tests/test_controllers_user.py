@@ -51,3 +51,28 @@ class TestPinAuth:
 
     def test_verify_unknown_user_returns_false(self, test_db):
         assert user_ctrl.verify_pin('nobody', '0000') is False
+
+
+class TestMultiStoreDirectoryWrappers:
+    """These delegate straight to models.user_directory (see
+    tests/test_models_user_directory.py for the real multi-store behavior);
+    here we just confirm the controller wires through to it correctly."""
+
+    def test_list_all_active_users_delegates(self, test_db, monkeypatch):
+        sentinel = [{'username': 'bob'}]
+        monkeypatch.setattr(user_ctrl.user_directory, 'list_all_active_users', lambda: sentinel)
+        assert user_ctrl.list_all_active_users() is sentinel
+
+    def test_find_username_conflicts_delegates(self, test_db, monkeypatch):
+        sentinel = ['bob']
+        monkeypatch.setattr(user_ctrl.user_directory, 'find_username_conflicts', lambda: sentinel)
+        assert user_ctrl.find_username_conflicts() is sentinel
+
+    def test_find_user_for_login_delegates(self, test_db, monkeypatch):
+        sentinel = {'username': 'bob'}
+        monkeypatch.setattr(
+            user_ctrl.user_directory, 'find_user_for_login',
+            lambda username: sentinel if username == 'bob' else None,
+        )
+        assert user_ctrl.find_user_for_login('bob') is sentinel
+        assert user_ctrl.find_user_for_login('carol') is None

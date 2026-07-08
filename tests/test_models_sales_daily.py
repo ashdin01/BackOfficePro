@@ -132,6 +132,40 @@ class TestGetSalesForBarcodesRangeEmpty:
         assert sd_model.get_sales_for_barcodes_range([], '2026-05-01', '2026-05-31') == {}
 
 
+def _boom_db_conn():
+    """A db_conn() replacement whose connection raises on every execute()."""
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock
+
+    @contextmanager
+    def _ctx():
+        mock_conn = MagicMock()
+        mock_conn.execute.side_effect = Exception("db exploded")
+        yield mock_conn
+    return _ctx
+
+
+class TestGetSalesForBarcodeErrorHandling:
+    def test_db_error_returns_none(self, test_db, monkeypatch):
+        monkeypatch.setattr(sd_model, "db_conn", _boom_db_conn())
+        assert sd_model.get_sales_for_barcode("0000000000000") is None
+
+
+class TestGetSalesForBarcodeRangeErrorHandling:
+    def test_db_error_returns_none(self, test_db, monkeypatch):
+        monkeypatch.setattr(sd_model, "db_conn", _boom_db_conn())
+        result = sd_model.get_sales_for_barcode_range(
+            "0000000000000", "2026-01-01", "2026-01-31"
+        )
+        assert result is None
+
+
+class TestBackfillMovementsErrorHandling:
+    def test_db_error_is_logged_and_swallowed(self, test_db, monkeypatch, product_barcode):
+        monkeypatch.setattr(sd_model, "db_conn", _boom_db_conn())
+        sd_model.backfill_movements('999', product_barcode)  # must not raise
+
+
 class TestGetGroupsException:
     def test_exception_returns_empty_list(self, test_db, monkeypatch):
         import models.sales_daily as sd_mod

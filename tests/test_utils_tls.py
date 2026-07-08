@@ -106,6 +106,31 @@ class TestGenerateSelfSigned:
         tls_mod._generate_self_signed(cert, key)
         assert cert.exists()
 
+    def test_invalid_lan_ip_is_skipped_in_san(self, monkeypatch, tmp_path):
+        """A bogus entry from _lan_ips() must not stop cert generation."""
+        monkeypatch.setattr(tls_mod, "_lan_ips", lambda: ["not-an-ip", "192.168.1.50"])
+        from cryptography import x509
+        cert = tmp_path / "test.crt"
+        key = tmp_path / "test.key"
+        tls_mod._generate_self_signed(cert, key)
+        cert_obj = x509.load_pem_x509_certificate(cert.read_bytes())
+        san = cert_obj.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        ip_strs = [str(ip) for ip in san.value.get_values_for_type(x509.IPAddress)]
+        assert "192.168.1.50" in ip_strs
+
+    def test_chmod_failure_does_not_prevent_cert_creation(self, monkeypatch, tmp_path):
+        """If os.chmod fails (e.g. unsupported on the filesystem), key generation
+        must still succeed rather than raising."""
+        monkeypatch.setattr(
+            os, "chmod",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("chmod not supported")),
+        )
+        cert = tmp_path / "test.crt"
+        key = tmp_path / "test.key"
+        tls_mod._generate_self_signed(cert, key)
+        assert cert.exists()
+        assert key.exists()
+
 
 # ── get_or_create_cert ────────────────────────────────────────────────────────
 
@@ -188,6 +213,64 @@ class TestCertExpiresSoon:
         tls_mod.get_or_create_cert()
         assert tls_mod._cert_expires_soon(cert) is False
 
+    def _build_cert_with_expiry(self, tmp_path, not_valid_after):
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject).issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1))
+            .not_valid_after(not_valid_after)
+            .sign(key, hashes.SHA256())
+        )
+        cert_path = tmp_path / "custom.crt"
+        cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        return cert_path
+
+    def test_returns_true_for_cert_expiring_within_renew_window(self, tmp_path):
+        expiring_soon = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=5)
+        cert_path = self._build_cert_with_expiry(tmp_path, expiring_soon)
+        assert tls_mod._cert_expires_soon(cert_path) is True
+
+    def test_returns_false_for_cert_expiring_beyond_renew_window(self, tmp_path):
+        expiring_later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=60)
+        cert_path = self._build_cert_with_expiry(tmp_path, expiring_later)
+        assert tls_mod._cert_expires_soon(cert_path) is False
+
+    def test_falls_back_when_not_valid_after_utc_unavailable(self, monkeypatch, tmp_path):
+        """Regression test: cryptography<42.0 (e.g. the 41.x this project pins)
+        has no not_valid_after_utc attribute — _cert_expires_soon must fall back
+        to the naive not_valid_after rather than silently returning False."""
+        cert_path, key_path = tmp_path / "compat.crt", tmp_path / "compat.key"
+        expiring_soon = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=5)
+        cert_path = self._build_cert_with_expiry(tmp_path, expiring_soon)
+
+        from cryptography import x509
+        real_load = x509.load_pem_x509_certificate
+
+        class _NoUtcCert:
+            def __init__(self, real):
+                self._real = real
+
+            def __getattr__(self, name):
+                if name == "not_valid_after_utc":
+                    raise AttributeError(name)
+                return getattr(self._real, name)
+
+        monkeypatch.setattr(
+            x509, "load_pem_x509_certificate",
+            lambda data: _NoUtcCert(real_load(data)),
+        )
+
+        assert tls_mod._cert_expires_soon(cert_path) is True
+
 
 class TestLanIps:
     def test_returns_list(self):
@@ -210,6 +293,18 @@ class TestLanIps:
         result = tls_mod._lan_ips()
         assert result == []
 
+    def test_valid_lan_ip_from_getaddrinfo_is_included(self, monkeypatch):
+        import socket
+        monkeypatch.setattr(
+            socket, "socket",
+            lambda *a, **kw: (_ for _ in ()).throw(OSError("no net")),
+        )
+        monkeypatch.setattr(
+            socket, "getaddrinfo",
+            lambda *a, **kw: [("", "", "", "", ("192.168.1.50", 0))],
+        )
+        assert tls_mod._lan_ips() == ["192.168.1.50"]
+
 
 class TestServeTlsFallback:
     def test_import_error_falls_back_to_plain_http(self, monkeypatch):
@@ -228,6 +323,26 @@ class TestServeTlsFallback:
         from unittest.mock import MagicMock
         with pytest.raises(SystemExit):
             tls_mod.serve_tls(MagicMock(), host="127.0.0.1", port=19876)
+
+    def test_import_error_fallback_returns_normally_after_waitress(self, monkeypatch):
+        """serve_tls's ImportError branch must return (not fall through to the
+        TLS path) once the plain-HTTP waitress server call completes."""
+        from unittest.mock import MagicMock
+        import sys
+
+        monkeypatch.setattr(
+            tls_mod, "get_or_create_cert",
+            lambda: (_ for _ in ()).throw(ImportError("cryptography not installed")),
+        )
+        fake_waitress_serve = MagicMock()
+        fake_mod = type(sys)("waitress_fake2")
+        fake_mod.serve = fake_waitress_serve
+        monkeypatch.setitem(sys.modules, "waitress", fake_mod)
+
+        result = tls_mod.serve_tls(MagicMock(), host="127.0.0.1", port=19877)
+
+        assert result is None
+        fake_waitress_serve.assert_called_once()
 
 
 class TestServeTlsMainPath:
