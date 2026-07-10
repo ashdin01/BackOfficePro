@@ -77,7 +77,8 @@ def get_by_barcodes(barcodes):
 def search(term, active_only=True, limit=None, offset=0):
     """
     Multi-word search: splits term into words and requires ALL words
-    to appear somewhere in description, barcode, brand, department, supplier, or PLU.
+    to appear somewhere in description, barcode, brand, department, supplier,
+    supplier SKU, or PLU.
     e.g. "oasis dip" finds "OASIS BEETROOT DIP" and "OASIS GARLIC DIP"
 
     Optional limit/offset for paginated callers (e.g. the REST API).
@@ -94,9 +95,9 @@ def search(term, active_only=True, limit=None, offset=0):
         like = f"%{word}%"
         word_clauses.append(
             "(p.description LIKE ? OR p.barcode LIKE ? OR p.brand LIKE ? OR "
-            "d.name LIKE ? OR s.name LIKE ? OR p.plu LIKE ?)"
+            "d.name LIKE ? OR s.name LIKE ? OR p.plu LIKE ? OR p.supplier_sku LIKE ?)"
         )
-        params.extend([like, like, like, like, like, like])
+        params.extend([like, like, like, like, like, like, like])
 
     where = " AND ".join(word_clauses)
     limit_clause = "LIMIT ? OFFSET ?" if limit is not None else ""

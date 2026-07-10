@@ -13,7 +13,106 @@ import controllers.ar_controller as ar_ctrl
 import controllers.product_controller as product_ctrl
 import config.styles as styles
 from utils.error_dialog import show_error
+from utils.text_search import matches_all_words
 from views.base_view import BaseView, BaseDialog
+from views.widgets.search_bar import SearchBar
+
+
+class _CustomerLookup(QDialog):
+    """F3-style popup for actively picking a customer.
+
+    No dropdown, no default selection — mirrors
+    views.purchase_orders.po_create._SupplierLookup so an invoice can't be
+    raised against whichever customer happens to sort first.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Customer")
+        self.setModal(True)
+        self.setFixedSize(420, 460)
+        self.setStyleSheet(
+            f"QDialog{{background:{styles.CLR_BG};color:{styles.CLR_TEXT};}}"
+            f"QTableWidget{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};"
+            f"gridline-color:{styles.CLR_BORDER};border:1px solid {styles.CLR_BORDER};}}"
+            f"QTableWidget::item:selected{{background:{styles.CLR_ACCENT};}}"
+            f"QHeaderView::section{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_MUTED};"
+            "border:none;padding:4px 8px;font-weight:bold;}"
+        )
+        self.selected_id = None
+        self.selected_name = None
+        self._all_customers = ar_ctrl.get_all_customers(active_only=True)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(10)
+
+        lbl = QLabel("Type to search, then double-click or press Enter:")
+        lbl.setStyleSheet(styles.STYLE_LABEL_MUTED)
+        lay.addWidget(lbl)
+
+        self.search = SearchBar("Search customers by name or code…", interval=150)
+        self.search.search_changed.connect(self._filter)
+        lay.addWidget(self.search)
+
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels(["Code", "Name"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 70)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.doubleClicked.connect(self._pick)
+        self._render(self._all_customers)
+        lay.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        btn_ok = QPushButton("Select  [Enter]")
+        btn_ok.setStyleSheet(
+            f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
+            "border-radius:4px;padding:6px 16px;font-weight:bold;}}"
+            f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
+        btn_cancel = QPushButton("Cancel  [Esc]")
+        btn_cancel.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{styles.CLR_MUTED};"
+            f"border:1px solid {styles.CLR_BORDER};border-radius:4px;padding:6px 14px;}}"
+            f"QPushButton:hover{{background:{styles.CLR_BG_PANEL};color:{styles.CLR_TEXT};}}")
+        btn_ok.clicked.connect(self._pick)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_ok)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        lay.addLayout(btn_row)
+
+        QShortcut(QKeySequence("Return"), self, self._pick)
+        QShortcut(QKeySequence("Enter"),  self, self._pick)
+        QShortcut(QKeySequence("Escape"), self, self.reject)
+
+        self.search.setFocus()
+
+    def _filter(self):
+        term = self.search.text()
+        rows = [c for c in self._all_customers
+                if matches_all_words(term, c['name'], c['code'])]
+        self._render(rows)
+
+    def _render(self, rows):
+        self.table.setRowCount(len(rows))
+        for r, c in enumerate(rows):
+            code_item = QTableWidgetItem(c['code'])
+            code_item.setData(Qt.ItemDataRole.UserRole, c['id'])
+            self.table.setItem(r, 0, code_item)
+            self.table.setItem(r, 1, QTableWidgetItem(c['name']))
+        if rows:
+            self.table.selectRow(0)
+
+    def _pick(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            self.selected_id = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            self.selected_name = self.table.item(row, 1).text()
+            self.accept()
 
 
 class InvoiceDetail(BaseView):
@@ -131,13 +230,20 @@ class InvoiceDetail(BaseView):
     def _new_invoice_dialog(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("New Invoice")
+        dlg.setMinimumWidth(360)
         form = QFormLayout(dlg)
 
-        cust_combo = QComboBox()
-        customers  = ar_ctrl.get_all_customers(active_only=True)
-        for c in customers:
-            cust_combo.addItem(f"{c['code']} — {c['name']}", c['id'])
-        form.addRow("Customer *", cust_combo)
+        self._new_inv_customer_id = None
+
+        cust_row = QHBoxLayout()
+        cust_lbl = QLabel("⚠  No customer selected")
+        cust_lbl.setStyleSheet(f"color:{styles.CLR_DANGER};font-weight:bold;")
+        cust_row.addWidget(cust_lbl, 1)
+        cust_btn = QPushButton("Select…")
+        cust_row.addWidget(cust_btn)
+        cust_container = QWidget()
+        cust_container.setLayout(cust_row)
+        form.addRow("Customer *", cust_container)
 
         notes_edit = QLineEdit()
         form.addRow("Notes", notes_edit)
@@ -145,6 +251,19 @@ class InvoiceDetail(BaseView):
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        ok_btn = btns.button(QDialogButtonBox.StandardButton.Ok)
+        ok_btn.setEnabled(False)  # stays disabled until a customer is actively picked
+
+        def _pick_customer():
+            pick_dlg = _CustomerLookup(dlg)
+            if pick_dlg.exec() == QDialog.DialogCode.Accepted and pick_dlg.selected_id:
+                self._new_inv_customer_id = pick_dlg.selected_id
+                cust_lbl.setText(f"✓  {pick_dlg.selected_name}")
+                cust_lbl.setStyleSheet(f"color:{styles.CLR_TEXT};font-weight:bold;")
+                ok_btn.setEnabled(True)
+
+        cust_btn.clicked.connect(_pick_customer)
+
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
         form.addRow(btns)
@@ -153,14 +272,16 @@ class InvoiceDetail(BaseView):
             self.close()
             return
 
-        cid = cust_combo.currentData()
-        if not cid:
+        if not self._new_inv_customer_id:
+            # Defensive only — OK is disabled until a customer is picked,
+            # so this path shouldn't be reachable, but a billing record is
+            # not something to create on an unproven assumption.
             self.close()
             return
 
         try:
             inv_id, inv_num = ar_ctrl.create_invoice(
-                customer_id=cid,
+                customer_id=self._new_inv_customer_id,
                 notes=notes_edit.text().strip(),
             )
         except Exception as e:

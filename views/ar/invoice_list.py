@@ -9,6 +9,7 @@ import controllers.ar_controller as ar_ctrl
 import config.styles as styles
 from views.base_view import BaseView
 from views.widgets.search_bar import SearchBar
+from utils.text_search import matches_all_words
 
 
 STATUS_COLOURS = {
@@ -81,15 +82,14 @@ class InvoiceList(BaseView):
         self._filter()
 
     def _filter(self):
-        term   = self.search.text().strip().lower()
+        term   = self.search.text().strip()
         status = self.status_filter.currentText()
         rows   = self._all_rows
         if status != 'All':
             rows = [r for r in rows if r['status'] == status]
         if term:
             rows = [r for r in rows
-                    if term in (r['customer_name'] or '').lower()
-                    or term in (r['invoice_number'] or '').lower()]
+                    if matches_all_words(term, r['customer_name'], r['invoice_number'])]
         self._render(rows)
 
     def _render(self, rows):

@@ -159,6 +159,24 @@ def test_search_empty_term(test_db):
     assert product_model.search('') == []
 
 
+def test_search_matches_supplier_sku(test_db, db_conn, dept_id, supplier_id):
+    _add_product(db_conn, '9555555555555', 'RED APPLES 1KG', dept_id, supplier_id)
+    db_conn.execute(
+        "UPDATE products SET supplier_sku='SUP-SKU-4471' WHERE barcode='9555555555555'"
+    )
+    _add_product(db_conn, '9666666666666', 'GREEN APPLES 1KG', dept_id, supplier_id)
+    db_conn.execute(
+        "UPDATE products SET supplier_sku='SUP-SKU-9900' WHERE barcode='9666666666666'"
+    )
+    db_conn.commit()
+
+    results = product_model.search('SUP-SKU-4471')
+
+    descriptions = [r['description'] for r in results]
+    assert 'RED APPLES 1KG' in descriptions
+    assert 'GREEN APPLES 1KG' not in descriptions
+
+
 # ── check_barcode_available ───────────────────────────────────────────────────
 
 def test_check_barcode_available_returns_none_for_free(test_db):

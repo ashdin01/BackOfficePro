@@ -8,6 +8,7 @@ from views.widgets.search_bar import SearchBar
 import controllers.bundle_controller as bundle_ctrl
 import config.styles as styles
 from views.base_view import BaseView
+from utils.text_search import matches_all_words
 
 
 class BundleList(KeyboardMixin, BaseView):
@@ -67,9 +68,8 @@ class BundleList(KeyboardMixin, BaseView):
     def _load(self, search=''):
         rows = bundle_ctrl.get_all(active_only=False)
         if search:
-            term = search.lower()
-            rows = [r for r in rows if term in r['name'].lower()
-                    or term in (r['description'] or '').lower()]
+            rows = [r for r in rows
+                    if matches_all_words(search, r['name'], r['description'])]
         self.table.setRowCount(0)
         for row in rows:
             r = self.table.rowCount()

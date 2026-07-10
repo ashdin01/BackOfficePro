@@ -7,6 +7,7 @@ import controllers.ar_controller as ar_ctrl
 from views.ar.customer_edit import CustomerEdit
 from views.base_view import BaseView
 from views.widgets.search_bar import SearchBar
+from utils.text_search import matches_all_words
 
 
 class CustomerList(BaseView):
@@ -56,14 +57,12 @@ class CustomerList(BaseView):
         self._render(self._all_rows)
 
     def _filter(self):
-        term = self.search.text().strip().lower()
+        term = self.search.text().strip()
         if not term:
             self._render(self._all_rows)
             return
         filtered = [r for r in self._all_rows
-                    if term in (r['name'] or '').lower()
-                    or term in (r['code'] or '').lower()
-                    or term in (r['email'] or '').lower()]
+                    if matches_all_words(term, r['name'], r['code'], r['email'])]
         self._render(filtered)
 
     def _render(self, rows):

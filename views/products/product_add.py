@@ -66,6 +66,10 @@ class ProductAdd(KeyboardMixin, QWidget):
         pack_row.addStretch()
 
         self.dept = QComboBox()
+        # No default department — must be actively chosen, not whichever
+        # sorts first, since it drives reporting, stocktake scope, and GP
+        # analysis for this product from here on.
+        self.dept.addItem("— Select a department —", None)
         for d in self._depts:
             self.dept.addItem(d['name'], d['id'])
         self.dept.currentIndexChanged.connect(self._on_dept_changed)
@@ -194,6 +198,10 @@ class ProductAdd(KeyboardMixin, QWidget):
         description = self.description.text().strip()
         if not barcode or not description:
             QMessageBox.warning(self, "Validation", "Barcode and Description are required.")
+            return
+        if self.dept.currentData() is None:
+            QMessageBox.warning(self, "Validation", "Please select a department.")
+            self.dept.setFocus()
             return
         try:
             product_ctrl.add_product(

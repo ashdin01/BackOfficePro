@@ -48,6 +48,11 @@ class _UserDialog(QDialog):
         form.addRow("Username *", self._username)
 
         self._role = QComboBox()
+        if not self._user:
+            # New user: force an active choice — no default role, especially
+            # not the first item in the list (ADMIN), which would otherwise
+            # silently grant full access to an account no one meant to.
+            self._role.addItem("— Select a role —")
         self._role.addItems(ROLES)
         if self._user:
             idx = self._role.findText(self._user['role'])
@@ -94,6 +99,10 @@ class _UserDialog(QDialog):
         if not username:
             QMessageBox.warning(self, "Validation", "Username is required.")
             self._username.setFocus()
+            return
+        if role not in ROLES:
+            QMessageBox.warning(self, "Validation", "Please select a role.")
+            self._role.setFocus()
             return
 
         if not self._user:

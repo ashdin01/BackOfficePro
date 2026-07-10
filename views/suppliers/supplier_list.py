@@ -7,6 +7,7 @@ from utils.keyboard_mixin import KeyboardMixin
 from views.widgets.search_bar import SearchBar
 from views.base_view import BaseView
 import controllers.supplier_controller as supplier_ctrl
+from utils.text_search import matches_all_words
 
 
 class SupplierList(KeyboardMixin, BaseView):
@@ -67,9 +68,8 @@ class SupplierList(KeyboardMixin, BaseView):
         self.status.setText(f"{self.table.rowCount()} suppliers")
 
     def _search(self, term):
-        term = term.lower()
         all_rows = supplier_ctrl.get_all(active_only=False)
-        filtered = [r for r in all_rows if term in r['name'].lower() or term in r['code'].lower()]
+        filtered = [r for r in all_rows if matches_all_words(term, r['name'], r['code'])]
         self._load(filtered)
 
     def _open_win(self, win):
