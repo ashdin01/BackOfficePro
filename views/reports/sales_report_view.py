@@ -8,10 +8,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate, QTimer
 from PyQt6.QtGui import QColor, QAction, QKeySequence, QShortcut
-import csv, os, subprocess, sys, logging
+import csv, os, logging
 import config.styles as styles
 import controllers.sales_report_controller as sales_ctrl
-from utils.error_dialog import show_error
 from views.base_view import BaseView
 from views.widgets.table_items import NumItem, item as _item, RIGHT, CENTER
 from views.widgets.table_utils import make_table as _make_table
@@ -116,6 +115,19 @@ class SalesReportView(BaseView):
             cards_row.addWidget(c)
         layout.addLayout(cards_row)
 
+        # Unmatched-PLU banner — hidden when there's nothing to flag. A PLU
+        # with no barcode match never had its sales deducted from stock on
+        # hand, so this is the proactive alternative to noticing a wrong
+        # SOH somewhere else and hunting for the cause.
+        self.unmatched_banner = QLabel("")
+        self.unmatched_banner.setStyleSheet(
+            f"color:{styles.CLR_DANGER};font-weight:bold;font-size:12px;"
+            f"background:{styles.CLR_BG_PANEL};border:1px solid {styles.CLR_DANGER};"
+            "border-radius:4px;padding:8px 12px;"
+        )
+        self.unmatched_banner.setVisible(False)
+        layout.addWidget(self.unmatched_banner)
+
         # Tabs
         tabs = QTabWidget()
 
@@ -192,7 +204,8 @@ class SalesReportView(BaseView):
     def _load(self):
         if not sales_ctrl.sales_table_exists():
             self.footer_label.setText(
-                "No sales data yet — import a CSV or PDF using the ⬆ Import Sales button.")
+                "No sales data yet — import a CSV using the ⬆ Import Sales button.")
+            self.unmatched_banner.setVisible(False)
             return
 
         d_from, d_to = self._get_dates()
@@ -248,6 +261,7 @@ class SalesReportView(BaseView):
         self.product_table.setSortingEnabled(False)
         self.product_table.setRowCount(0)
 
+        unmatched_count = 0
         for row in products:
             plu      = row['plu']       or ""
             plu_name = row['plu_name']  or ""
@@ -301,6 +315,9 @@ class SalesReportView(BaseView):
             cost_price   = prod["cost_price"]    if prod else 0
             on_hand      = prod["on_hand"]       if prod else ""
 
+            if not barcode:
+                unmatched_count += 1
+
             r = self.product_table.rowCount()
             self.product_table.insertRow(r)
 
@@ -341,6 +358,16 @@ class SalesReportView(BaseView):
             self.product_table.setItem(r, 8, pct_item)
 
         self.product_table.setSortingEnabled(True)
+
+        if unmatched_count:
+            self.unmatched_banner.setText(
+                f"⚠  {unmatched_count} unmatched PLU{'s' if unmatched_count != 1 else ''} in this "
+                "date range — sales were recorded but stock on hand was NOT adjusted for them. "
+                "Double-click a row with a red barcode in By Product to match it."
+            )
+            self.unmatched_banner.setVisible(True)
+        else:
+            self.unmatched_banner.setVisible(False)
 
         # By Day
         days = sales_ctrl.get_sales_by_day(d_from, d_to, group)
@@ -455,48 +482,15 @@ class SalesReportView(BaseView):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Select Daily PLU Sales File(s)",
             os.path.expanduser("~/Downloads"),
-            "Sales Files (*.csv *.pdf);;CSV Files (*.csv);;PDF Files (*.pdf)")
+            "CSV Files (*.csv)")
         if not paths: return
 
-        # Import the script as a module directly — works in both dev and
-        # PyInstaller exe environments without needing subprocess/sys.executable
-        import sys as _sys
-        import importlib.util
-
-        if getattr(_sys, "frozen", False):
-            script = os.path.join(_sys._MEIPASS, "scripts", "import_sales.py")
+        from views.home_screen import _run_import
+        success, message = _run_import(self, paths)
+        if success:
+            QMessageBox.information(self, "Import Complete", message)
         else:
-            script = os.path.normpath(os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..", "..", "scripts", "import_sales.py"))
-
-        if not os.path.exists(script):
-            QMessageBox.critical(self, "Error",
-                f"import_sales.py not found at:\n{script}")
-            return
-
-        try:
-            spec   = importlib.util.spec_from_file_location("import_sales", script)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            module.ensure_tables()
-
-            errors = []
-            for path in paths:
-                try:
-                    module.import_file(path)
-                except Exception as e:
-                    errors.append(f"{os.path.basename(path)}: {e}")
-
-            if errors:
-                QMessageBox.warning(self, "Import Warnings",
-                    "Some files had errors:\n" + "\n".join(errors))
-            else:
-                QMessageBox.information(self, "Import Complete",
-                    f"Imported {len(paths)} file(s).\nDashboard will now refresh.")
-        except Exception as e:
-            show_error(self, "Could not import sales file.", e, title="Import Failed")
-            return
+            QMessageBox.warning(self, "Import Issue", message)
 
         self.load()
 

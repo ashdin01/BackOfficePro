@@ -62,14 +62,23 @@ def _run_import(parent, paths):
         spec.loader.exec_module(module)
         module.ensure_tables()
         errors = []
+        total_unmatched = 0
         for path in paths:
             try:
-                module.import_csv(path)
+                _upserted, _movements, unmatched = module.import_csv(path)
+                total_unmatched += unmatched
             except Exception as e:
                 errors.append(f"{os.path.basename(path)}: {e}")
         if errors:
             return False, "Some files had errors:\n" + "\n".join(errors)
-        return True, f"Imported {len(paths)} file(s) successfully."
+        message = f"Imported {len(paths)} file(s) successfully."
+        if total_unmatched:
+            message += (
+                f"\n\n⚠ {total_unmatched} PLU(s) could not be matched to a product — "
+                "stock on hand was NOT adjusted for those sales.\n"
+                "Open Sales Report > By Product (rows with a red barcode) to match them."
+            )
+        return True, message
     except Exception as e:
         return False, str(e)
 

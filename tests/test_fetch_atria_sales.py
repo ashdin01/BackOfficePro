@@ -17,7 +17,8 @@ def _no_real_logging_or_disk(tmp_path, monkeypatch):
 
 def _log_rows(db_conn):
     return db_conn.execute(
-        "SELECT sale_date, row_count, status, error_message FROM atria_import_log ORDER BY sale_date"
+        "SELECT sale_date, row_count, status, error_message, unmatched_count "
+        "FROM atria_import_log ORDER BY sale_date"
     ).fetchall()
 
 
@@ -44,6 +45,63 @@ class TestMigrateV60:
         assert cols == {"sale_date", "imported_at", "row_count", "status", "error_message"}
 
 
+# ── migrate_v61 ────────────────────────────────────────────────────────────────
+
+class TestMigrateV61:
+    def test_unmatched_count_column_added(self, tmp_path, monkeypatch):
+        import sqlite3
+        import database.connection as conn_mod
+        import database.migrations as mig
+
+        db_path = str(tmp_path / "v61.db")
+        monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
+        c = sqlite3.connect(db_path)
+        c.execute("CREATE TABLE db_meta (version INTEGER NOT NULL DEFAULT 1)")
+        c.execute("INSERT INTO db_meta (version) VALUES (60)")
+        c.execute("""
+            CREATE TABLE atria_import_log (
+                sale_date     TEXT PRIMARY KEY,
+                imported_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                row_count     INTEGER NOT NULL DEFAULT 0,
+                status        TEXT NOT NULL DEFAULT 'OK',
+                error_message TEXT
+            )
+        """)
+        c.commit()
+        c.close()
+        conn_mod.invalidate_all_connections()
+
+        mig.migrate_v61(conn_mod.get_connection())
+
+        conn = conn_mod.get_connection()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(atria_import_log)").fetchall()}
+        assert "unmatched_count" in cols
+
+    def test_safe_to_run_twice(self, tmp_path, monkeypatch):
+        """_add_column swallows 'duplicate column' — re-running must not raise."""
+        import sqlite3
+        import database.connection as conn_mod
+        import database.migrations as mig
+
+        db_path = str(tmp_path / "v61b.db")
+        monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
+        c = sqlite3.connect(db_path)
+        c.execute("CREATE TABLE db_meta (version INTEGER NOT NULL DEFAULT 1)")
+        c.execute("INSERT INTO db_meta (version) VALUES (60)")
+        c.execute("""
+            CREATE TABLE atria_import_log (
+                sale_date TEXT PRIMARY KEY, row_count INTEGER, status TEXT, error_message TEXT
+            )
+        """)
+        c.commit()
+        c.close()
+        conn_mod.invalidate_all_connections()
+
+        conn = conn_mod.get_connection()
+        mig.migrate_v61(conn)
+        mig.migrate_v61(conn)  # must not raise
+
+
 # ── _record_import_result ──────────────────────────────────────────────────────
 
 class TestRecordImportResult:
@@ -54,6 +112,7 @@ class TestRecordImportResult:
         assert rows[0]["sale_date"] == "2026-07-01"
         assert rows[0]["row_count"] == 12
         assert rows[0]["status"] == "OK"
+        assert rows[0]["unmatched_count"] == 0
 
     def test_upsert_overwrites_existing_row(self, test_db, db_conn):
         atria._record_import_result("2026-07-01", 5, "OK")
@@ -67,6 +126,17 @@ class TestRecordImportResult:
         rows = _log_rows(db_conn)
         assert rows[0]["status"] == "ERROR"
         assert rows[0]["error_message"] == "login failed"
+
+    def test_unmatched_count_persisted(self, test_db, db_conn):
+        atria._record_import_result("2026-07-01", 12, "OK", unmatched_count=4)
+        rows = _log_rows(db_conn)
+        assert rows[0]["unmatched_count"] == 4
+
+    def test_upsert_updates_unmatched_count(self, test_db, db_conn):
+        atria._record_import_result("2026-07-01", 12, "OK", unmatched_count=4)
+        atria._record_import_result("2026-07-01", 12, "OK", unmatched_count=0)
+        rows = _log_rows(db_conn)
+        assert rows[0]["unmatched_count"] == 0
 
 
 # ── _missing_dates ──────────────────────────────────────────────────────────────
@@ -116,7 +186,7 @@ class TestSyncMissingDays:
 
         result = atria.sync_missing_days(days=7)
 
-        assert result == {"imported": [], "failed": [], "skipped_reason": None}
+        assert result == {"imported": [], "failed": [], "skipped_reason": None, "unmatched_total": 0}
         fake_login.assert_not_called()
 
     def test_missing_credentials_skips_whole_run(self, test_db, monkeypatch):
@@ -143,7 +213,7 @@ class TestSyncMissingDays:
     def test_successful_multi_day_catchup(self, test_db, db_conn, monkeypatch):
         monkeypatch.setattr(atria, "get_atria_credentials", MagicMock(return_value=("u", "p")))
         monkeypatch.setattr(atria, "login", MagicMock())
-        monkeypatch.setattr(atria, "_fetch_and_import_one_day", MagicMock(return_value=3))
+        monkeypatch.setattr(atria, "_fetch_and_import_one_day", MagicMock(return_value=(3, 0)))
 
         result = atria.sync_missing_days(days=2)
 
@@ -154,6 +224,17 @@ class TestSyncMissingDays:
         assert len(rows) == 2
         assert all(r["status"] == "OK" and r["row_count"] == 3 for r in rows)
 
+    def test_unmatched_plus_summed_across_run_and_logged(self, test_db, db_conn, monkeypatch):
+        monkeypatch.setattr(atria, "get_atria_credentials", MagicMock(return_value=("u", "p")))
+        monkeypatch.setattr(atria, "login", MagicMock())
+        monkeypatch.setattr(atria, "_fetch_and_import_one_day", MagicMock(return_value=(3, 2)))
+
+        result = atria.sync_missing_days(days=2)
+
+        assert result["unmatched_total"] == 4
+        rows = _log_rows(db_conn)
+        assert all(r["unmatched_count"] == 2 for r in rows)
+
     def test_per_day_failure_recorded_and_loop_continues(self, test_db, db_conn, monkeypatch):
         monkeypatch.setattr(atria, "get_atria_credentials", MagicMock(return_value=("u", "p")))
         monkeypatch.setattr(atria, "login", MagicMock())
@@ -163,7 +244,7 @@ class TestSyncMissingDays:
         def _fake_fetch(session, target_date):
             if target_date == missing[0]:
                 raise RuntimeError("document never became ready")
-            return 5
+            return 5, 0
 
         monkeypatch.setattr(atria, "_fetch_and_import_one_day", _fake_fetch)
 
@@ -197,7 +278,7 @@ class TestFetchAndImportOneDay:
         atria.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         result = atria._fetch_and_import_one_day(session, target_date)
 
-        assert result == 7
+        assert result == (7, 1)
         fake_import_sales.ensure_tables.assert_called_once()
         saved_path = fake_import_sales.import_csv.call_args[0][0]
         assert saved_path.endswith("DailyPluSales_2026-07-01.csv")

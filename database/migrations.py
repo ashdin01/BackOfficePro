@@ -2566,6 +2566,17 @@ def migrate_v60(conn):
     conn.commit()
 
 
+def migrate_v61(conn):
+    """Add unmatched_count to atria_import_log so an unresolved PLU (a sale
+    that couldn't be matched to a product barcode, so stock was never
+    decremented for it) is visible without someone first noticing a wrong
+    stock-on-hand figure downstream."""
+    _add_column(conn, """
+        ALTER TABLE atria_import_log ADD COLUMN unmatched_count INTEGER NOT NULL DEFAULT 0
+    """)
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2626,4 +2637,5 @@ _MIGRATIONS: dict[int, tuple] = {
     58: (migrate_v58, "received_weight column on po_lines for variable weight items"),
     59: (migrate_v59, "group_id on stocktake_sessions for sub-department filtering"),
     60: (migrate_v60, "atria_import_log table for startup Atria sync tracking"),
+    61: (migrate_v61, "unmatched_count column on atria_import_log"),
 }

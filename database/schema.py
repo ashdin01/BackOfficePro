@@ -499,11 +499,12 @@ CREATE TABLE IF NOT EXISTS pos_sales (
 -- e.g. store closed), so the startup catch-up sync knows which of the last
 -- N days are genuinely already handled vs never attempted.
 CREATE TABLE IF NOT EXISTS atria_import_log (
-    sale_date     TEXT    PRIMARY KEY,
-    imported_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
-    row_count     INTEGER NOT NULL DEFAULT 0,
-    status        TEXT    NOT NULL DEFAULT 'OK' CHECK (status IN ('OK', 'ERROR')),
-    error_message TEXT
+    sale_date       TEXT    PRIMARY KEY,
+    imported_at     TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    row_count       INTEGER NOT NULL DEFAULT 0,
+    status          TEXT    NOT NULL DEFAULT 'OK' CHECK (status IN ('OK', 'ERROR')),
+    error_message   TEXT,
+    unmatched_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS migration_log (

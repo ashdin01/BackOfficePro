@@ -262,18 +262,20 @@ def download_document(
 # closed), so the startup catch-up sync can tell "already checked" apart from
 # "never attempted" and doesn't keep retrying closed days forever.
 
-def _record_import_result(sale_date: str, row_count: int, status: str, error_message: str = '') -> None:
+def _record_import_result(sale_date: str, row_count: int, status: str, error_message: str = '',
+                           unmatched_count: int = 0) -> None:
     conn = get_connection()
     try:
         conn.execute("""
-            INSERT INTO atria_import_log (sale_date, row_count, status, error_message)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO atria_import_log (sale_date, row_count, status, error_message, unmatched_count)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(sale_date) DO UPDATE SET
-                imported_at   = datetime('now', 'localtime'),
-                row_count     = excluded.row_count,
-                status        = excluded.status,
-                error_message = excluded.error_message
-        """, (sale_date, row_count, status, error_message))
+                imported_at     = datetime('now', 'localtime'),
+                row_count       = excluded.row_count,
+                status          = excluded.status,
+                error_message   = excluded.error_message,
+                unmatched_count = excluded.unmatched_count
+        """, (sale_date, row_count, status, error_message, unmatched_count))
         conn.commit()
     finally:
         conn.release()
@@ -300,10 +302,12 @@ def _missing_dates(days: int) -> list:
     return missing
 
 
-def _fetch_and_import_one_day(session: requests.Session, target_date: datetime.date) -> int:
+def _fetch_and_import_one_day(session: requests.Session, target_date: datetime.date) -> tuple:
     """Download + import the ATRIA PLU sales report for a single date.
 
-    Returns the number of sales_daily rows upserted. Raises on failure —
+    Returns (upserted, unmatched) — sales_daily rows upserted, and PLUs that
+    couldn't be resolved to a product barcode (so stock wasn't decremented
+    for them; see import_sales._resolve_barcode). Raises on failure —
     callers are responsible for recording the outcome via _record_import_result.
     """
     client_id = create_client(session)
@@ -321,7 +325,13 @@ def _fetch_and_import_one_day(session: requests.Session, target_date: datetime.d
         "Import complete for %s — %d rows, %d movements, %d unmatched PLUs",
         target_date, upserted, movements, unmatched,
     )
-    return upserted
+    if unmatched:
+        logging.warning(
+            "%d PLU(s) on %s could not be matched to a product — stock on hand "
+            "was NOT adjusted for those sales until matched in Sales Report > By Product.",
+            unmatched, target_date,
+        )
+    return upserted, unmatched
 
 
 def sync_missing_days(days: int = 7) -> dict:
@@ -333,11 +343,13 @@ def sync_missing_days(days: int = 7) -> dict:
     individual day is logged and recorded, and the loop continues with the
     remaining days.
 
-    Returns {"imported": [...dates], "failed": [...dates], "skipped_reason": str|None}.
+    Returns {"imported": [...dates], "failed": [...dates], "skipped_reason": str|None,
+    "unmatched_total": int} — unmatched_total sums unmatched PLUs across every
+    day imported in this run, so a caller can decide whether to flag it.
     """
     setup_logging()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    result = {"imported": [], "failed": [], "skipped_reason": None}
+    result = {"imported": [], "failed": [], "skipped_reason": None, "unmatched_total": 0}
 
     missing = _missing_dates(days)
     if not missing:
@@ -360,13 +372,21 @@ def sync_missing_days(days: int = 7) -> dict:
 
     for target_date in missing:
         try:
-            row_count = _fetch_and_import_one_day(session, target_date)
-            _record_import_result(target_date.isoformat(), row_count, "OK")
+            row_count, unmatched = _fetch_and_import_one_day(session, target_date)
+            _record_import_result(target_date.isoformat(), row_count, "OK", unmatched_count=unmatched)
             result["imported"].append(target_date.isoformat())
+            result["unmatched_total"] += unmatched
         except Exception as exc:
             logging.exception("Atria sync: failed to import %s", target_date)
             _record_import_result(target_date.isoformat(), 0, "ERROR", str(exc))
             result["failed"].append(target_date.isoformat())
+
+    if result["unmatched_total"]:
+        logging.warning(
+            "Atria sync: %d unmatched PLU(s) across this run — review Sales Report > "
+            "By Product (rows with a red barcode) to match them.",
+            result["unmatched_total"],
+        )
 
     return result
 
@@ -388,8 +408,8 @@ def main() -> int:
         )
 
         login(session, username, password)
-        row_count = _fetch_and_import_one_day(session, yesterday)
-        _record_import_result(yesterday.isoformat(), row_count, "OK")
+        row_count, unmatched = _fetch_and_import_one_day(session, yesterday)
+        _record_import_result(yesterday.isoformat(), row_count, "OK", unmatched_count=unmatched)
         return 0
 
     except Exception as exc:
