@@ -95,7 +95,8 @@ def get_stock_valuation_detail(dept_ids=None, as_of_date=None):
 # ── Reorder Report ────────────────────────────────────────────────────────────
 
 def get_reorder_items(dept_id=None, supplier_id=None):
-    """Products at or below reorder point with suggested order quantities."""
+    """Products that have fallen below their reorder point (minimum) — stock
+    exactly at the minimum is not yet a trigger — with suggested order quantities."""
     sql = """
         SELECT p.barcode, p.description, d.name as dept_name,
                sup.name as supplier_name,
@@ -118,7 +119,7 @@ def get_reorder_items(dept_id=None, supplier_id=None):
         LEFT JOIN departments d ON p.department_id = d.id
         LEFT JOIN suppliers sup ON p.supplier_id = sup.id
         WHERE p.active = 1
-          AND COALESCE(s.quantity, 0) <= p.reorder_point
+          AND COALESCE(s.quantity, 0) < p.reorder_point
           AND p.reorder_point > 0
     """
     params = []

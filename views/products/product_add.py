@@ -108,6 +108,7 @@ class ProductAdd(KeyboardMixin, QWidget):
         self.reorder_point = QDoubleSpinBox()
         self.reorder_point.setMaximum(99999)
         self.reorder_point.setDecimals(0)
+        self.reorder_point.setToolTip("Minimum stock level. Reorders once stock falls below this.")
 
         self.reorder_max = QDoubleSpinBox()
         self.reorder_max.setMaximum(99999)

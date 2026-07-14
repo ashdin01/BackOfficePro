@@ -38,6 +38,18 @@ def _fill_minimum(widget, barcode="9300000055501", description="New Test Product
     widget.description.setText(description)
 
 
+# ── Reorder point labelling ───────────────────────────────────────────────────
+
+class TestReorderPointLabel:
+    def test_labelled_as_minimum(self, product_add_view):
+        from PyQt6.QtWidgets import QLabel
+        texts = [lbl.text() for lbl in product_add_view.findChildren(QLabel)]
+        assert "Reorder Point (Min)" in texts
+
+    def test_tooltip_explains_below_threshold_trigger(self, product_add_view):
+        assert "falls below" in product_add_view.reorder_point.toolTip()
+
+
 # ── Department must be actively chosen ──────────────────────────────────────────
 
 class TestDepartmentNotPreselected:

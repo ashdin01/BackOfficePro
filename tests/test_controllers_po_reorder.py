@@ -62,7 +62,7 @@ class TestGetReorderRecommendations:
     def test_product_below_reorder_point_appears(self, test_db, db_conn, dept_id, supplier_id):
         bc = _insert_product(db_conn, dept_id, supplier_id, '9300011110001',
                              'Low Stock Item', reorder_point=5, reorder_max=20)
-        _set_soh(db_conn, bc, 3)  # SOH(3) <= reorder_point(5)
+        _set_soh(db_conn, bc, 3)  # SOH(3) < reorder_point(5)
         recs = get_reorder_recommendations(supplier_id)
         barcodes = [r['barcode'] for r in recs]
         assert bc in barcodes
@@ -75,10 +75,26 @@ class TestGetReorderRecommendations:
         barcodes = [r['barcode'] for r in recs]
         assert bc not in barcodes
 
-    def test_product_at_exact_reorder_point_appears(self, test_db, db_conn, dept_id, supplier_id):
+    def test_product_at_exact_reorder_point_not_yet_triggered(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        """Stock sitting exactly at the minimum is not a trigger — only once
+        it drops below. (Reordering the instant stock touches the floor,
+        rather than once it's actually been breached, was the behaviour
+        this test used to assert and has been deliberately changed.)"""
         bc = _insert_product(db_conn, dept_id, supplier_id, '9300011110003',
                              'Exactly At Reorder', reorder_point=5, reorder_max=20)
-        _set_soh(db_conn, bc, 5)  # SOH == reorder_point → should appear
+        _set_soh(db_conn, bc, 5)  # SOH == reorder_point → must NOT appear
+        recs = get_reorder_recommendations(supplier_id)
+        barcodes = [r['barcode'] for r in recs]
+        assert bc not in barcodes
+
+    def test_product_one_below_reorder_point_triggers(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011110005',
+                             'One Below Reorder', reorder_point=5, reorder_max=20)
+        _set_soh(db_conn, bc, 4)  # SOH(4) < reorder_point(5) → should appear
         recs = get_reorder_recommendations(supplier_id)
         barcodes = [r['barcode'] for r in recs]
         assert bc in barcodes
@@ -461,6 +477,71 @@ class TestLookupProductForPO:
         result = lookup_product_for_po(bc, po_id, None, unit_mode=False)
 
         assert result is not None
+
+
+class TestLookupProductForPOSupplierSpecificData:
+    """The 'Bonsoy Milk' scenario: a product linked to two suppliers with
+    different SKUs and pack sizes — the lookup used for Add Line must use
+    the PO's actual supplier, not whichever supplier is the default."""
+
+    def _link(self, db_conn, barcode, supplier_id, is_default, sku, pack_qty, pack_unit='CTN'):
+        db_conn.execute("""
+            INSERT INTO product_suppliers (barcode, supplier_id, is_default, supplier_sku, pack_qty, pack_unit)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (barcode, supplier_id, int(is_default), sku, pack_qty, pack_unit))
+        db_conn.commit()
+
+    def test_uses_alternate_suppliers_sku_and_pack_not_default(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011160001',
+                             'Bonsoy Milk', pack_qty=12)
+        db_conn.execute("INSERT INTO suppliers (code, name) VALUES ('FORDS', 'Fords Dairy')")
+        db_conn.commit()
+        fords_id = db_conn.execute("SELECT id FROM suppliers WHERE code='FORDS'").fetchone()['id']
+
+        self._link(db_conn, bc, supplier_id, is_default=True, sku='SPIRAL-123', pack_qty=12)
+        self._link(db_conn, bc, fords_id, is_default=False, sku='FORDS-456', pack_qty=6)
+
+        po_id = create_po(fords_id)
+        result = lookup_product_for_po(bc, po_id, fords_id, unit_mode=False)
+
+        assert result['supplier_sku'] == 'FORDS-456'
+        assert result['pack_qty'] == 6
+
+    def test_uses_default_suppliers_sku_and_pack_when_po_is_for_default(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011160002',
+                             'Bonsoy Milk 2', pack_qty=12)
+        db_conn.execute("INSERT INTO suppliers (code, name) VALUES ('FORDS2', 'Fords Dairy 2')")
+        db_conn.commit()
+        fords_id = db_conn.execute("SELECT id FROM suppliers WHERE code='FORDS2'").fetchone()['id']
+
+        self._link(db_conn, bc, supplier_id, is_default=True, sku='SPIRAL-999', pack_qty=12)
+        self._link(db_conn, bc, fords_id, is_default=False, sku='FORDS-999', pack_qty=6)
+
+        po_id = create_po(supplier_id)
+        result = lookup_product_for_po(bc, po_id, supplier_id, unit_mode=False)
+
+        assert result['supplier_sku'] == 'SPIRAL-999'
+        assert result['pack_qty'] == 12
+
+    def test_falls_back_to_product_defaults_when_no_supplier_id(
+        self, test_db, db_conn, dept_id, supplier_id
+    ):
+        bc = _insert_product(db_conn, dept_id, supplier_id, '9300011160003',
+                             'No Supplier Context', pack_qty=4)
+        db_conn.execute(
+            "UPDATE products SET supplier_sku='DEFAULT-SKU' WHERE barcode=?", (bc,)
+        )
+        db_conn.commit()
+        po_id = create_po(supplier_id)
+
+        result = lookup_product_for_po(bc, po_id, None, unit_mode=False)
+
+        assert result['supplier_sku'] == 'DEFAULT-SKU'
+        assert result['pack_qty'] == 4
 
 
 # ── Milk forecast path ────────────────────────────────────────────────────────

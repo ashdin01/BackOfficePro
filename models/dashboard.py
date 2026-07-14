@@ -32,7 +32,7 @@ def get_stats() -> dict:
             LEFT JOIN stock_on_hand s ON s.barcode = p.barcode
             WHERE p.active = 1
               AND p.reorder_point > 0
-              AND COALESCE(s.quantity, 0) <= p.reorder_point
+              AND COALESCE(s.quantity, 0) < p.reorder_point
         """).fetchone()
         low_stock_count = int(low[0] or 0)
 

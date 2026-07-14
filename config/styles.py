@@ -101,6 +101,6 @@ def html_bold(text, color):
 
 
 def html_colored_label(value, reorder, on_order=0):
-    """Stock-on-hand coloured label: red if at/below reorder, green otherwise."""
-    color = CLR_DANGER if value <= reorder else CLR_SUCCESS
-    return f"<span style='color:{color}'>{value}</span> (reorder at {reorder})"
+    """Stock-on-hand coloured label: red if below the reorder minimum, green otherwise."""
+    color = CLR_DANGER if value < reorder else CLR_SUCCESS
+    return f"<span style='color:{color}'>{value}</span> (reorder below {reorder})"

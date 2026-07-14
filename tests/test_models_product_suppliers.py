@@ -128,3 +128,74 @@ class TestSaveForBarcode:
         assert result[0]["pack_qty"] == 12
         assert result[0]["pack_unit"] == "CTN"
         assert result[0]["supplier_sku"] == "MYSKU-99"
+
+
+# ── get_map_for_barcodes / get_for_barcode_and_supplier ─────────────────────────
+#
+# The "Bonsoy Milk" scenario: a product with a default supplier (Spiral
+# Foods) and an alternate supplier (Fords Dairy), each with their own SKU
+# and pack size. A PO for the alternate supplier must show *that*
+# supplier's SKU/pack, not the default's.
+
+class TestGetMapForBarcodes:
+    def test_returns_correct_supplier_specific_row(self, product_barcode, supplier_id, second_supplier_id):
+        ps_model.save_for_barcode(product_barcode, [
+            {"supplier_id": supplier_id, "is_default": True,
+             "supplier_sku": "SPIRAL-123", "pack_qty": 12, "pack_unit": "CTN"},
+            {"supplier_id": second_supplier_id, "is_default": False,
+             "supplier_sku": "FORDS-456", "pack_qty": 6, "pack_unit": "CTN"},
+        ])
+
+        default_map   = ps_model.get_map_for_barcodes([product_barcode], supplier_id)
+        alternate_map = ps_model.get_map_for_barcodes([product_barcode], second_supplier_id)
+
+        assert default_map[product_barcode]["supplier_sku"] == "SPIRAL-123"
+        assert default_map[product_barcode]["pack_qty"] == 12
+        assert alternate_map[product_barcode]["supplier_sku"] == "FORDS-456"
+        assert alternate_map[product_barcode]["pack_qty"] == 6
+
+    def test_barcode_absent_when_not_linked_to_that_supplier(
+        self, product_barcode, supplier_id, second_supplier_id
+    ):
+        ps_model.save_for_barcode(product_barcode, [
+            {"supplier_id": supplier_id, "is_default": True,
+             "supplier_sku": "SPIRAL-123", "pack_qty": 12, "pack_unit": "CTN"},
+        ])
+        result = ps_model.get_map_for_barcodes([product_barcode], second_supplier_id)
+        assert product_barcode not in result
+
+    def test_empty_barcode_list_returns_empty_map(self, test_db, supplier_id):
+        assert ps_model.get_map_for_barcodes([], supplier_id) == {}
+
+    def test_multiple_barcodes_batched_correctly(
+        self, db_conn, dept_id, supplier_id, second_supplier_id
+    ):
+        db_conn.execute(
+            "INSERT INTO products (barcode, description, department_id, supplier_id, active, unit) "
+            "VALUES ('9300000000002', 'Second Product', ?, ?, 1, 'EA')",
+            (dept_id, supplier_id)
+        )
+        db_conn.commit()
+        ps_model.save_for_barcode('9300000000002', [
+            {"supplier_id": second_supplier_id, "is_default": True,
+             "supplier_sku": "ALT-SKU", "pack_qty": 3, "pack_unit": "EA"},
+        ])
+
+        result = ps_model.get_map_for_barcodes(
+            ['9300000000002'], second_supplier_id
+        )
+        assert result['9300000000002']["supplier_sku"] == "ALT-SKU"
+
+
+class TestGetForBarcodeAndSupplier:
+    def test_returns_none_when_no_link(self, product_barcode, supplier_id):
+        assert ps_model.get_for_barcode_and_supplier(product_barcode, supplier_id) is None
+
+    def test_returns_the_matching_row(self, product_barcode, supplier_id):
+        ps_model.save_for_barcode(product_barcode, [
+            {"supplier_id": supplier_id, "is_default": True,
+             "supplier_sku": "SKU-77", "pack_qty": 4, "pack_unit": "EA"},
+        ])
+        row = ps_model.get_for_barcode_and_supplier(product_barcode, supplier_id)
+        assert row["supplier_sku"] == "SKU-77"
+        assert row["pack_qty"] == 4

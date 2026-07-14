@@ -4,7 +4,8 @@ from database.connection import db_conn
 
 def get_reorder_candidates(supplier_id) -> list:
     """
-    Products linked to supplier_id whose SOH is at or below their reorder point.
+    Products linked to supplier_id whose SOH has fallen below their reorder
+    point (the minimum) — stock exactly at the minimum is not yet a trigger.
     Returns list of dicts with barcode, description, reorder_point, reorder_max,
     cost_price, on_hand, pack_qty, pack_unit, supplier_sku.
     """
@@ -20,7 +21,7 @@ def get_reorder_candidates(supplier_id) -> list:
             LEFT JOIN stock_on_hand s ON p.barcode = s.barcode
             WHERE p.supplier_id = ?
               AND p.active = 1
-              AND COALESCE(s.quantity, 0) <= p.reorder_point
+              AND COALESCE(s.quantity, 0) < p.reorder_point
               AND p.reorder_point > 0
             ORDER BY p.description
         """, (supplier_id,)).fetchall()

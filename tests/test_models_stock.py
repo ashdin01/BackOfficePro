@@ -93,7 +93,10 @@ class TestAdjust:
 
 
 class TestGetBelowReorder:
-    def test_product_at_reorder_point_is_included(self, test_db, product_barcode, db_conn):
+    def test_product_at_reorder_point_not_yet_included(self, test_db, product_barcode, db_conn):
+        """Exactly at the minimum is not a trigger — only once stock drops
+        below it (name of the function notwithstanding, this used to
+        include the boundary case; deliberately changed)."""
         db_conn.execute(
             "UPDATE products SET reorder_point=10 WHERE barcode=?", (product_barcode,)
         )
@@ -101,7 +104,7 @@ class TestGetBelowReorder:
         soh_model.adjust(product_barcode, 10, "RECEIPT", "", "", "admin")
         results = soh_model.get_below_reorder()
         barcodes = [r["barcode"] for r in results]
-        assert product_barcode in barcodes
+        assert product_barcode not in barcodes
 
     def test_product_below_reorder_point_is_included(self, test_db, product_barcode, db_conn):
         db_conn.execute(
@@ -121,13 +124,15 @@ class TestGetBelowReorder:
         results = soh_model.get_below_reorder()
         assert not any(r["barcode"] == product_barcode for r in results)
 
-    def test_product_with_zero_reorder_point_and_zero_stock_is_included(self, test_db, product_barcode):
-        # get_below_reorder does not exclude reorder_point=0 products.
-        # qty=0, reorder_point=0 satisfies qty <= reorder_point so the product appears.
-        # Filtering by reorder_point > 0 is enforced in the controller, not the model.
+    def test_product_with_zero_reorder_point_and_zero_stock_excluded(self, test_db, product_barcode):
+        # reorder_point=0 means "no threshold configured". With a strict <
+        # comparison, qty=0 and reorder_point=0 no longer satisfy 0 < 0, so
+        # this correctly excludes it — previously the <= comparison here
+        # (with no reorder_point > 0 guard, unlike the other reorder
+        # queries) let it through by accident.
         soh_model.adjust(product_barcode, 0, "RECEIPT", "", "", "admin")
         results = soh_model.get_below_reorder()
-        assert any(r["barcode"] == product_barcode for r in results)
+        assert not any(r["barcode"] == product_barcode for r in results)
 
 
 # ── get_by_barcodes edge cases ────────────────────────────────────────────────

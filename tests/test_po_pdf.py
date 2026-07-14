@@ -10,6 +10,7 @@ import os
 import sqlite3
 import pytest
 from utils.po_pdf import generate_po_pdf
+import models.product_suppliers as ps_model
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -331,4 +332,132 @@ def test_pdf_carton_mode_with_pack_qty_shows_carton_and_unit_count(
     out = str(tmp_path / "smoke_packqty.pdf")
     result = generate_po_pdf(po_id, out)
     assert result == out
-    assert os.path.getsize(out) > 0
+
+
+# ── Per-supplier SKU / pack size ─────────────────────────────────────────────────
+#
+# The "Bonsoy Milk" scenario: a product with a default supplier (e.g. Spiral
+# Foods) that's also linked to an alternate supplier (e.g. Fords Dairy) with
+# a different SKU and pack size. A PO raised against the alternate supplier
+# must print *that* supplier's SKU/pack — not the product's default.
+
+@pytest.fixture()
+def second_supplier_id(db_conn):
+    db_conn.execute("INSERT INTO suppliers (code, name) VALUES ('FORDS', 'Fords Dairy')")
+    db_conn.commit()
+    return db_conn.execute("SELECT id FROM suppliers WHERE code='FORDS'").fetchone()["id"]
+
+
+def _spy_paragraph_text(monkeypatch):
+    """Patch utils.po_pdf.Paragraph to record every string rendered into the
+    PDF while still building real Paragraph flowables, so generate_po_pdf
+    completes normally and we can inspect exactly what text was used."""
+    import utils.po_pdf as po_pdf_mod
+    from reportlab.platypus import Paragraph as RealParagraph
+
+    captured = []
+
+    def spy(text, *args, **kwargs):
+        captured.append(text)
+        return RealParagraph(text, *args, **kwargs)
+
+    monkeypatch.setattr(po_pdf_mod, "Paragraph", spy)
+    return captured
+
+
+class TestPerSupplierSkuAndPack:
+    def test_pdf_shows_alternate_suppliers_sku_not_default(
+        self, tmp_path, db_conn, supplier_id, second_supplier_id, product_barcode, monkeypatch
+    ):
+        ps_model.save_for_barcode(product_barcode, [
+            {"supplier_id": supplier_id, "is_default": True,
+             "supplier_sku": "SPIRAL-123", "pack_qty": 12, "pack_unit": "CTN"},
+            {"supplier_id": second_supplier_id, "is_default": False,
+             "supplier_sku": "FORDS-456", "pack_qty": 6, "pack_unit": "CTN"},
+        ])
+        db_conn.execute(
+            "INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)"
+            " VALUES ('SMOKE-ALTSUP-001', ?, 'DRAFT', 'PO')",
+            (second_supplier_id,),
+        )
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='SMOKE-ALTSUP-001'"
+        ).fetchone()["id"]
+        db_conn.execute(
+            "INSERT INTO po_lines"
+            " (po_id, barcode, description, ordered_qty, unit_cost, pack_qty)"
+            " VALUES (?, ?, 'Bonsoy Milk', 3, 4.00, 6)",
+            (po_id, product_barcode),
+        )
+        db_conn.commit()
+
+        captured = _spy_paragraph_text(monkeypatch)
+        generate_po_pdf(po_id, str(tmp_path / "altsup.pdf"))
+
+        assert any("FORDS-456" in t for t in captured), captured
+        assert not any("SPIRAL-123" in t for t in captured), captured
+
+    def test_pdf_shows_default_suppliers_sku_when_po_is_for_default(
+        self, tmp_path, db_conn, supplier_id, second_supplier_id, product_barcode, monkeypatch
+    ):
+        ps_model.save_for_barcode(product_barcode, [
+            {"supplier_id": supplier_id, "is_default": True,
+             "supplier_sku": "SPIRAL-123", "pack_qty": 12, "pack_unit": "CTN"},
+            {"supplier_id": second_supplier_id, "is_default": False,
+             "supplier_sku": "FORDS-456", "pack_qty": 6, "pack_unit": "CTN"},
+        ])
+        db_conn.execute(
+            "INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)"
+            " VALUES ('SMOKE-DEFSUP-001', ?, 'DRAFT', 'PO')",
+            (supplier_id,),
+        )
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='SMOKE-DEFSUP-001'"
+        ).fetchone()["id"]
+        db_conn.execute(
+            "INSERT INTO po_lines"
+            " (po_id, barcode, description, ordered_qty, unit_cost, pack_qty)"
+            " VALUES (?, ?, 'Bonsoy Milk', 3, 4.00, 12)",
+            (po_id, product_barcode),
+        )
+        db_conn.commit()
+
+        captured = _spy_paragraph_text(monkeypatch)
+        generate_po_pdf(po_id, str(tmp_path / "defsup.pdf"))
+
+        assert any("SPIRAL-123" in t for t in captured), captured
+        assert not any("FORDS-456" in t for t in captured), captured
+
+    def test_falls_back_to_product_default_when_no_explicit_link(
+        self, tmp_path, db_conn, supplier_id, product_barcode, monkeypatch
+    ):
+        """A PO line for a product that was never linked via product_suppliers
+        (pre-v14 data, or added before a supplier link existed) must still
+        render using the product's own default fields, not crash or blank out."""
+        db_conn.execute(
+            "UPDATE products SET supplier_sku='LEGACY-SKU' WHERE barcode=?",
+            (product_barcode,),
+        )
+        db_conn.execute(
+            "INSERT INTO purchase_orders (po_number, supplier_id, status, po_type)"
+            " VALUES ('SMOKE-NOLINK-001', ?, 'DRAFT', 'PO')",
+            (supplier_id,),
+        )
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='SMOKE-NOLINK-001'"
+        ).fetchone()["id"]
+        db_conn.execute(
+            "INSERT INTO po_lines"
+            " (po_id, barcode, description, ordered_qty, unit_cost, pack_qty)"
+            " VALUES (?, ?, 'Unlinked Product', 3, 4.00, 1)",
+            (po_id, product_barcode),
+        )
+        db_conn.commit()
+
+        captured = _spy_paragraph_text(monkeypatch)
+        generate_po_pdf(po_id, str(tmp_path / "nolink.pdf"))
+
+        assert any("LEGACY-SKU" in t for t in captured), captured

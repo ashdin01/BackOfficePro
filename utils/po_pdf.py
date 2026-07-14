@@ -74,6 +74,7 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     from database.connection import get_connection
     import models.po_lines as lines_model
     import models.product as product_model
+    import models.product_suppliers as product_suppliers_model
 
     conn = get_connection()
     po = conn.execute("""
@@ -95,6 +96,13 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     _po_type  = po["po_type"] or "PO"
     unit_mode = po_unit_mode(_po_type)
     is_return = po_is_return(_po_type)
+
+    # Per-supplier SKU/pack size overrides — a product can be linked to
+    # multiple suppliers with different codes/pack sizes, so this PO must
+    # show what *this* supplier actually uses, not the product's default.
+    supplier_overrides = product_suppliers_model.get_map_for_barcodes(
+        [l["barcode"] for l in lines if not l["is_note"]], po["supplier_id"]
+    )
 
     doc = SimpleDocTemplate(
         output_path,
@@ -199,10 +207,16 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
             tbl_data.append([note_para, "", "", "", "", ""])
             continue
 
-        product   = product_model.get_by_barcode(line["barcode"])
-        pack_qty  = int(product["pack_qty"])        if product and product["pack_qty"]  else 1
-        pack_unit = (product["pack_unit"] or "EA")  if product else "EA"
-        sup_sku   = (product["supplier_sku"] or "") if product else ""
+        product  = product_model.get_by_barcode(line["barcode"])
+        override = supplier_overrides.get(line["barcode"])
+        if override:
+            pack_qty  = int(override["pack_qty"]) or 1
+            pack_unit = override["pack_unit"] or "EA"
+            sup_sku   = override["supplier_sku"] or ""
+        else:
+            pack_qty  = int(product["pack_qty"])        if product and product["pack_qty"]  else 1
+            pack_unit = (product["pack_unit"] or "EA")  if product else "EA"
+            sup_sku   = (product["supplier_sku"] or "") if product else ""
         tax_rate  = float(product["tax_rate"])      if product and product["tax_rate"]  else 0.0
 
         total_units = po_display_qty(_po_type, int(line["ordered_qty"]), pack_qty)

@@ -202,7 +202,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_tax = ro_row("Tax Rate", self._tax_label(), self._edit_tax)
         right_col.addLayout(r)
 
-        r, self.lbl_reorder_pt = ro_row("Reorder Point", int(self._reorder_point), self._edit_reorder_point)
+        r, self.lbl_reorder_pt = ro_row("Reorder Point (Min)", int(self._reorder_point), self._edit_reorder_point)
         right_col.addLayout(r)
 
         r, self.lbl_reorder_max = ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
@@ -697,14 +697,22 @@ class ProductEdit(KeyboardMixin, QWidget):
             self.lbl_tax.setText(val)
 
     def _edit_reorder_point(self):
-        val = number_popup("Edit Reorder Point", "Reorder Point", self._reorder_point, self)
+        val = number_popup(
+            "Edit Reorder Point",
+            "Reorder Point (Min) — reorders once stock falls below this",
+            self._reorder_point, self,
+        )
         if val is not None:
             self._reorder_point = val
             self.lbl_reorder_pt.setText(str(int(val)))
 
 
     def _edit_reorder_max(self):
-        val = number_popup("Edit Reorder Max", "Reorder Max (0 = use Reorder Qty)", self._reorder_max, self)
+        val = number_popup(
+            "Edit Reorder Max",
+            "Reorder Max (0 = order 1 unit when triggered)",
+            self._reorder_max, self,
+        )
         if val is not None:
             self._reorder_max = val
             self.lbl_reorder_max.setText(str(int(val)))

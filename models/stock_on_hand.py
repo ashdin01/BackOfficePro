@@ -71,7 +71,7 @@ def get_below_reorder():
             JOIN products p     ON s.barcode = p.barcode
             JOIN departments d  ON p.department_id = d.id
             LEFT JOIN suppliers sup ON p.supplier_id = sup.id
-            WHERE s.quantity <= p.reorder_point AND p.active = 1
+            WHERE s.quantity < p.reorder_point AND p.active = 1
             ORDER BY p.description
         """).fetchall()
 

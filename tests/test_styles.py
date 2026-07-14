@@ -157,3 +157,22 @@ def test_clr_constants_are_unique():
     assert not duplicates, (
         "Duplicate CLR_* hex values found:\n" + "\n".join(duplicates)
     )
+
+
+# ── html_colored_label reorder threshold ────────────────────────────────────────
+
+class TestHtmlColoredLabel:
+    def test_below_reorder_is_danger_colour(self):
+        html = styles.html_colored_label(4, 5)
+        assert styles.CLR_DANGER in html
+
+    def test_at_reorder_point_is_not_danger_colour(self):
+        """Exactly at the minimum is not yet a trigger — matches the reorder
+        recommendation logic, which also uses a strict < comparison."""
+        html = styles.html_colored_label(5, 5)
+        assert styles.CLR_DANGER not in html
+        assert styles.CLR_SUCCESS in html
+
+    def test_above_reorder_point_is_success_colour(self):
+        html = styles.html_colored_label(20, 5)
+        assert styles.CLR_SUCCESS in html

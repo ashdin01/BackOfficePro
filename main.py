@@ -367,10 +367,25 @@ def _configure_app_icon(app):
         logging.warning("App icon not found: %s", icon_path)
 
 
+def _configure_app_style(app):
+    """Force a consistent cross-platform Qt style.
+
+    Without this, Qt falls back to each OS's native default style —
+    "windowsvista"/"windows11" on Windows, "Fusion" on most Linux setups —
+    and since the app's dark theme is applied entirely via stylesheets
+    rather than a QPalette, the native Windows style resists it in places,
+    leaking through as light mode. Fusion is fully stylesheet-driven and
+    renders identically on every OS.
+    """
+    app.setStyle("Fusion")
+    logging.info("App style set to Fusion")
+
+
 def main():
     logging.info("main() called")
     from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
+    _configure_app_style(app)
     _configure_app_icon(app)
 
     import config.settings as _cfg

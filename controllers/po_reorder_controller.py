@@ -11,7 +11,8 @@ import models.supplier as supplier_model
 def get_reorder_recommendations(supplier_id) -> list[dict]:
     """
     Products linked to supplier_id whose effective stock (SOH + on open POs)
-    is at or below their reorder point.
+    has fallen below their reorder point (the minimum). Stock sitting exactly
+    at the minimum is not yet a trigger — only once it drops below.
     Returns dicts with barcode, description, reorder_point, reorder_max,
     cost_price, on_hand, on_order, effective_stock, pack_qty, pack_unit, supplier_sku.
     """
@@ -23,7 +24,7 @@ def get_reorder_recommendations(supplier_id) -> list[dict]:
     for r in candidates:
         on_order_qty    = on_order.get(r['barcode'], 0.0)
         effective_stock = float(r['on_hand']) + on_order_qty
-        if effective_stock <= float(r['reorder_point']):
+        if effective_stock < float(r['reorder_point']):
             d = dict(r)
             d['on_order']        = on_order_qty
             d['effective_stock'] = effective_stock
@@ -310,9 +311,11 @@ def lookup_product_for_po(barcode, po_id, supplier_id, unit_mode) -> dict | None
     if not product:
         return None
 
+    supplier_link = None
     if supplier_id:
-        linked = [r['supplier_id'] for r in ps_model.get_by_barcode(barcode)]
-        if supplier_id not in linked:
+        supplier_rows = ps_model.get_by_barcode(barcode)
+        supplier_link = next((r for r in supplier_rows if r['supplier_id'] == supplier_id), None)
+        if supplier_link is None:
             sup     = supplier_model.get_by_id(supplier_id)
             po_name = sup['name'] if sup else "Unknown"
             raise ValueError(f"not_linked:{po_name}")
@@ -320,8 +323,17 @@ def lookup_product_for_po(barcode, po_id, supplier_id, unit_mode) -> dict | None
     soh          = stock_model.get_by_barcode(barcode)
     on_hand      = int(soh['quantity']) if soh else 0
     reorder_max  = int(product['reorder_max']) if product['reorder_max'] else 0
-    pack_qty     = int(product['pack_qty'])    if product['pack_qty']    else 1
-    pack_unit    = product['pack_unit'] or 'EA'
+    # Prefer this supplier's own SKU/pack size over the product's default —
+    # a product can be linked to multiple suppliers with different codes
+    # and pack sizes (e.g. a case of 12 from one, a case of 6 from another).
+    if supplier_link:
+        pack_qty     = int(supplier_link['pack_qty']) or 1
+        pack_unit    = supplier_link['pack_unit'] or 'EA'
+        supplier_sku = supplier_link['supplier_sku'] or ''
+    else:
+        pack_qty     = int(product['pack_qty']) if product['pack_qty'] else 1
+        pack_unit    = product['pack_unit'] or 'EA'
+        supplier_sku = product['supplier_sku'] or ''
     reorder_point = int(product['reorder_point'])
 
     if unit_mode:
@@ -337,5 +349,6 @@ def lookup_product_for_po(barcode, po_id, supplier_id, unit_mode) -> dict | None
         'reorder_point':  reorder_point,
         'pack_qty':       pack_qty,
         'pack_unit':      pack_unit,
+        'supplier_sku':   supplier_sku,
         'suggested_qty':  suggested_qty,
     }

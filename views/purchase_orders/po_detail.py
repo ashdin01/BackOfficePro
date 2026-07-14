@@ -443,9 +443,16 @@ class PODetail(BaseView):
             d_from = self._date_from.date().toPyDate()
             d_to   = self._date_to.date().toPyDate()
 
-            product_map = product_ctrl.get_products_by_barcodes(barcodes)
-            soh_map     = product_ctrl.get_soh_by_barcodes(barcodes)
-            sales_map   = po_controller.get_sales_for_barcodes_range(barcodes, d_from, d_to)
+            product_map    = product_ctrl.get_products_by_barcodes(barcodes)
+            soh_map        = product_ctrl.get_soh_by_barcodes(barcodes)
+            sales_map      = po_controller.get_sales_for_barcodes_range(barcodes, d_from, d_to)
+            # Per-supplier SKU/pack size — a product can be linked to
+            # multiple suppliers with different codes/pack sizes, so this PO
+            # must show what *this* supplier actually uses, not whichever
+            # supplier happens to be the product's default.
+            supplier_overrides = product_ctrl.get_supplier_overrides_for_barcodes(
+                barcodes, self._po['supplier_id']
+            )
 
             for line in lines:
                 r = self.table.rowCount()
@@ -472,8 +479,13 @@ class PODetail(BaseView):
                     continue
 
                 product  = product_map.get(line['barcode'])
-                pack_qty  = int(product['pack_qty']) if product and product['pack_qty'] else 1
-                pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
+                override = supplier_overrides.get(line['barcode'])
+                if override:
+                    pack_qty  = int(override['pack_qty']) or 1
+                    pack_unit = override['pack_unit'] or 'EA'
+                else:
+                    pack_qty  = int(product['pack_qty']) if product and product['pack_qty'] else 1
+                    pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
                 tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
                 self._line_pack_info.append((pack_qty, pack_unit))
                 self._line_tax_rates.append(tax_rate)
@@ -491,7 +503,10 @@ class PODetail(BaseView):
                 ctn_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r, 2, ctn_item)
 
-                sup_sku = (product['supplier_sku'] or '') if product else ''
+                if override:
+                    sup_sku = override['supplier_sku'] or ''
+                else:
+                    sup_sku = (product['supplier_sku'] or '') if product else ''
                 sup_sku_item = QTableWidgetItem(sup_sku)
                 sup_sku_item.setFlags(sup_sku_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(r, 3, sup_sku_item)

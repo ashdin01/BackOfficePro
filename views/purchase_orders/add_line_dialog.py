@@ -54,6 +54,9 @@ class AddLineDialog(QDialog):
         self.pack_label = QLabel("")
         self.pack_label.setStyleSheet("color: steelblue; font-style: italic;")
 
+        self.sku_label = QLabel("")
+        self.sku_label.setStyleSheet("color: steelblue; font-style: italic;")
+
         self.qty = QDoubleSpinBox()
         self.qty.setMinimum(1)
         self.qty.setMaximum(99999)
@@ -79,6 +82,7 @@ class AddLineDialog(QDialog):
         form.addRow("Description",     self.description)
         form.addRow("Stock on Hand",   self.on_hand_label)
         form.addRow("Pack Size",       self.pack_label)
+        form.addRow("Supplier SKU",    self.sku_label)
         form.addRow("Qty (Units) *" if self._unit_mode else "Qty (Cartons) *", self.qty)
         form.addRow("",                self.unit_preview)
         form.addRow("Unit Cost",       self.unit_cost)
@@ -160,11 +164,13 @@ class AddLineDialog(QDialog):
             reorder = product['reorder_point']
             self.on_hand_label.setText(styles.html_colored_label(on_hand, reorder))
             self.pack_label.setText(f"{self._pack_qty} × {self._pack_unit} per carton")
+            self.sku_label.setText(product.get('supplier_sku') or '—')
             self.qty.setValue(product['suggested_qty'])
             self._update_unit_preview()
         else:
             self.description.clear()
             self.pack_label.setText("")
+            self.sku_label.setText("")
             self.on_hand_label.setText(styles.html_span("Product not found", styles.CLR_GP_BAD))
 
     def _update_unit_preview(self):

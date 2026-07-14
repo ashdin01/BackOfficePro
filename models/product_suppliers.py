@@ -16,6 +16,34 @@ def get_by_barcode(barcode):
         """, (barcode,)).fetchall()
 
 
+def get_map_for_barcodes(barcodes, supplier_id):
+    """{barcode: {supplier_sku, pack_qty, pack_unit}} for one specific
+    supplier — used so a PO shows the SKU/pack size that supplier actually
+    uses, not whichever supplier happens to be the product's default.
+    Barcodes with no explicit link to this supplier are simply absent from
+    the returned map; callers should fall back to the product's own
+    defaults in that case."""
+    if not barcodes:
+        return {}
+    with db_conn() as conn:
+        placeholders = ','.join('?' * len(barcodes))
+        rows = conn.execute(f"""
+            SELECT barcode, COALESCE(supplier_sku, '') AS supplier_sku,
+                   COALESCE(pack_qty, 1)      AS pack_qty,
+                   COALESCE(pack_unit, 'EA')  AS pack_unit
+            FROM product_suppliers
+            WHERE supplier_id = ? AND barcode IN ({placeholders})
+        """, (supplier_id, *barcodes)).fetchall()
+        return {r['barcode']: dict(r) for r in rows}
+
+
+def get_for_barcode_and_supplier(barcode, supplier_id):
+    """Single-row version of get_map_for_barcodes — None if this product has
+    no explicit link to that supplier."""
+    result = get_map_for_barcodes([barcode], supplier_id)
+    return result.get(barcode)
+
+
 def get_by_supplier(supplier_id, default_only=True):
     """All active products linked to a supplier."""
     with db_conn() as conn:

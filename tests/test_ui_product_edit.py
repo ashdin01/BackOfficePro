@@ -40,6 +40,14 @@ class TestLoad:
     def test_normal_title_has_no_marker(self, product_edit_view):
         assert "[Read Only]" not in product_edit_view.windowTitle()
 
+    def test_reorder_point_labelled_as_minimum(self, product_edit_view):
+        """Standardised to match Add Product's "Reorder Point (Min)" — was
+        just "Reorder Point" here, which read inconsistently across the two
+        screens for the same field."""
+        from PyQt6.QtWidgets import QLabel
+        texts = [lbl.text() for lbl in product_edit_view.findChildren(QLabel)]
+        assert "Reorder Point (Min)" in texts
+
 
 # ── _save ─────────────────────────────────────────────────────────────────────
 

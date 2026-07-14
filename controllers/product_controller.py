@@ -270,6 +270,13 @@ def get_products_by_barcodes(barcodes) -> list[dict]:
     return product_model.get_by_barcodes(barcodes)
 
 
+def get_supplier_overrides_for_barcodes(barcodes, supplier_id) -> dict:
+    """{barcode: {supplier_sku, pack_qty, pack_unit}} for one supplier — the
+    per-supplier SKU/pack size that should be shown on a PO for that
+    supplier, rather than the product's default supplier's values."""
+    return ps_model.get_map_for_barcodes(barcodes, supplier_id)
+
+
 def add_product(barcode, description, department_id, supplier_id=None, unit='EA',
                 sell_price=0, cost_price=0, tax_rate=0, reorder_point=0,
                 reorder_max=0, variable_weight=0, expected=1, brand='',

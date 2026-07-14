@@ -91,6 +91,53 @@ def test_configure_app_icon_missing_file_does_not_raise(tmp_path):
         m.BASE_DIR = orig_base
 
 
+# ── _configure_app_style ──────────────────────────────────────────────────────
+#
+# Regression coverage for: BackOfficePro rendered in light mode on Windows
+# but dark mode on Linux, because the app never forced a consistent Qt
+# style — each OS fell back to its own native default ("windowsvista" on
+# Windows, "Fusion" on most Linux setups), and the app's dark theme (applied
+# via stylesheets, not a QPalette) doesn't survive that native Windows style
+# consistently. Forcing Fusion everywhere fixes it.
+
+def test_configure_app_style_sets_fusion():
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    import main as m
+    m._configure_app_style(app)
+
+    assert app.style().objectName().lower() == "fusion"
+
+
+def test_main_calls_configure_app_style(monkeypatch):
+    """main() must apply the style before building any UI, so no window is
+    ever shown with the native (non-Fusion) style first."""
+    import main as m
+
+    calls = []
+    monkeypatch.setattr(m, "_configure_app_style", lambda app: calls.append("style"))
+    monkeypatch.setattr(m, "_configure_app_icon", lambda app: calls.append("icon"))
+
+    class _StopEarly(Exception):
+        pass
+
+    def _raise(*a, **kw):
+        raise _StopEarly()
+
+    monkeypatch.setattr(m, "_pick_store", _raise)
+    monkeypatch.setattr(m, "_init_all_stores", _raise)
+
+    import config.app_config as app_cfg
+    monkeypatch.setattr(app_cfg, "get_merged_login", lambda: False)
+
+    with pytest.raises(_StopEarly):
+        m.main()
+
+    assert calls[0] == "style"
+
+
 # ── .desktop file ─────────────────────────────────────────────────────────────
 
 _REPO_DESKTOP = os.path.join(
