@@ -2577,6 +2577,16 @@ def migrate_v61(conn):
     conn.commit()
 
 
+def migrate_v62(conn):
+    """Add old_cost, new_cost, value_delta columns to stock_movements so a
+    REVALUE row can record a product's cost-price change on PO receipt,
+    plus its stock-value impact on the units already on hand at old cost."""
+    _add_column(conn, "ALTER TABLE stock_movements ADD COLUMN old_cost REAL")
+    _add_column(conn, "ALTER TABLE stock_movements ADD COLUMN new_cost REAL")
+    _add_column(conn, "ALTER TABLE stock_movements ADD COLUMN value_delta REAL")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2638,4 +2648,5 @@ _MIGRATIONS: dict[int, tuple] = {
     59: (migrate_v59, "group_id on stocktake_sessions for sub-department filtering"),
     60: (migrate_v60, "atria_import_log table for startup Atria sync tracking"),
     61: (migrate_v61, "unmatched_count column on atria_import_log"),
+    62: (migrate_v62, "old_cost/new_cost/value_delta columns on stock_movements for REVALUE tracking"),
 }

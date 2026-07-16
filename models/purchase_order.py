@@ -303,7 +303,7 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
     if charges:
         _validate_charges(charges)
 
-    from config.constants import MOVE_RECEIPT
+    from config.constants import MOVE_RECEIPT, MOVE_REVALUE
     from database.audit_context import get_user, get_source
     who = get_user()
     src = get_source()
@@ -324,6 +324,18 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
                 f"UPDATE po_lines SET {', '.join(fields)} WHERE id=?", params
             )
 
+            # Snapshot cost and pre-receipt on-hand qty before either changes,
+            # so a REVALUE row can price the stock already on the shelf at the
+            # old cost — not the units this receipt is bringing in.
+            old_cost_row = conn.execute(
+                "SELECT cost_price FROM products WHERE barcode=?", (r['barcode'],)
+            ).fetchone()
+            old_cost = old_cost_row['cost_price'] if old_cost_row else None
+            pre_soh_row = conn.execute(
+                "SELECT quantity FROM stock_on_hand WHERE barcode=?", (r['barcode'],)
+            ).fetchone()
+            pre_qty = pre_soh_row['quantity'] if pre_soh_row else 0.0
+
             conn.execute("""
                 INSERT INTO stock_on_hand (barcode, quantity)
                 VALUES (?, ?)
@@ -338,6 +350,20 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
             """, (r['barcode'], MOVE_RECEIPT, r['qty_units'], po_number, who, src))
 
             if r['unit_cost'] and r['unit_cost'] > 0 and not r['is_promo']:
+                if old_cost is not None and float(old_cost) != float(r['unit_cost']):
+                    value_delta = (float(r['unit_cost']) - float(old_cost)) * float(pre_qty)
+                    note = (
+                        f"Cost changed ${old_cost:.2f} → ${r['unit_cost']:.2f}"
+                        f"  |  {pre_qty:.0f} units on hand revalued"
+                        f"  |  value {'+' if value_delta >= 0 else ''}{value_delta:.2f}"
+                    )
+                    conn.execute("""
+                        INSERT INTO stock_movements
+                            (barcode, movement_type, quantity, reference, notes,
+                             created_by, source, old_cost, new_cost, value_delta)
+                        VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+                    """, (r['barcode'], MOVE_REVALUE, po_number, note, who, src,
+                          old_cost, r['unit_cost'], value_delta))
                 conn.execute(
                     "UPDATE products SET cost_price=?, updated_at=CURRENT_TIMESTAMP"
                     " WHERE barcode=?",

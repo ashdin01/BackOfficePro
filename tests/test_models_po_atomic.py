@@ -109,6 +109,55 @@ class TestReceiveAtomic:
         # Cost should remain at original 2.00
         assert row["cost_price"] == pytest.approx(2.00)
 
+    def test_receive_atomic_records_revalue_on_cost_change(
+        self, test_db, po_id, product_barcode
+    ):
+        # Pre-seed 40 units already on hand at the old cost (2.00) before this receipt.
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO stock_on_hand (barcode, quantity) VALUES (?, ?)",
+            (product_barcode, 40),
+        )
+        conn.commit()
+        conn.close()
+
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        receipt = self._make_receipt(line["id"], product_barcode,
+                                     unit_cost=2.50, is_promo=False, qty_units=6)
+        po_ctrl.receive_po_atomic(po_id, po["po_number"], [receipt], "RECEIVED")
+
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT * FROM stock_movements WHERE barcode=? AND movement_type=?",
+            (product_barcode, constants.MOVE_REVALUE),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row["quantity"] == 0
+        assert row["old_cost"] == pytest.approx(2.00)
+        assert row["new_cost"] == pytest.approx(2.50)
+        # 40 units already on hand, revalued from 2.00 to 2.50 = +20.00
+        assert row["value_delta"] == pytest.approx(20.00)
+
+    def test_receive_atomic_no_revalue_when_cost_unchanged(
+        self, test_db, po_id, product_barcode
+    ):
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        # Original cost_price is 2.00 (from product_barcode fixture)
+        receipt = self._make_receipt(line["id"], product_barcode,
+                                     unit_cost=2.00, is_promo=False, qty_units=6)
+        po_ctrl.receive_po_atomic(po_id, po["po_number"], [receipt], "RECEIVED")
+
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT * FROM stock_movements WHERE barcode=? AND movement_type=?",
+            (product_barcode, constants.MOVE_REVALUE),
+        ).fetchall()
+        conn.close()
+        assert len(rows) == 0
+
     def test_receive_atomic_sets_po_status_to_final_status(
         self, test_db, po_id, product_barcode
     ):

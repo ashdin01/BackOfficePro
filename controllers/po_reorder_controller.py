@@ -7,6 +7,9 @@ import models.plu_barcode_map as plu_map_model
 import models.product_queries as product_queries_model
 import models.supplier as supplier_model
 
+SAFETY_DAYS  = 2
+SALES_WINDOW = 14
+
 
 def get_reorder_recommendations(supplier_id) -> list[dict]:
     """
@@ -101,21 +104,22 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
     supplier_id.  Requires delivery_days to be set on the supplier; returns []
     if not configured (caller falls back to standard reorder logic).
 
+    Stock ordered now arrives at the next delivery and must last until the
+    delivery after that (the order isn't topped up again until then).
+
     Algorithm per product:
         avg_daily    = total units sold (last 14 days) / 14
-        cover_days   = days_to_next_delivery + 1  (safety buffer)
-        needed_units = max(0, avg_daily * cover_days - current_soh)
+        cover_days   = days_between(next_delivery, following_delivery) + 2  (safety buffer)
+        needed_units = max(0, avg_daily * cover_days - effective_stock)
         cartons      = ceil(needed_units / pack_qty), minimum 1
     """
-    SAFETY_DAYS  = 2
-    SALES_WINDOW = 14
-
     delivery_days = supplier_model.get_delivery_days(supplier_id)
     if not delivery_days:
         return []
 
     days_ahead, next_delivery = _days_to_next_delivery(delivery_days)
-    cover_days   = days_ahead + SAFETY_DAYS
+    days_between, following_delivery = _days_to_next_delivery(delivery_days, from_date=next_delivery)
+    cover_days   = days_between + SAFETY_DAYS
     today        = date.today()
     window_start = today - timedelta(days=SALES_WINDOW)
 
@@ -168,6 +172,7 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
             'cover_days':       cover_days,
             'days_to_delivery': days_ahead,
             'next_delivery':    next_delivery,
+            'following_delivery': following_delivery,
             'has_sales_data':   plu is not None and total_14day > 0,
         })
     return recs
@@ -203,15 +208,16 @@ def auto_populate_po_lines(po_id, supplier_id) -> str:
     milk_recs     = get_milk_order_recommendations(supplier_id)
     milk_barcodes = set()
     if milk_recs:
-        first        = milk_recs[0]
-        nd           = first['next_delivery']
-        delivery_str = f"{nd.strftime('%a')} {nd.day} {nd.strftime('%b')}"
-        safety       = first['cover_days'] - first['days_to_delivery']
+        first          = milk_recs[0]
+        nd             = first['next_delivery']
+        delivery_str   = f"{nd.strftime('%a')} {nd.day} {nd.strftime('%b')}"
+        fd             = first['following_delivery']
+        following_str  = f"{fd.strftime('%a')} {fd.day} {fd.strftime('%b')}"
         for r in milk_recs:
             on_order_str = f"  |  On order: {int(r['on_order'])}" if r['on_order'] > 0 else ""
             note = (
                 f"🥛 Milk forecast: avg {r['avg_daily']}/day × {r['cover_days']} days "
-                f"(delivery {delivery_str} + {safety} day buffer)"
+                f"(delivery {delivery_str}, covering to {following_str} + {SAFETY_DAYS} day buffer)"
                 f"  |  SOH: {int(r['on_hand'])}{on_order_str}"
                 f"  |  {r['pack_qty']} × {r['pack_unit']}"
             )
@@ -224,8 +230,8 @@ def auto_populate_po_lines(po_id, supplier_id) -> str:
             )
             milk_barcodes.add(r['barcode'])
         banner_parts.append(
-            f"🥛 {len(milk_recs)} milk line(s) — covering {first['days_to_delivery']} days "
-            f"to delivery ({delivery_str}) + {safety} day buffer"
+            f"🥛 {len(milk_recs)} milk line(s) — arriving {delivery_str}, covering to "
+            f"{following_str} + {SAFETY_DAYS} day buffer"
         )
 
     # Standard reorder points (skip milk products already added)

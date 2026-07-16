@@ -408,6 +408,7 @@ class POList(BaseView):
     def showEvent(self, event):
         """Auto-focus table when screen becomes visible."""
         super().showEvent(event)
+        self.load()
         if self.active_table.rowCount() > 0:
             self.active_table.setFocus()
             if self.active_table.currentRow() < 0:

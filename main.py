@@ -367,6 +367,25 @@ def _configure_app_icon(app):
         logging.warning("App icon not found: %s", icon_path)
 
 
+def _set_windows_dark_titlebar(widget):
+    """Ask DWM to draw this window's native title bar in dark mode.
+
+    Fusion + stylesheets only theme widget content; the title bar/frame is
+    drawn by the Windows compositor and otherwise follows the OS light/dark
+    setting regardless of the app's own style.
+    """
+    import ctypes
+    try:
+        hwnd = int(widget.winId())
+        value = ctypes.c_int(1)
+        for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 = Win10 20H1+/Win11, 19 = older Win10
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+                break
+    except Exception:
+        logging.exception("Failed to set dark title bar for window")
+
+
 def _configure_app_style(app):
     """Force a consistent cross-platform Qt style.
 
@@ -379,6 +398,20 @@ def _configure_app_style(app):
     """
     app.setStyle("Fusion")
     logging.info("App style set to Fusion")
+
+    if sys.platform == "win32":
+        from PyQt6.QtCore import QObject, QEvent
+
+        class _DarkTitleBarFilter(QObject):
+            """Applies a dark title bar to every top-level window as it's shown."""
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.Show and obj.isWindow():
+                    _set_windows_dark_titlebar(obj)
+                return False
+
+        app._dark_titlebar_filter = _DarkTitleBarFilter(app)
+        app.installEventFilter(app._dark_titlebar_filter)
+        logging.info("Windows dark title bar event filter installed")
 
 
 def main():

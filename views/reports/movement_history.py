@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
 from views.base_view import BaseView
+import config.styles as styles
 
 class NumItem(QTableWidgetItem):
     """Sorts numerically, stripping $, %, commas and +/-."""
@@ -43,7 +44,7 @@ class MovementHistoryReport(BaseView):
         self.type_filter = QComboBox()
         self.type_filter.addItems([
             "ALL", "RECEIPT", "SALE", "ADJUSTMENT_IN",
-            "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE"
+            "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE", "REVALUE"
         ])
         filter_row.addWidget(self.type_filter)
 
@@ -118,6 +119,8 @@ class MovementHistoryReport(BaseView):
                 type_item.setForeground(QColor("green"))
             elif row['movement_type'] in ('SALE', 'WASTAGE', 'ADJUSTMENT_OUT', 'SHRINKAGE'):
                 type_item.setForeground(QColor("red"))
+            elif row['movement_type'] == 'REVALUE':
+                type_item.setForeground(QColor(styles.CLR_PURPLE))
             else:
                 type_item.setForeground(QColor("steelblue"))
             self.table.setItem(r, 3, type_item)
@@ -125,7 +128,11 @@ class MovementHistoryReport(BaseView):
             qty = row['quantity']
             qty_item = NumItem(f"{'+' if qty > 0 else ''}{qty:.0f}")
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            qty_item.setForeground(QColor("green") if qty > 0 else QColor("red"))
+            qty_item.setForeground(
+                QColor("green") if qty > 0 else
+                QColor("red") if qty < 0 else
+                QColor(styles.CLR_MUTED)
+            )
             self.table.setItem(r, 4, qty_item)
 
             self.table.setItem(r, 5, QTableWidgetItem(row['reference'] or ''))

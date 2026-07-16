@@ -136,6 +136,9 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by      TEXT,
     source          TEXT    DEFAULT '',
+    old_cost        REAL,
+    new_cost        REAL,
+    value_delta     REAL,
     FOREIGN KEY (barcode) REFERENCES products(barcode) ON DELETE RESTRICT
 );
 

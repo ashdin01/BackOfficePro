@@ -56,6 +56,7 @@ MOVE_SHRINKAGE      = 'SHRINKAGE'
 # Stock movement types — system-generated (not shown in dropdowns)
 MOVE_REVERSAL  = 'REVERSAL'
 MOVE_STOCKTAKE = 'STOCKTAKE'
+MOVE_REVALUE   = 'REVALUE'
 
 # Dropdown list for stock adjustment screens — must stay in sync with MOVE_* constants above
 MOVE_TYPES = [

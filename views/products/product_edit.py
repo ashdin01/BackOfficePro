@@ -1197,7 +1197,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         filter_row.addWidget(QLabel("Type:"))
         type_cb = QComboBox()
         type_cb.addItems(["ALL", "RECEIPT", "SALE", "ADJUSTMENT", "ADJUSTMENT_IN",
-                          "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE"])
+                          "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE",
+                          "REVALUE"])
         filter_row.addWidget(type_cb)
         filter_row.addStretch()
         status_lbl = QLabel()
@@ -1229,6 +1230,7 @@ class ProductEdit(KeyboardMixin, QWidget):
             for row in reversed(rows):  # oldest first so balance builds correctly
                 balance += row["quantity"]
                 display_rows.append((row, balance))
+            display_rows.reverse()  # newest first for display, balances already computed
 
             for row, bal in display_rows:
                 r = tbl.rowCount()
@@ -1242,13 +1244,19 @@ class ProductEdit(KeyboardMixin, QWidget):
                     type_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
                 elif row["movement_type"] in ("SALE", "WASTAGE", "ADJUSTMENT_OUT", "SHRINKAGE"):
                     type_item.setForeground(QColor(styles.CLR_DANGER))
+                elif row["movement_type"] == "REVALUE":
+                    type_item.setForeground(QColor(styles.CLR_PURPLE))
                 else:
                     type_item.setForeground(QColor("steelblue"))
                 tbl.setItem(r, 1, type_item)
 
                 qty_item = QTableWidgetItem(f"{'+' if qty > 0 else ''}{qty:.0f}")
                 qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                qty_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if qty > 0 else QColor(styles.CLR_DANGER))
+                qty_item.setForeground(
+                    QColor(styles.CLR_SUCCESS_ALT) if qty > 0 else
+                    QColor(styles.CLR_DANGER) if qty < 0 else
+                    QColor(styles.CLR_MUTED)
+                )
                 tbl.setItem(r, 2, qty_item)
 
                 bal_item = QTableWidgetItem(f"{bal:.0f}")
