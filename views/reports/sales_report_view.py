@@ -12,6 +12,7 @@ import csv, os, logging
 import config.styles as styles
 import controllers.sales_report_controller as sales_ctrl
 from views.base_view import BaseView
+from utils.error_dialog import show_error
 from views.widgets.table_items import NumItem, item as _item, RIGHT, CENTER
 from views.widgets.table_utils import make_table as _make_table
 from views.reports.sales_plu_dialogs import (
@@ -536,56 +537,60 @@ class SalesReportView(BaseView):
         saved_plu_map = _load_plu_map()
 
         # ── Write CSV ─────────────────────────────────────────────────
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow([
-                "Barcode", "PLU", "Description", "Sub Group", "Department",
-                "On Hand", "Total Qty", "Total Sales $", "Avg/Day $",
-                "% of Sales", "Matched"
-            ])
-
-            for row in agg_rows:
-                plu      = row['plu']       or ""
-                plu_name = row['plu_name']  or ""
-                sub_grp  = row['sub_group'] or ""
-                qty      = row['qty']       or 0
-                sales    = row['sales']     or 0
-                avg_day  = row['avg_day']   or 0
-                pct      = (sales / total_rev * 100) if total_rev else 0
-
-                # Resolve product — same priority order as screen
-                prod = None
-                try:
-                    plu_int  = int(str(plu).strip())
-                    saved_bc = saved_plu_map.get(plu_int)
-                    if saved_bc:
-                        prod = bc_to_prod.get(saved_bc)
-                except (ValueError, TypeError):
-                    plu_int = None
-                if prod is None and plu_int is not None:
-                    prod = plu_to_prod.get(plu_int)
-                if prod is None:
-                    prod = bc_to_prod.get(str(plu).strip())
-
-                barcode   = prod["barcode"]   if prod else ""
-                dept      = prod["dept_name"] if prod else ""
-                on_hand   = prod["on_hand"]   if prod else ""
-                desc      = prod["description"] if prod else plu_name
-                matched   = "Yes" if prod else "No"
-
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
                 w.writerow([
-                    f'="{barcode}"' if barcode else "",
-                    plu,
-                    desc,
-                    sub_grp,
-                    dept,
-                    f"{on_hand:.0f}" if on_hand != "" else "",
-                    f"{qty:.0f}",
-                    f"{sales:.2f}",
-                    f"{avg_day:.2f}",
-                    f"{pct:.1f}%",
-                    matched,
+                    "Barcode", "PLU", "Description", "Sub Group", "Department",
+                    "On Hand", "Total Qty", "Total Sales $", "Avg/Day $",
+                    "% of Sales", "Matched"
                 ])
+
+                for row in agg_rows:
+                    plu      = row['plu']       or ""
+                    plu_name = row['plu_name']  or ""
+                    sub_grp  = row['sub_group'] or ""
+                    qty      = row['qty']       or 0
+                    sales    = row['sales']     or 0
+                    avg_day  = row['avg_day']   or 0
+                    pct      = (sales / total_rev * 100) if total_rev else 0
+
+                    # Resolve product — same priority order as screen
+                    prod = None
+                    try:
+                        plu_int  = int(str(plu).strip())
+                        saved_bc = saved_plu_map.get(plu_int)
+                        if saved_bc:
+                            prod = bc_to_prod.get(saved_bc)
+                    except (ValueError, TypeError):
+                        plu_int = None
+                    if prod is None and plu_int is not None:
+                        prod = plu_to_prod.get(plu_int)
+                    if prod is None:
+                        prod = bc_to_prod.get(str(plu).strip())
+
+                    barcode   = prod["barcode"]   if prod else ""
+                    dept      = prod["dept_name"] if prod else ""
+                    on_hand   = prod["on_hand"]   if prod else ""
+                    desc      = prod["description"] if prod else plu_name
+                    matched   = "Yes" if prod else "No"
+
+                    w.writerow([
+                        f'="{barcode}"' if barcode else "",
+                        plu,
+                        desc,
+                        sub_grp,
+                        dept,
+                        f"{on_hand:.0f}" if on_hand != "" else "",
+                        f"{qty:.0f}",
+                        f"{sales:.2f}",
+                        f"{avg_day:.2f}",
+                        f"{pct:.1f}%",
+                        matched,
+                    ])
+        except OSError as e:
+            show_error(self, "Could not export the sales report.", e, title="Export Failed")
+            return
 
         matched_count   = sum(1 for r in agg_rows
                               if saved_plu_map.get(

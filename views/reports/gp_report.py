@@ -10,6 +10,7 @@ from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
 from views.base_view import BaseView
 from views.widgets.table_items import NumItem, center_item, right_item
+from utils.error_dialog import show_error
 
 
 class GPReport(BaseView):
@@ -175,10 +176,14 @@ class GPReport(BaseView):
         if not path:
             return
         rows = report_ctrl.get_gp_data(self.dept_filter.currentData(), self.gp_filter.currentData())
-        with open(path, 'w', newline='') as f:
-            w = csv.writer(f)
-            w.writerow(["Barcode", "Description", "Department", "Sell Price", "Cost Price", "GP %"])
-            for row in rows:
-                w.writerow([row['barcode'], row['description'], row['dept_name'],
-                             row['sell_price'], row['cost_price'], row['gp_pct']])
+        try:
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(["Barcode", "Description", "Department", "Sell Price", "Cost Price", "GP %"])
+                for row in rows:
+                    w.writerow([row['barcode'], row['description'], row['dept_name'],
+                                 row['sell_price'], row['cost_price'], row['gp_pct']])
+        except OSError as e:
+            show_error(self, "Could not export the GP report.", e, title="Export Failed")
+            return
         QMessageBox.information(self, "Export", f"Exported to {path}")

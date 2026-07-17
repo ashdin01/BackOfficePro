@@ -12,6 +12,7 @@ from PyQt6.QtGui import QColor, QFont
 
 import config.styles as styles
 import controllers.report_controller as report_ctrl
+from utils.error_dialog import show_error
 
 _HEADER_BG  = "#1e3a5f"
 _HEADER_FG  = "#90caf9"
@@ -298,7 +299,10 @@ class LiquorReport(QWidget):
         )
         if not path:
             return
-        with open(path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=['Group', 'Description', 'Unit', 'SOH Start', 'IN', 'OUT', 'SOH End'])
-            writer.writeheader()
-            writer.writerows(self._data)
+        try:
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=['Group', 'Description', 'Unit', 'SOH Start', 'IN', 'OUT', 'SOH End'])
+                writer.writeheader()
+                writer.writerows(self._data)
+        except OSError as e:
+            show_error(self, "Could not export the liquor report.", e, title="Export Failed")

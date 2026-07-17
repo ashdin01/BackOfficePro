@@ -240,73 +240,77 @@ class POHistory(QWidget):
 
         data = compute_po_history_data(self.po_id, po=po)
 
-        with open(path, 'w', newline='', encoding='utf-8') as f:
-            w = csv.writer(f)
+        try:
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
 
-            w.writerow(["PO Number",        po['po_number']])
-            w.writerow(["Supplier",         po['supplier_name']])
-            w.writerow(["Status",           po['status']])
-            w.writerow(["Supplier Invoice", po['supplier_invoice_number'] or ''])
-            w.writerow(["Received Date",    po['delivery_date'] or ''])
-            sup = supplier_ctrl.get_by_id(po['supplier_id'])
-            if sup:
-                bk_name = sup['bank_account_name']   or ''
-                bk_bsb  = sup['bank_bsb']            or ''
-                bk_acct = sup['bank_account_number'] or ''
-                if bk_name or bk_bsb or bk_acct:
-                    w.writerow(["Bank Account Name", bk_name])
-                    w.writerow(["BSB",               bk_bsb])
-                    w.writerow(["Account Number",    bk_acct])
-            w.writerow([])
-
-            w.writerow([
-                "Barcode", "Description", "Pack Size",
-                "Ordered (units)", "Received (units)", "Weight (kg)",
-                "Cost ex. GST", "Tax %", "Promo",
-                "Line Total ex. GST", "Line Total inc. GST",
-            ] if data.unit_mode else [
-                "Barcode", "Description", "Pack Size",
-                "Ordered (cartons)", "Received (cartons)", "Received (units)", "Weight (kg)",
-                "Cost ex. GST", "Tax %", "Promo",
-                "Line Total ex. GST", "Line Total inc. GST",
-            ])
-
-            for ld in data.lines:
-                weight_csv = f"{ld.recv_weight:.3f}" if ld.is_variable_weight else ""
-                if data.unit_mode:
-                    w.writerow([
-                        ld.barcode, ld.description, ld.pack_str,
-                        ld.ordered_disp, ld.recv_units, weight_csv,
-                        f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
-                        "Yes" if ld.is_promo else "No",
-                        f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
-                    ])
-                else:
-                    w.writerow([
-                        ld.barcode, ld.description, ld.pack_str,
-                        ld.ordered_qty_raw, ld.recv_raw, ld.recv_units, weight_csv,
-                        f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
-                        "Yes" if ld.is_promo else "No",
-                        f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
-                    ])
-
-            if data.charges:
+                w.writerow(["PO Number",        po['po_number']])
+                w.writerow(["Supplier",         po['supplier_name']])
+                w.writerow(["Status",           po['status']])
+                w.writerow(["Supplier Invoice", po['supplier_invoice_number'] or ''])
+                w.writerow(["Received Date",    po['delivery_date'] or ''])
+                sup = supplier_ctrl.get_by_id(po['supplier_id'])
+                if sup:
+                    bk_name = sup['bank_account_name']   or ''
+                    bk_bsb  = sup['bank_bsb']            or ''
+                    bk_acct = sup['bank_account_number'] or ''
+                    if bk_name or bk_bsb or bk_acct:
+                        w.writerow(["Bank Account Name", bk_name])
+                        w.writerow(["BSB",               bk_bsb])
+                        w.writerow(["Account Number",    bk_acct])
                 w.writerow([])
-                w.writerow(["Additional Charges"])
-                w.writerow(["Description", "Tax %", "Amount ex. GST", "Amount inc. GST"])
-                for cd in data.charges:
-                    w.writerow([
-                        cd.description,
-                        f"{cd.tax_r:.0f}",
-                        f"{cd.amt_ex:.2f}",
-                        f"{cd.amt_inc:.2f}",
-                    ])
 
-            total_label = "Credit Total inc. GST" if data.is_return else "Total inc. GST"
-            w.writerow([])
-            w.writerow(["Subtotal ex. GST", f"{data.grand_ex:.2f}"])
-            w.writerow(["GST",              f"{data.grand_gst:.2f}"])
-            w.writerow([total_label,        f"{data.grand_inc:.2f}"])
+                w.writerow([
+                    "Barcode", "Description", "Pack Size",
+                    "Ordered (units)", "Received (units)", "Weight (kg)",
+                    "Cost ex. GST", "Tax %", "Promo",
+                    "Line Total ex. GST", "Line Total inc. GST",
+                ] if data.unit_mode else [
+                    "Barcode", "Description", "Pack Size",
+                    "Ordered (cartons)", "Received (cartons)", "Received (units)", "Weight (kg)",
+                    "Cost ex. GST", "Tax %", "Promo",
+                    "Line Total ex. GST", "Line Total inc. GST",
+                ])
+
+                for ld in data.lines:
+                    weight_csv = f"{ld.recv_weight:.3f}" if ld.is_variable_weight else ""
+                    if data.unit_mode:
+                        w.writerow([
+                            ld.barcode, ld.description, ld.pack_str,
+                            ld.ordered_disp, ld.recv_units, weight_csv,
+                            f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
+                            "Yes" if ld.is_promo else "No",
+                            f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
+                        ])
+                    else:
+                        w.writerow([
+                            ld.barcode, ld.description, ld.pack_str,
+                            ld.ordered_qty_raw, ld.recv_raw, ld.recv_units, weight_csv,
+                            f"{ld.cost:.4f}", f"{ld.tax_rate:.0f}",
+                            "Yes" if ld.is_promo else "No",
+                            f"{ld.line_ex:.2f}", f"{ld.line_inc:.2f}",
+                        ])
+
+                if data.charges:
+                    w.writerow([])
+                    w.writerow(["Additional Charges"])
+                    w.writerow(["Description", "Tax %", "Amount ex. GST", "Amount inc. GST"])
+                    for cd in data.charges:
+                        w.writerow([
+                            cd.description,
+                            f"{cd.tax_r:.0f}",
+                            f"{cd.amt_ex:.2f}",
+                            f"{cd.amt_inc:.2f}",
+                        ])
+
+                total_label = "Credit Total inc. GST" if data.is_return else "Total inc. GST"
+                w.writerow([])
+                w.writerow(["Subtotal ex. GST", f"{data.grand_ex:.2f}"])
+                w.writerow(["GST",              f"{data.grand_gst:.2f}"])
+                w.writerow([total_label,        f"{data.grand_inc:.2f}"])
+        except OSError as e:
+            show_error(self, "Could not export the PO history.", e, title="Export Failed")
+            return
 
         import subprocess, sys
         if sys.platform == 'win32':
@@ -473,7 +477,11 @@ class POHistory(QWidget):
                 ]),
             ))
 
-        doc.build(story)
+        try:
+            doc.build(story)
+        except OSError as e:
+            show_error(self, "Could not export the PO receipt PDF.", e, title="Export Failed")
+            return
 
         import subprocess, sys
         if sys.platform == 'win32':

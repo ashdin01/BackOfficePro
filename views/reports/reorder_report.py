@@ -10,6 +10,7 @@ from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
 from views.base_view import BaseView
 from views.widgets.table_items import NumItem, center_item, right_item
+from utils.error_dialog import show_error
 
 
 class ReorderReport(BaseView):
@@ -112,12 +113,16 @@ class ReorderReport(BaseView):
         if not path:
             return
         rows = report_ctrl.get_reorder_items(self.dept_filter.currentData(), self.sup_filter.currentData())
-        with open(path, 'w', newline='') as f:
-            w = csv.writer(f)
-            w.writerow(["Barcode", "Description", "Department", "Supplier",
-                        "On Hand", "Reorder Point", "Order Qty", "Unit Cost", "Order Cost"])
-            for row in rows:
-                w.writerow([row['barcode'], row['description'], row['dept_name'],
-                             row['supplier_name'], row['on_hand'], row['reorder_point'],
-                             row['cost_price'], row['order_cost']])
+        try:
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(["Barcode", "Description", "Department", "Supplier",
+                            "On Hand", "Reorder Point", "Order Qty", "Unit Cost", "Order Cost"])
+                for row in rows:
+                    w.writerow([row['barcode'], row['description'], row['dept_name'],
+                                 row['supplier_name'], row['on_hand'], row['reorder_point'],
+                                 row['cost_price'], row['order_cost']])
+        except OSError as e:
+            show_error(self, "Could not export the reorder report.", e, title="Export Failed")
+            return
         QMessageBox.information(self, "Export", f"Exported to {path}")

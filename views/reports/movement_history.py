@@ -9,6 +9,7 @@ from PyQt6.QtGui import QColor
 import controllers.report_controller as report_ctrl
 from views.base_view import BaseView
 import config.styles as styles
+from utils.error_dialog import show_error
 
 class NumItem(QTableWidgetItem):
     """Sorts numerically, stripping $, %, commas and +/-."""
@@ -162,10 +163,14 @@ class MovementHistoryReport(BaseView):
             date_to=self.date_to.date().toString("yyyy-MM-dd"),
             limit=999999
         )
-        with open(path, 'w', newline='') as f:
-            w = csv.writer(f)
-            w.writerow(["Date/Time", "Barcode", "Description", "Type", "Qty", "Reference", "Notes"])
-            for row in rows:
-                w.writerow([row['created_at'], row['barcode'], row['description'],
-                             row['movement_type'], row['quantity'], row['reference'], row['notes']])
+        try:
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(["Date/Time", "Barcode", "Description", "Type", "Qty", "Reference", "Notes"])
+                for row in rows:
+                    w.writerow([row['created_at'], row['barcode'], row['description'],
+                                 row['movement_type'], row['quantity'], row['reference'], row['notes']])
+        except OSError as e:
+            show_error(self, "Could not export the movement history.", e, title="Export Failed")
+            return
         QMessageBox.information(self, "Export", f"Exported to {path}")

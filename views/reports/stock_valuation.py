@@ -11,6 +11,7 @@ import controllers.report_controller as report_ctrl
 from views.base_view import BaseView
 from views.widgets.table_items import right_item as _right
 from views.widgets.table_utils import make_table as _make_table_base
+from utils.error_dialog import show_error
 import csv, os
 
 
@@ -223,10 +224,14 @@ class StockValuationReport(BaseView):
             return
         dept_ids = self._selected_dept_ids()
         rows = report_ctrl.get_stock_valuation_detail(dept_ids, as_of_date)
-        with open(path, 'w', newline='') as f:
-            w = csv.writer(f)
-            w.writerow(["Barcode", "Description", "Department", "Unit", "Qty", "Cost Value", "Sell Value"])
-            for row in rows:
-                w.writerow([row['barcode'], row['description'], row['dept_name'],
-                             row['unit'], row['quantity'], row['cost_value'], row['sell_value']])
+        try:
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(["Barcode", "Description", "Department", "Unit", "Qty", "Cost Value", "Sell Value"])
+                for row in rows:
+                    w.writerow([row['barcode'], row['description'], row['dept_name'],
+                                 row['unit'], row['quantity'], row['cost_value'], row['sell_value']])
+        except OSError as e:
+            show_error(self, "Could not export the stock valuation.", e, title="Export Failed")
+            return
         QMessageBox.information(self, "Export", f"Exported to {path}")
