@@ -50,7 +50,7 @@ def silent_auto_backup() -> str | None:
     try:
         files = sorted(
             [os.path.join(_BACKUP_DIR, f)
-             for f in os.listdir(_BACKUP_DIR) if f.endswith(".db")]
+             for f in os.listdir(_BACKUP_DIR) if _BACKUP_RE.match(f)]
         )
         for old in files[:-_KEEP_COUNT]:
             os.remove(old)

@@ -401,11 +401,13 @@ def _configure_app_style(app):
 
     if sys.platform == "win32":
         from PyQt6.QtCore import QObject, QEvent
+        from PyQt6.QtWidgets import QWidget
 
         class _DarkTitleBarFilter(QObject):
             """Applies a dark title bar to every top-level window as it's shown."""
             def eventFilter(self, obj, event):
-                if event.type() == QEvent.Type.Show and obj.isWindow():
+                if (event.type() == QEvent.Type.Show
+                        and isinstance(obj, QWidget) and obj.isWindow()):
                     _set_windows_dark_titlebar(obj)
                 return False
 
