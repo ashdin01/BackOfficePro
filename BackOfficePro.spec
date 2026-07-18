@@ -46,6 +46,7 @@ a = Analysis(
         'views.reports.reorder_report',
         'views.reports.movement_history',
         'views.reports.writeoff_report',
+        'views.reports.weight_variance_report',
         'views.reports.liquor_report',
         'views.products.plu_manager',
         'views.ar.aged_debtors',

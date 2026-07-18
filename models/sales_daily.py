@@ -135,21 +135,30 @@ def get_last_import_date():
 
 # ── Per-barcode sales queries ─────────────────────────────────────────────────
 
-def get_sales_for_barcode(barcode):
-    """
-    Return a dict of sales totals (last_week, two_weeks, this_month, ytd)
-    by looking up the product's PLU in the plu_barcode_map and aggregating sales_daily.
-    Returns None if no PLU mapping exists.
-    """
+def _period_bounds():
+    """Returns (last_week_start, last_week_end, two_weeks_start, two_weeks_end,
+    month_start, year_start, today) — the window boundaries shared by the
+    per-barcode last_week/two_weeks/this_month/ytd breakdowns."""
     today = date.today()
-    days_since_monday = today.weekday()
-    this_week_start = today - timedelta(days=days_since_monday)
+    this_week_start = today - timedelta(days=today.weekday())
     last_week_start = this_week_start - timedelta(days=7)
     last_week_end   = this_week_start - timedelta(days=1)
     two_weeks_start = last_week_start - timedelta(days=7)
     two_weeks_end   = last_week_start - timedelta(days=1)
     month_start = today.replace(day=1)
     year_start  = today.replace(month=1, day=1)
+    return (last_week_start, last_week_end, two_weeks_start, two_weeks_end,
+            month_start, year_start, today)
+
+
+def get_sales_for_barcode(barcode):
+    """
+    Return a dict of sales totals (last_week, two_weeks, this_month, ytd)
+    by looking up the product's PLU in the plu_barcode_map and aggregating sales_daily.
+    Returns None if no PLU mapping exists.
+    """
+    (last_week_start, last_week_end, two_weeks_start, two_weeks_end,
+     month_start, year_start, today) = _period_bounds()
 
     with db_conn() as conn:
         try:
@@ -177,6 +186,44 @@ def get_sales_for_barcode(barcode):
             }
         except Exception:
             logging.exception("sales_daily.get_sales_for_barcode failed")
+            return None
+
+
+def get_weight_for_barcode(barcode):
+    """
+    Return a dict of weight sold in kg (last_week, two_weeks, this_month, ytd)
+    for a variable-weight product, by looking up its PLU in plu_barcode_map
+    and summing sales_daily.weight_kg. Returns None if no PLU mapping exists.
+    """
+    (last_week_start, last_week_end, two_weeks_start, two_weeks_end,
+     month_start, year_start, today) = _period_bounds()
+
+    with db_conn() as conn:
+        try:
+            plu_row = conn.execute(
+                "SELECT plu FROM plu_barcode_map WHERE barcode = ?", (barcode,)
+            ).fetchone()
+            if not plu_row:
+                return None
+
+            plu = str(plu_row[0])
+
+            def _weight(d_from, d_to):
+                row = conn.execute("""
+                    SELECT COALESCE(SUM(weight_kg), 0)
+                    FROM sales_daily
+                    WHERE plu = ? AND sale_date BETWEEN ? AND ?
+                """, (plu, str(d_from), str(d_to))).fetchone()
+                return round(float(row[0]), 3) if row else 0.0
+
+            return {
+                "last_week":   _weight(last_week_start, last_week_end),
+                "two_weeks":   _weight(two_weeks_start, two_weeks_end),
+                "this_month":  _weight(month_start, today),
+                "ytd":         _weight(year_start, today),
+            }
+        except Exception:
+            logging.exception("sales_daily.get_weight_for_barcode failed")
             return None
 
 

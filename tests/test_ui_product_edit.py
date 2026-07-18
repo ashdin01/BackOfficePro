@@ -48,6 +48,31 @@ class TestLoad:
         texts = [lbl.text() for lbl in product_edit_view.findChildren(QLabel)]
         assert "Reorder Point (Min)" in texts
 
+    def test_non_variable_weight_product_has_no_volume_sold_row(self, product_edit_view):
+        """Volume Sold only makes sense for weighed items — must not show for
+        a normal each-priced product."""
+        from PyQt6.QtWidgets import QLabel
+        texts = [lbl.text() for lbl in product_edit_view.findChildren(QLabel)]
+        assert "Volume Sold (This Month)" not in texts
+        assert not hasattr(product_edit_view, "lbl_vol_sold")
+
+    def test_variable_weight_product_shows_volume_sold_row(self, qtbot, test_db, db_conn, dept_id, supplier_id):
+        db_conn.execute(
+            "INSERT INTO products (barcode, description, department_id, supplier_id, "
+            "sell_price, cost_price, tax_rate, pack_qty, active, unit, variable_weight) "
+            "VALUES ('8000000000020', 'Weighed Item', ?, ?, 15.00, 8.00, 10.0, 1, 1, 'KG', 1)",
+            (dept_id, supplier_id)
+        )
+        db_conn.commit()
+        from views.products.product_edit import ProductEdit
+        from PyQt6.QtWidgets import QLabel
+        w = ProductEdit('8000000000020')
+        qtbot.addWidget(w)
+        texts = [lbl.text() for lbl in w.findChildren(QLabel)]
+        assert "Volume Sold (This Month)" in texts
+        assert hasattr(w, "lbl_vol_sold")
+        assert "0.00 kg" in w.lbl_vol_sold.text()
+
 
 # ── _save ─────────────────────────────────────────────────────────────────────
 

@@ -208,15 +208,18 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_reorder_max = ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
         right_col.addLayout(r)
 
+        right_col.addStretch()
+
+        # Third column — status & product flags
         r, self.lbl_active = ro_row("Active", "Yes" if self._active else "No", self._edit_active)
-        right_col.addLayout(r)
+        third_col.addLayout(r)
 
         soh = product_controller.get_soh_by_barcode(self.barcode)
         soh_qty = int(soh["quantity"]) if soh else 0
         soh_color = styles.CLR_SUCCESS_ALT if soh_qty > 0 else styles.CLR_ORANGE if soh_qty == 0 else styles.CLR_DANGER_ALT
         self.lbl_soh = QLabel(f'<span style="color:{soh_color};font-weight:bold;">{soh_qty}</span>')
         self.lbl_soh.setTextFormat(Qt.TextFormat.RichText)
-        right_col.addLayout(info_row("Stock on Hand", self.lbl_soh))
+        third_col.addLayout(info_row("Stock on Hand", self.lbl_soh))
 
         on_order = product_controller.get_stock_on_order(self.barcode)
         on_order_color = styles.CLR_BLUE if on_order > 0 else styles.CLR_MUTED
@@ -234,11 +237,23 @@ class ProductEdit(KeyboardMixin, QWidget):
         oo_row.addWidget(oo_key)
         oo_row.addWidget(self.lbl_on_order)
         oo_row.addStretch()
-        right_col.addLayout(oo_row)
+        third_col.addLayout(oo_row)
 
-        right_col.addStretch()
+        if self._variable_wt:
+            vol = product_controller.get_volume_sold(self.barcode)
+            vol_month = vol['this_month'] if vol else 0.0
+            self.lbl_vol_sold = QLabel(f'<span style="font-weight:bold;">{vol_month:.2f} kg</span>')
+            self.lbl_vol_sold.setTextFormat(Qt.TextFormat.RichText)
+            if vol:
+                self.lbl_vol_sold.setToolTip(
+                    f"Last week: {vol['last_week']:.2f} kg\n"
+                    f"Two weeks ago: {vol['two_weeks']:.2f} kg\n"
+                    f"Year to date: {vol['ytd']:.2f} kg"
+                )
+            else:
+                self.lbl_vol_sold.setToolTip("No PLU mapping — weight sold cannot be calculated")
+            third_col.addLayout(info_row("Volume Sold (This Month)", self.lbl_vol_sold))
 
-        # Third column — product flags
         r, self.lbl_vw = ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
         third_col.addLayout(r)
 

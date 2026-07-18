@@ -64,6 +64,9 @@ class TestReturnTypes:
     def test_get_combined_daily_revenue_returns_dict(self, test_db):
         assert isinstance(report_ctrl.get_combined_daily_revenue("2026-01-01", "2026-12-31"), dict)
 
+    def test_get_weight_variance_returns_list(self, test_db):
+        assert isinstance(report_ctrl.get_weight_variance("2026-01-01", "2026-12-31"), list)
+
 
 # ── Functional tests with data ─────────────────────────────────────────────────
 

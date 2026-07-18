@@ -10,6 +10,7 @@ import models.plu_barcode_map as plu_map_model
 import models.product_selling_units as selling_units_model
 import models.stock_movements as movements_model
 import models.po_lines as po_lines_model
+import models.sales_daily as sales_daily_model
 
 
 def update_cost_price(barcode, cost) -> None:
@@ -42,6 +43,14 @@ def rename_barcode(old_bc, new_bc) -> None:
 def get_stock_on_order(barcode) -> float:
     """Returns total outstanding units across open POs for a barcode."""
     return po_lines_model.get_on_order_total(barcode)
+
+
+def get_volume_sold(barcode) -> dict | None:
+    """
+    Weight sold in kg for a variable-weight product (last_week, two_weeks,
+    this_month, ytd). Returns None if the product has no PLU mapping.
+    """
+    return sales_daily_model.get_weight_for_barcode(barcode)
 
 
 def get_stock_on_order_detail(barcode) -> list[dict]:

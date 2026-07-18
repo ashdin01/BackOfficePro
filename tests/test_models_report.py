@@ -418,3 +418,78 @@ class TestGetReorderItemsFilters:
     def test_supplier_filter(self, test_db, supplier_id):
         rows = report_model.get_reorder_items(supplier_id=supplier_id)
         assert isinstance(rows, list)
+
+
+class TestWeightVariance:
+    def _make_vw_product(self, db_conn, dept_id, supplier_id, plu=700):
+        bc = f"9300000{plu}"
+        db_conn.execute("""
+            INSERT INTO products
+                (barcode, description, department_id, supplier_id,
+                 sell_price, cost_price, tax_rate, pack_qty, pack_unit,
+                 active, unit, variable_weight)
+            VALUES (?, 'Test Deli Item', ?, ?, 15.00, 8.00, 10.0, 1, 'EA', 1, 'KG', 1)
+        """, (bc, dept_id, supplier_id))
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (?, ?)",
+            (plu, bc)
+        )
+        db_conn.commit()
+        return bc
+
+    def _receive_weight(self, db_conn, supplier_id, barcode, received_weight, unit_cost=5.0):
+        po_number = f"PO-WV-{barcode}"
+        db_conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, status, po_type, received_at)
+            VALUES (?, ?, 'RECEIVED', 'PO', '2026-05-01 10:00:00')
+        """, (po_number, supplier_id))
+        db_conn.commit()
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number=?", (po_number,)
+        ).fetchone()["id"]
+        db_conn.execute("""
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty,
+                                   received_weight, pack_qty, unit_cost)
+            VALUES (?, ?, 'Test Line', 1, 1, ?, 1, ?)
+        """, (po_id, barcode, received_weight, unit_cost))
+        db_conn.commit()
+
+    def _sell_weight(self, db_conn, plu, sale_date, weight_kg, quantity=1):
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, weight_kg, quantity, sales_dollars)
+            VALUES (?, ?, 'Test Deli Item', ?, ?, 0)
+        """, (sale_date, plu, weight_kg, quantity))
+        db_conn.commit()
+
+    def test_returns_list(self, test_db):
+        rows = report_model.get_weight_variance("2026-05-01", "2026-05-31")
+        assert isinstance(rows, list)
+
+    def test_non_variable_weight_product_excluded(self, test_db, db_conn, supplier_id, product_barcode):
+        # product_barcode fixture is variable_weight=0 by default
+        self._receive_weight(db_conn, supplier_id, product_barcode, received_weight=3.0)
+        rows = report_model.get_weight_variance("2026-05-01", "2026-05-31")
+        assert not any(r["barcode"] == product_barcode for r in rows)
+
+    def test_received_and_sold_weight_aggregated(self, test_db, db_conn, dept_id, supplier_id):
+        bc = self._make_vw_product(db_conn, dept_id, supplier_id, plu=701)
+        self._receive_weight(db_conn, supplier_id, bc, received_weight=10.0)
+        self._sell_weight(db_conn, 701, "2026-05-10", weight_kg=6.5)
+        rows = report_model.get_weight_variance("2026-05-01", "2026-05-31")
+        row = next(r for r in rows if r["barcode"] == bc)
+        assert row["received_weight"] == pytest.approx(10.0)
+        assert row["sold_weight"] == pytest.approx(6.5)
+
+    def test_date_range_excludes_out_of_range_activity(self, test_db, db_conn, dept_id, supplier_id):
+        bc = self._make_vw_product(db_conn, dept_id, supplier_id, plu=702)
+        self._sell_weight(db_conn, 702, "2026-01-01", weight_kg=4.0)
+        rows = report_model.get_weight_variance("2026-05-01", "2026-05-31")
+        assert not any(r["barcode"] == bc for r in rows)
+
+    def test_dept_filter(self, test_db, db_conn, dept_id, supplier_id):
+        bc = self._make_vw_product(db_conn, dept_id, supplier_id, plu=703)
+        self._receive_weight(db_conn, supplier_id, bc, received_weight=2.0)
+        rows = report_model.get_weight_variance("2026-05-01", "2026-05-31", dept_id=dept_id)
+        assert any(r["barcode"] == bc for r in rows)
+        rows_other = report_model.get_weight_variance("2026-05-01", "2026-05-31", dept_id=dept_id + 999)
+        assert not any(r["barcode"] == bc for r in rows_other)

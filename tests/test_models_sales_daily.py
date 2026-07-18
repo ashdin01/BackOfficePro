@@ -107,6 +107,43 @@ class TestGetSalesForBarcode:
             assert key in result
 
 
+class TestGetWeightForBarcode:
+    def test_returns_none_when_no_plu_mapping(self, test_db, product_barcode):
+        assert sd_model.get_weight_for_barcode(product_barcode) is None
+
+    def test_returns_dict_when_mapped(self, test_db, db_conn, product_barcode, seeded_sales):
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (100, ?)",
+            (product_barcode,)
+        )
+        db_conn.commit()
+        result = sd_model.get_weight_for_barcode(product_barcode)
+        assert result is not None
+        for key in ('last_week', 'two_weeks', 'this_month', 'ytd'):
+            assert key in result
+
+    def test_sums_weight_kg_within_this_month(self, test_db, db_conn, product_barcode):
+        from datetime import date
+        today = date.today()
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (900, ?)",
+            (product_barcode,)
+        )
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, weight_kg, quantity, sales_dollars)
+            VALUES (?, '900', 'Weighed Item', 2.5, 1, 0)
+        """, (today.replace(day=1).isoformat(),))
+        db_conn.commit()
+        result = sd_model.get_weight_for_barcode(product_barcode)
+        assert result['this_month'] == pytest.approx(2.5)
+
+
+class TestGetWeightForBarcodeErrorHandling:
+    def test_db_error_returns_none(self, test_db, monkeypatch):
+        monkeypatch.setattr(sd_model, "db_conn", _boom_db_conn())
+        assert sd_model.get_weight_for_barcode("0000000000000") is None
+
+
 class TestGetSalesForBarcodeRange:
     def test_returns_none_when_no_plu_mapping(self, test_db, product_barcode):
         result = sd_model.get_sales_for_barcode_range(

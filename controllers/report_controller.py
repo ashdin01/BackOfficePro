@@ -112,6 +112,13 @@ def get_writeoff_data(date_from, date_to, dept_id=None, category=None) -> list[d
     return report_model.get_writeoff_data(date_from, date_to, dept_id, category)
 
 
+# ── Weight Variance Report ────────────────────────────────────────────────────
+
+def get_weight_variance(date_from, date_to, dept_id=None) -> list[dict]:
+    """Received vs sold weight (kg) per variable-weight product for a date range."""
+    return report_model.get_weight_variance(date_from, date_to, dept_id)
+
+
 def get_combined_daily_revenue(d_from, d_to) -> dict:
     """Return {date_str: {'pos': float, 'ar': float}} for the date range."""
     return report_model.get_combined_daily_revenue(d_from, d_to)

@@ -469,6 +469,55 @@ def get_writeoff_data(date_from, date_to, dept_id=None, category=None):
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+# ── Weight Variance Report ───────────────────────────────────────────────────
+
+def get_weight_variance(date_from, date_to, dept_id=None):
+    """
+    Received weight (from receipted PO lines) vs sold weight (from the ATRIA
+    sales import) per variable-weight product over a date range. Joined via
+    plu_barcode_map, the same way get_supplier_sales() links sales to products.
+
+    Not a shrinkage figure by itself — it ignores weight still sitting in
+    stock at the start/end of the range, so short ranges will show large
+    apparent variance purely from timing. Most meaningful over a full month
+    or longer where that edge effect washes out.
+    """
+    sql = """
+        SELECT p.barcode, p.description, d.name AS dept_name,
+               COALESCE(recv.received_weight, 0) AS received_weight,
+               COALESCE(sold.sold_weight, 0)     AS sold_weight
+        FROM products p
+        LEFT JOIN departments d ON d.id = p.department_id
+        LEFT JOIN (
+            SELECT pol.barcode, SUM(pol.received_weight) AS received_weight
+            FROM po_lines pol
+            JOIN purchase_orders po ON po.id = pol.po_id
+            WHERE po.status IN ('RECEIVED', 'PARTIAL')
+              AND DATE(po.received_at) BETWEEN ? AND ?
+            GROUP BY pol.barcode
+        ) recv ON recv.barcode = p.barcode
+        LEFT JOIN plu_barcode_map pbm ON pbm.barcode = p.barcode
+        LEFT JOIN (
+            SELECT plu, SUM(weight_kg) AS sold_weight
+            FROM sales_daily
+            WHERE sale_date BETWEEN ? AND ?
+            GROUP BY plu
+        ) sold ON sold.plu = CAST(pbm.plu AS TEXT)
+        WHERE p.variable_weight = 1
+          AND p.active = 1
+    """
+    params = [str(date_from), str(date_to), str(date_from), str(date_to)]
+    if dept_id:
+        sql += " AND p.department_id = ?"
+        params.append(dept_id)
+    sql += """
+          AND (COALESCE(recv.received_weight, 0) > 0 OR COALESCE(sold.sold_weight, 0) > 0)
+        ORDER BY d.name, p.description
+    """
+    with db_conn() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
 # ── Combined POS + AR daily revenue ──────────────────────────────────────────
 
 def get_combined_daily_revenue(d_from: str, d_to: str) -> dict:

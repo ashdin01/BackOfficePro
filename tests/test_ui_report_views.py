@@ -6,6 +6,7 @@ that each report widget constructs and loads without raising.
 
 Requires pytest-qt and a live display (DISPLAY env var or Xvfb).
 """
+from datetime import date
 import pytest
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
@@ -175,3 +176,72 @@ class TestReorderReport:
             item = w.table.item(0, 4)  # on_hand / quantity column (col 4)
             assert item is not None
             assert isinstance(item, NumItem)
+
+
+class TestWeightVarianceReport:
+    def test_import_no_nameerror(self):
+        import views.reports.weight_variance_report  # noqa: F401
+
+    def test_constructs_without_crash(self, qtbot, test_db):
+        from views.reports.weight_variance_report import WeightVarianceReport
+        w = WeightVarianceReport()
+        qtbot.addWidget(w)
+        assert w is not None
+
+    def test_table_has_expected_columns(self, qtbot, test_db):
+        from views.reports.weight_variance_report import WeightVarianceReport
+        w = WeightVarianceReport()
+        qtbot.addWidget(w)
+        assert w.table.columnCount() == 7
+
+    def test_load_empty_db_no_crash(self, qtbot, test_db):
+        from views.reports.weight_variance_report import WeightVarianceReport
+        w = WeightVarianceReport()
+        qtbot.addWidget(w)
+        w.load()
+        assert w.table.rowCount() == 0
+
+    def test_variable_weight_product_shown_with_received_and_sold(
+        self, qtbot, test_db, db_conn, dept_id, supplier_id
+    ):
+        db_conn.execute(
+            "INSERT INTO products (barcode, description, department_id, supplier_id, "
+            "sell_price, cost_price, tax_rate, pack_qty, active, unit, variable_weight) "
+            "VALUES ('8000000000010', 'Weighed Item', ?, ?, 15.00, 8.00, 10.0, 1, 1, 'KG', 1)",
+            (dept_id, supplier_id)
+        )
+        db_conn.execute(
+            "INSERT OR IGNORE INTO plu_barcode_map (plu, barcode) VALUES (910, '8000000000010')"
+        )
+        db_conn.execute("""
+            INSERT INTO purchase_orders (po_number, supplier_id, status, po_type, received_at)
+            VALUES ('PO-WVUI-1', ?, 'RECEIVED', 'PO', ?)
+        """, (supplier_id, f"{date.today().isoformat()} 10:00:00"))
+        po_id = db_conn.execute(
+            "SELECT id FROM purchase_orders WHERE po_number='PO-WVUI-1'"
+        ).fetchone()["id"]
+        db_conn.execute("""
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty,
+                                   received_weight, pack_qty, unit_cost)
+            VALUES (?, '8000000000010', 'Test Line', 1, 1, 10.0, 1, 5.0)
+        """, (po_id,))
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, weight_kg, quantity, sales_dollars)
+            VALUES (?, '910', 'Weighed Item', 6.0, 1, 0)
+        """, (date.today().isoformat(),))
+        db_conn.commit()
+
+        from views.reports.weight_variance_report import WeightVarianceReport
+        w = WeightVarianceReport()
+        qtbot.addWidget(w)
+        w.load()
+
+        descriptions = [
+            w.table.item(r, 1).text() if w.table.item(r, 1) else ''
+            for r in range(w.table.rowCount())
+        ]
+        assert 'Weighed Item' in descriptions
+        row = descriptions.index('Weighed Item')
+        assert w.table.item(row, 3).text() == "10.00"
+        assert w.table.item(row, 4).text() == "6.00"
+        assert w.table.item(row, 5).text() == "4.00"
