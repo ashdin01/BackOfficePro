@@ -2587,6 +2587,29 @@ def migrate_v62(conn):
     conn.commit()
 
 
+def migrate_v63(conn):
+    """Backfill corrected checksums for migrate_v40, migrate_v42, and migrate_v53-v62.
+
+    Their docstrings/comments were reworded after already being applied to
+    existing databases (e.g. documenting the legacy_alter_table fix and the
+    v42 no-op), which changes the source-based checksum without changing any
+    schema or behaviour. This re-stamps migration_log so drift detection
+    compares against the current, corrected source — same pattern as v53.
+    """
+    for v, fn in (
+        (40, migrate_v40), (42, migrate_v42), (53, migrate_v53),
+        (54, migrate_v54), (55, migrate_v55), (56, migrate_v56),
+        (57, migrate_v57), (58, migrate_v58), (59, migrate_v59),
+        (60, migrate_v60), (61, migrate_v61), (62, migrate_v62),
+    ):
+        conn.execute(
+            "UPDATE migration_log SET checksum=? WHERE version=?",
+            (_fn_checksum(fn), v)
+        )
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '63')")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2649,4 +2672,5 @@ _MIGRATIONS: dict[int, tuple] = {
     60: (migrate_v60, "atria_import_log table for startup Atria sync tracking"),
     61: (migrate_v61, "unmatched_count column on atria_import_log"),
     62: (migrate_v62, "old_cost/new_cost/value_delta columns on stock_movements for REVALUE tracking"),
+    63: (migrate_v63, "backfill corrected checksums for migrate_v40, v42, and v53-v62"),
 }
