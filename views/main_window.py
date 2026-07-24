@@ -10,6 +10,7 @@ import config.settings as _cfg_settings
 import controllers.backup_controller as backup_ctrl
 import config.styles as styles
 from utils.role_access import user_can_access_screen, staff_allowed_screens
+from utils.stock_events import stock_events
 import logging
 import os
 import threading
@@ -255,9 +256,17 @@ class MainWindow(QMainWindow):
         for screen in self.screens:
             self.stack.addWidget(screen)
 
-        # ── Connect stock_changed signal to refresh all affected screens ──
-        stock_adjust = self.screens[7]
-        stock_adjust.stock_changed.connect(self._on_stock_changed)
+        # ── Refresh all affected screens whenever stock changes anywhere ──
+        # (manual adjustment, PO receipt, credit return, stocktake apply,
+        # ATRIA import) — see utils/stock_events.py.
+        # stock_events is a persistent singleton but _build_ui() re-runs on
+        # every lock/relogin cycle on this same instance, so disconnect any
+        # prior binding first to avoid stacking duplicate connections.
+        try:
+            stock_events.changed.disconnect(self._on_stock_changed)
+        except TypeError:
+            pass
+        stock_events.changed.connect(self._on_stock_changed)
 
         # Single-key nav is handled in keyPressEvent so it only fires when
         # focus is NOT on a text input field.

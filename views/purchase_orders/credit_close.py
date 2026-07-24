@@ -14,6 +14,7 @@ import controllers.purchase_order_controller as po_ctrl
 import config.styles as styles
 from utils.po_type_helpers import po_unit_mode
 from utils.error_dialog import show_error
+from utils.stock_events import stock_events
 from views.base_view import BaseView
 
 
@@ -237,6 +238,7 @@ class CreditClose(BaseView):
 
         if self.on_save:
             self.on_save()
+        stock_events.changed.emit()
         QMessageBox.information(
             self, "Return Closed",
             f"Credit return {po['po_number']} closed.\nStock has been adjusted."

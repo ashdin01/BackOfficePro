@@ -249,7 +249,10 @@ def _start_atria_sync():
     def _run():
         try:
             from scripts.fetch_atria_sales import sync_missing_days
-            sync_missing_days(days=7)
+            result = sync_missing_days(days=7)
+            if result.get('imported'):
+                from utils.stock_events import stock_events
+                stock_events.changed.emit()
         except Exception:
             logging.exception("Atria sync thread crashed")
 

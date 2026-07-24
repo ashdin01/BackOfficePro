@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
 from utils.error_dialog import show_error
+from utils.stock_events import stock_events
 from views.base_view import BaseView
 import controllers.stocktake_controller as stocktake_ctrl
 import config.styles as styles
@@ -260,6 +261,7 @@ class VarianceReport(BaseView):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 stocktake_ctrl.apply_session(self.session_id)
+                stock_events.changed.emit()
                 QMessageBox.information(
                     self, "Complete",
                     f"Stocktake applied. {counted} product(s) updated."

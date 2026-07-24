@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, QTimer, QObject, QEvent, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 import controllers.product_controller as product_controller
 import config.styles as styles
+from utils.stock_events import stock_events
 
 
 def _btn(text, color=None):
@@ -403,11 +404,23 @@ class StockAdjustView(QWidget):
         layout.addWidget(self.history_table)
 
         self._selected_barcode = None
+        self._selected_description = None
         self._thread = None
         self._worker = None
         self._timer = QTimer()
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._do_search)
+
+        # Stock can change from other processes (POS terminals, Android
+        # stocktake app) while a product sits selected on this screen —
+        # Qt signals can't cross that process boundary, so poll instead.
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(5000)
+        self._poll_timer.timeout.connect(self._refresh_selected_soh)
+
+        # Same-process changes (PO receipt, credit return, stocktake apply,
+        # ATRIA import) arrive instantly via the shared signal.
+        stock_events.changed.connect(self._on_external_stock_change)
 
         # Enter in search → jump to results table (first row selected)
         self._enter_filter = _SearchEnterFilter(
@@ -429,6 +442,14 @@ class StockAdjustView(QWidget):
         super().showEvent(event)
         self.search.setFocus()
         self.search.selectAll()
+        if self._selected_barcode:
+            self._refresh_selected_soh()
+            self._poll_timer.start()
+
+    def hideEvent(self, event):
+        """Stop polling while this screen isn't visible."""
+        super().hideEvent(event)
+        self._poll_timer.stop()
 
     def _on_result_activated(self, item):
         """Enter or double-click on a results row → select that product."""
@@ -491,14 +512,35 @@ class StockAdjustView(QWidget):
 
     def _select(self, barcode, description):
         self._selected_barcode = barcode
-        soh = product_controller.get_soh_by_barcode(barcode)
-        on_hand = int(soh["quantity"]) if soh else 0
-        self.selected_label.setText(
-            f"Selected: {description}   |   Barcode: {barcode}   |   Current Stock: {on_hand}"
-        )
+        self._selected_description = description
+        self._render_selected_label()
         self.apply_btn.setEnabled(True)
         self.qty_spin.setFocus()
         self.qty_spin.selectAll()
+        self._poll_timer.start()
+
+    def _render_selected_label(self):
+        soh = product_controller.get_soh_by_barcode(self._selected_barcode)
+        on_hand = int(soh["quantity"]) if soh else 0
+        self.selected_label.setText(
+            f"Selected: {self._selected_description}   |   "
+            f"Barcode: {self._selected_barcode}   |   Current Stock: {on_hand}"
+        )
+        return on_hand
+
+    def _refresh_selected_soh(self):
+        """Poll tick / external-change refresh — re-render the current selection's SOH."""
+        if not self._selected_barcode:
+            self._poll_timer.stop()
+            return
+        self._render_selected_label()
+
+    def _on_external_stock_change(self):
+        """Another screen or background sync changed stock — refresh what's on screen."""
+        if self._selected_barcode:
+            self._render_selected_label()
+        if self.results_table.rowCount() > 0:
+            self._do_search()
 
     def _apply(self):
         if not self._selected_barcode:
@@ -514,6 +556,11 @@ class StockAdjustView(QWidget):
             adj_type_val = raw_code
         else:
             adj_type_val = "ADJUSTMENT"
+
+        # Re-fetch right before confirming — closes the gap between selecting
+        # a product and confirming, during which another process (POS sale)
+        # could have moved the real quantity.
+        self._render_selected_label()
 
         desc = self.selected_label.text().split("   |   ")[0].replace("Selected: ", "")
         dlg = _ConfirmAdjustDialog(
@@ -556,6 +603,7 @@ class StockAdjustView(QWidget):
         self.apply_btn.setText("✓  Apply Adjustment")
         self.clear_btn.setEnabled(True)
         self.stock_changed.emit()
+        stock_events.changed.emit()
         self.qty_spin.setFocus()
         self.qty_spin.selectAll()
 
@@ -567,6 +615,8 @@ class StockAdjustView(QWidget):
 
     def _clear_selection(self):
         self._selected_barcode = None
+        self._selected_description = None
+        self._poll_timer.stop()
         self.selected_label.setText("No product selected")
         self.apply_btn.setEnabled(False)
         self.qty_spin.setValue(0)

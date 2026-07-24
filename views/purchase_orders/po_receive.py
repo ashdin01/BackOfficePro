@@ -13,6 +13,7 @@ import controllers.purchase_order_controller as po_ctrl
 from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
 import config.styles as styles
 from utils.error_dialog import show_error
+from utils.stock_events import stock_events
 from views.base_view import BaseView
 
 
@@ -800,6 +801,7 @@ class POReceive(BaseView):
 
         if self.on_save:
             self.on_save()
+        stock_events.changed.emit()
 
         QMessageBox.information(self, "Done", f"Stock received. PO status: {status}")
         self.close()
