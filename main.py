@@ -389,6 +389,55 @@ def _set_windows_dark_titlebar(widget):
         logging.exception("Failed to set dark title bar for window")
 
 
+def _configure_app_palette(app):
+    """Apply a dark QPalette so unstyled/native widgets match the app theme.
+
+    The app's dark theme is applied almost entirely via per-widget
+    setStyleSheet() calls (see config/styles.py). That covers each view's
+    own widgets, but anything Qt draws itself — QMessageBox, QComboBox/
+    QDateEdit popups, QMenu, tooltips, native file dialogs, disabled-state
+    colours — falls back to Fusion's default *light* palette, since QSS on
+    one widget doesn't cascade to separately-created top-level widgets like
+    message boxes and dropdown popups. Setting the palette at the
+    QApplication level fixes the fallback for all of those at once, without
+    touching the per-widget stylesheets (which still take precedence where
+    they're set).
+    """
+    from PyQt6.QtGui import QPalette, QColor
+    import config.styles as styles
+
+    pal = QPalette()
+    text = QColor(styles.CLR_TEXT)
+    muted = QColor(styles.CLR_MUTED)
+    bg = QColor(styles.CLR_BG)
+    bg_panel = QColor(styles.CLR_BG_PANEL)
+    accent = QColor(styles.CLR_ACCENT)
+
+    pal.setColor(QPalette.ColorRole.Window, bg)
+    pal.setColor(QPalette.ColorRole.WindowText, text)
+    pal.setColor(QPalette.ColorRole.Base, bg_panel)
+    pal.setColor(QPalette.ColorRole.AlternateBase, bg)
+    pal.setColor(QPalette.ColorRole.ToolTipBase, bg_panel)
+    pal.setColor(QPalette.ColorRole.ToolTipText, text)
+    pal.setColor(QPalette.ColorRole.Text, text)
+    pal.setColor(QPalette.ColorRole.Button, bg_panel)
+    pal.setColor(QPalette.ColorRole.ButtonText, text)
+    pal.setColor(QPalette.ColorRole.BrightText, QColor("red"))
+    pal.setColor(QPalette.ColorRole.Link, accent)
+    pal.setColor(QPalette.ColorRole.Highlight, accent)
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor("white"))
+    pal.setColor(QPalette.ColorRole.PlaceholderText, muted)
+
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, muted)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, muted)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, muted)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base, bg)
+    pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button, bg)
+
+    app.setPalette(pal)
+    logging.info("App palette set to dark")
+
+
 def _configure_app_style(app):
     """Force a consistent cross-platform Qt style.
 
@@ -401,6 +450,7 @@ def _configure_app_style(app):
     """
     app.setStyle("Fusion")
     logging.info("App style set to Fusion")
+    _configure_app_palette(app)
 
     if sys.platform == "win32":
         from PyQt6.QtCore import QObject, QEvent
