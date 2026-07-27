@@ -18,6 +18,7 @@ from controllers.purchase_order_controller import (
     receive_po_atomic,
     close_po_force,
     get_po_charges,
+    get_upcoming_deliveries,
 )
 
 
@@ -114,6 +115,54 @@ class TestListPOs:
         po_id = _make_po(supplier_id)
         po = get_po_by_id(po_id)
         assert po['supplier_name'] == 'Test Supplier'
+
+
+# ── Upcoming Deliveries ───────────────────────────────────────────────────────
+
+class TestUpcomingDeliveries:
+    def test_open_po_within_window_included(self, test_db, supplier_id):
+        from datetime import date, timedelta
+        soon = (date.today() + timedelta(days=5)).isoformat()
+        po_id = _make_po(supplier_id, delivery_date=soon)
+        results = get_upcoming_deliveries(days=30)
+        assert any(p['id'] == po_id for p in results)
+
+    def test_po_beyond_window_excluded(self, test_db, supplier_id):
+        from datetime import date, timedelta
+        far = (date.today() + timedelta(days=90)).isoformat()
+        po_id = _make_po(supplier_id, delivery_date=far)
+        results = get_upcoming_deliveries(days=30)
+        assert not any(p['id'] == po_id for p in results)
+
+    def test_po_with_no_delivery_date_excluded(self, test_db, supplier_id):
+        po_id = _make_po(supplier_id)
+        results = get_upcoming_deliveries(days=30)
+        assert not any(p['id'] == po_id for p in results)
+
+    def test_received_po_excluded_even_within_window(self, test_db, supplier_id):
+        from datetime import date, timedelta
+        soon = (date.today() + timedelta(days=5)).isoformat()
+        po_id = _make_po(supplier_id, delivery_date=soon)
+        update_po_status(po_id, 'RECEIVED')
+        results = get_upcoming_deliveries(days=30)
+        assert not any(p['id'] == po_id for p in results)
+
+    def test_overdue_po_included(self, test_db, supplier_id):
+        from datetime import date, timedelta
+        overdue = (date.today() - timedelta(days=3)).isoformat()
+        po_id = _make_po(supplier_id, delivery_date=overdue)
+        results = get_upcoming_deliveries(days=30)
+        assert any(p['id'] == po_id for p in results)
+
+    def test_ordered_soonest_first(self, test_db, supplier_id):
+        from datetime import date, timedelta
+        later = (date.today() + timedelta(days=20)).isoformat()
+        sooner = (date.today() + timedelta(days=2)).isoformat()
+        id_later = _make_po(supplier_id, delivery_date=later)
+        id_sooner = _make_po(supplier_id, delivery_date=sooner)
+        results = get_upcoming_deliveries(days=30)
+        ids_in_order = [p['id'] for p in results if p['id'] in (id_later, id_sooner)]
+        assert ids_in_order == [id_sooner, id_later]
 
 
 # ── Add / Update / Delete PO Lines ───────────────────────────────────────────

@@ -30,12 +30,20 @@ def get_all() -> list[dict]:
     return user_model.get_all()
 
 
-def create(username, full_name, role, pin) -> None:
-    user_model.create(username, full_name, role, pin)
+def create(username, full_name, role, pin, *,
+           rsa_cert_number=None, rsa_expiry_date=None) -> None:
+    user_model.create(username, full_name, role, pin,
+                       rsa_cert_number=rsa_cert_number, rsa_expiry_date=rsa_expiry_date)
 
 
-def update(user_id, username, full_name, role) -> None:
-    user_model.update(user_id, username, full_name, role)
+def update(user_id, username, full_name, role, *,
+           rsa_cert_number=None, rsa_expiry_date=None) -> None:
+    user_model.update(user_id, username, full_name, role,
+                       rsa_cert_number=rsa_cert_number, rsa_expiry_date=rsa_expiry_date)
+
+
+def get_expiring_rsa_certs(days=None) -> list[dict]:
+    return user_model.get_expiring_rsa_certs(days)
 
 
 def set_pin_by_id(user_id, pin) -> None:

@@ -22,9 +22,12 @@ class TestCheckIntegrity:
         self._fresh_db(tmp_path, monkeypatch)
         mig.apply_migrations()  # must not raise
 
-    def test_drift_raises_runtime_error(self, tmp_path, monkeypatch):
-        """Tampering with a logged migration checksum must raise RuntimeError."""
-        import sys
+    def test_drift_logs_warning_does_not_raise(self, tmp_path, monkeypatch, caplog):
+        """Tampering with a logged migration checksum logs a WARNING but does
+        not raise — frozen-stamped checksums can never match a source-based
+        recompute for entirely legitimate reasons, so drift is a hint, not a
+        reliable fatal signal (see _check_integrity docstring)."""
+        import sys, logging
         # Only valid in non-frozen builds — the drift check is skipped when frozen.
         if getattr(sys, 'frozen', False):
             pytest.skip("drift check skipped in frozen build")
@@ -41,10 +44,12 @@ class TestCheckIntegrity:
         # Invalidate connection cache so next get_connection() reopens
         conn_mod.invalidate_all_connections()
 
-        with pytest.raises(RuntimeError, match="drift"):
+        with caplog.at_level(logging.WARNING):
             conn = conn_mod.get_connection()
-            mig._check_integrity(conn)
+            mig._check_integrity(conn)  # must not raise
             conn.release()
+
+        assert any("drift" in r.message.lower() for r in caplog.records)
 
     def test_gap_warning_does_not_raise(self, tmp_path, monkeypatch, caplog):
         """A missing migration_log entry generates a WARNING but does not raise."""
@@ -74,10 +79,12 @@ class TestCheckIntegrity:
         mig._check_integrity(conn)  # must not raise, just return early
         conn.release()
 
-    def test_skips_drift_check_when_frozen(self, tmp_path, monkeypatch):
-        """A corrupted checksum would normally raise, but the drift check is
-        skipped entirely for frozen (PyInstaller) builds."""
-        import sys
+    def test_skips_drift_check_when_frozen(self, tmp_path, monkeypatch, caplog):
+        """The drift check (and its warning) is skipped entirely for frozen
+        (PyInstaller) builds — recomputing there would just re-exercise the
+        same bytecode-fallback path that stamped the checksum moments earlier,
+        adding no information."""
+        import sys, logging
         db_path = self._fresh_db(tmp_path, monkeypatch)
         mig.apply_migrations()
 
@@ -88,9 +95,12 @@ class TestCheckIntegrity:
         conn_mod.invalidate_all_connections()
 
         monkeypatch.setattr(sys, "frozen", True, raising=False)
-        conn = conn_mod.get_connection()
-        mig._check_integrity(conn)  # must not raise despite corrupted checksum
-        conn.release()
+        with caplog.at_level(logging.WARNING):
+            conn = conn_mod.get_connection()
+            mig._check_integrity(conn)  # must not raise despite corrupted checksum
+            conn.release()
+
+        assert not any("drift" in r.message.lower() for r in caplog.records)
 
     def test_skips_logged_version_no_longer_in_registry(self, tmp_path, monkeypatch):
         """A migration_log entry for a version number removed from _MIGRATIONS
@@ -491,11 +501,14 @@ class TestEndToEndMigrationChain:
 # ── _check_integrity with modified function source ─────────────────────────────
 
 class TestCheckIntegrityFunctionDrift:
-    """Verify drift detection catches a migration function whose source was changed."""
+    """Verify drift detection catches a migration function whose source was
+    changed — logging a warning, not raising (see _check_integrity docstring:
+    a frozen-stamped checksum can never match a source-based recompute for
+    entirely legitimate reasons, so this is a hint, not a reliable fatal
+    signal)."""
 
-    def test_modified_function_raises_runtime_error(self, tmp_path, monkeypatch):
-        """Replacing a live migration function raises RuntimeError on _check_integrity."""
-        import sys
+    def test_modified_function_logs_warning_does_not_raise(self, tmp_path, monkeypatch, caplog):
+        import sys, logging
         if getattr(sys, 'frozen', False):
             pytest.skip("drift check skipped in frozen build")
 
@@ -519,9 +532,10 @@ class TestCheckIntegrityFunctionDrift:
 
         try:
             conn_mod.invalidate_all_connections()
-            with pytest.raises(RuntimeError, match="drift"):
+            with caplog.at_level(logging.WARNING):
                 conn = conn_mod.get_connection()
-                mig._check_integrity(conn)
+                mig._check_integrity(conn)  # must not raise
                 conn.release()
+            assert any("drift" in r.message.lower() for r in caplog.records)
         finally:
             mig._MIGRATIONS[2] = original_migrations[2]

@@ -105,15 +105,17 @@ def _check_cross_store_conflict(username: str):
         )
 
 
-def create(username: str, full_name: str, role: str, pin: str):
+def create(username: str, full_name: str, role: str, pin: str, *,
+           rsa_cert_number: str = None, rsa_expiry_date: str = None):
     _validate_pin(pin)
     _check_cross_store_conflict(username)
     from models.audit_log import record_changes
     from database.audit_context import get_user
     with db_conn() as conn:
         conn.execute(
-            "INSERT INTO users (username, full_name, role, pin, active) VALUES (?,?,?,?,1)",
-            (username, full_name, role, _hash_pin(pin))
+            "INSERT INTO users (username, full_name, role, pin, active, "
+            "rsa_cert_number, rsa_expiry_date) VALUES (?,?,?,?,1,?,?)",
+            (username, full_name, role, _hash_pin(pin), rsa_cert_number, rsa_expiry_date)
         )
         record_changes(conn, 'user', username, {},
                        {'role': role, 'active': '1'}, get_user())
@@ -124,12 +126,14 @@ def get_all():
     """Return all users including inactive, ordered by full_name."""
     with db_conn() as conn:
         rows = conn.execute(
-            "SELECT id, username, full_name, role, active FROM users ORDER BY full_name"
+            "SELECT id, username, full_name, role, active, "
+            "rsa_cert_number, rsa_expiry_date FROM users ORDER BY full_name"
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-def update(user_id: int, username: str, full_name: str, role: str):
+def update(user_id: int, username: str, full_name: str, role: str, *,
+           rsa_cert_number: str = None, rsa_expiry_date: str = None):
     from models.audit_log import record_changes
     from database.audit_context import get_user
     with db_conn() as conn:
@@ -139,8 +143,9 @@ def update(user_id: int, username: str, full_name: str, role: str):
         if not old or old['username'] != username:
             _check_cross_store_conflict(username)
         conn.execute(
-            "UPDATE users SET username=?, full_name=?, role=? WHERE id=?",
-            (username, full_name, role, user_id)
+            "UPDATE users SET username=?, full_name=?, role=?, "
+            "rsa_cert_number=?, rsa_expiry_date=? WHERE id=?",
+            (username, full_name, role, rsa_cert_number, rsa_expiry_date, user_id)
         )
         if old:
             record_changes(conn, 'user', username,
@@ -148,6 +153,26 @@ def update(user_id: int, username: str, full_name: str, role: str):
                            {'username': username, 'full_name': full_name, 'role': role},
                            get_user())
         conn.commit()
+
+
+def get_expiring_rsa_certs(days: int = None):
+    """Return active users whose RSA certificate expires within `days`
+    (defaults to UPCOMING_TASKS_WINDOW_DAYS), including any already expired.
+    Ordered soonest-expiring first."""
+    if days is None:
+        from config.constants import UPCOMING_TASKS_WINDOW_DAYS
+        days = UPCOMING_TASKS_WINDOW_DAYS
+    with db_conn() as conn:
+        rows = conn.execute("""
+            SELECT id, full_name, username, rsa_cert_number, rsa_expiry_date
+            FROM users
+            WHERE active = 1
+              AND rsa_expiry_date IS NOT NULL
+              AND rsa_expiry_date != ''
+              AND rsa_expiry_date <= date('now', '+' || ? || ' days')
+            ORDER BY rsa_expiry_date ASC
+        """, (days,)).fetchall()
+        return [dict(r) for r in rows]
 
 
 def set_active(user_id: int, active: bool):

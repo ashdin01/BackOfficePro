@@ -4,10 +4,12 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QMessageBox,
     QGroupBox, QSizePolicy, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QDialog, QComboBox, QDialogButtonBox, QCheckBox
+    QDialog, QComboBox, QDialogButtonBox, QCheckBox, QDateEdit
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QKeySequence, QShortcut, QColor
+from datetime import date, timedelta
+import config.constants as constants
 import config.styles as styles
 import config.app_config as app_config
 import config.settings as app_settings
@@ -76,6 +78,40 @@ class _UserDialog(QDialog):
 
         layout.addLayout(form)
 
+        # RSA certification — optional, not every staff member serves alcohol
+        rsa_group = QGroupBox("RSA Certification")
+        rsa_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        rsa_form = QFormLayout(rsa_group)
+        rsa_form.setSpacing(10)
+        rsa_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        has_rsa = bool(self._user and self._user.get('rsa_expiry_date'))
+        self._has_rsa = QCheckBox("Has RSA certificate")
+        self._has_rsa.setChecked(has_rsa)
+        rsa_form.addRow(self._has_rsa)
+
+        self._rsa_cert_number = QLineEdit(
+            self._user.get('rsa_cert_number') or '' if self._user else '')
+        self._rsa_cert_number.setPlaceholderText("Certificate number")
+        rsa_form.addRow("Cert #", self._rsa_cert_number)
+
+        self._rsa_expiry = QDateEdit()
+        self._rsa_expiry.setCalendarPopup(True)
+        self._rsa_expiry.setDisplayFormat("dd/MM/yyyy")
+        if has_rsa:
+            self._rsa_expiry.setDate(
+                QDate.fromString(self._user['rsa_expiry_date'], "yyyy-MM-dd"))
+        else:
+            self._rsa_expiry.setDate(QDate.currentDate().addYears(3))
+        rsa_form.addRow("Expiry", self._rsa_expiry)
+
+        self._rsa_cert_number.setEnabled(has_rsa)
+        self._rsa_expiry.setEnabled(has_rsa)
+        self._has_rsa.toggled.connect(self._rsa_cert_number.setEnabled)
+        self._has_rsa.toggled.connect(self._rsa_expiry.setEnabled)
+
+        layout.addWidget(rsa_group)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -122,11 +158,23 @@ class _UserDialog(QDialog):
                 self._pin2.setFocus()
                 return
 
+        rsa_cert_number = None
+        rsa_expiry_date = None
+        if self._has_rsa.isChecked():
+            rsa_cert_number = self._rsa_cert_number.text().strip()
+            if not rsa_cert_number:
+                QMessageBox.warning(self, "Validation", "RSA certificate number is required.")
+                self._rsa_cert_number.setFocus()
+                return
+            rsa_expiry_date = self._rsa_expiry.date().toString("yyyy-MM-dd")
+
         self.result_data = {
             'full_name': full_name,
             'username':  username,
             'role':      role,
             'pin':       pin or None,
+            'rsa_cert_number': rsa_cert_number,
+            'rsa_expiry_date': rsa_expiry_date,
         }
         self.accept()
 
@@ -253,15 +301,18 @@ class UsersScreen(QWidget):
         users_layout.setSpacing(8)
 
         self._users_table = QTableWidget()
-        self._users_table.setColumnCount(4)
-        self._users_table.setHorizontalHeaderLabels(["Full Name", "Username", "Role", "Status"])
+        self._users_table.setColumnCount(5)
+        self._users_table.setHorizontalHeaderLabels(
+            ["Full Name", "Username", "Role", "Status", "RSA Expiry"])
         self._users_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._users_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self._users_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self._users_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self._users_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self._users_table.setColumnWidth(1, 130)
         self._users_table.setColumnWidth(2, 90)
         self._users_table.setColumnWidth(3, 80)
+        self._users_table.setColumnWidth(4, 90)
         self._users_table.setFixedHeight(220)
         self._users_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._users_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -391,8 +442,23 @@ class UsersScreen(QWidget):
             status_item.setForeground(QColor(styles.CLR_SUCCESS_ALT if active else styles.CLR_DANGER_ALT))
             self._users_table.setItem(r, 3, status_item)
 
+            rsa_expiry = u.get('rsa_expiry_date')
+            rsa_item = QTableWidgetItem('')
+            rsa_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if rsa_expiry:
+                expiry = date.fromisoformat(rsa_expiry)
+                rsa_item.setText(expiry.strftime('%d/%m/%Y'))
+                if expiry < date.today():
+                    rsa_color = styles.CLR_DANGER_ALT
+                elif expiry <= date.today() + timedelta(days=constants.UPCOMING_TASKS_WINDOW_DAYS):
+                    rsa_color = styles.CLR_WARNING
+                else:
+                    rsa_color = styles.CLR_MUTED
+                rsa_item.setForeground(QColor(rsa_color))
+            self._users_table.setItem(r, 4, rsa_item)
+
             if not active:
-                for col in range(4):
+                for col in range(5):
                     item = self._users_table.item(r, col)
                     if item:
                         item.setForeground(QColor("#666"))
@@ -421,7 +487,9 @@ class UsersScreen(QWidget):
             return
         d = dlg.result_data
         try:
-            user_ctrl.create(d['username'], d['full_name'], d['role'], d['pin'])
+            user_ctrl.create(d['username'], d['full_name'], d['role'], d['pin'],
+                              rsa_cert_number=d['rsa_cert_number'],
+                              rsa_expiry_date=d['rsa_expiry_date'])
         except Exception as e:
             show_error(self, "Could not create user.", e)
             return
@@ -441,7 +509,9 @@ class UsersScreen(QWidget):
             return
         d = dlg.result_data
         try:
-            user_ctrl.update(uid, d['username'], d['full_name'], d['role'])
+            user_ctrl.update(uid, d['username'], d['full_name'], d['role'],
+                              rsa_cert_number=d['rsa_cert_number'],
+                              rsa_expiry_date=d['rsa_expiry_date'])
             if d['pin']:
                 user_ctrl.set_pin_by_id(uid, d['pin'])
         except Exception as e:

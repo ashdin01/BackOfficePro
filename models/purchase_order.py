@@ -79,6 +79,26 @@ def get_all(status=None, archived=False):
             return conn.execute(query).fetchall()
 
 
+def get_upcoming_deliveries(days=None):
+    """Return open POs (DRAFT/SENT/PARTIAL) with a delivery_date within
+    `days` (defaults to UPCOMING_TASKS_WINDOW_DAYS), including overdue ones.
+    Ordered soonest-due first."""
+    if days is None:
+        from config.constants import UPCOMING_TASKS_WINDOW_DAYS
+        days = UPCOMING_TASKS_WINDOW_DAYS
+    with db_conn() as conn:
+        query = """
+            SELECT po.*, s.name as supplier_name
+            FROM purchase_orders po
+            JOIN suppliers s ON po.supplier_id = s.id
+            WHERE po.status IN ('DRAFT', 'SENT', 'PARTIAL')
+              AND po.delivery_date IS NOT NULL
+              AND po.delivery_date <= date('now', '+' || ? || ' days')
+            ORDER BY po.delivery_date ASC
+        """
+        return conn.execute(query, (days,)).fetchall()
+
+
 def get_by_id(po_id):
     with db_conn() as conn:
         return conn.execute("""

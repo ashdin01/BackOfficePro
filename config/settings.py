@@ -43,8 +43,20 @@ def _migrate_legacy_data_dir(new_dir: str) -> None:
 
 
 # Database and images. Dev runs (not frozen) keep using the repo-root
-# 'data' folder regardless of OS.
-if getattr(sys, 'frozen', False) and sys.platform == 'win32' and os.environ.get('LOCALAPPDATA'):
+# 'data' folder regardless of OS — this is deliberate, so running
+# `python main.py` from a source checkout never touches a real store's
+# production data by accident.
+#
+# BACKOFFICEPRO_DATA_DIR is an explicit opt-in escape hatch for the one
+# legitimate exception: a standalone maintenance script (e.g.
+# scripts/fetch_atria_sales.py run from Task Scheduler via system python.exe,
+# not the frozen app) that needs to read/write the *real* production
+# database on the same machine the installed app runs on. Unset, behaviour
+# is identical to before.
+_data_dir_override = os.environ.get('BACKOFFICEPRO_DATA_DIR')
+if _data_dir_override:
+    DATA_DIR = _data_dir_override
+elif getattr(sys, 'frozen', False) and sys.platform == 'win32' and os.environ.get('LOCALAPPDATA'):
     DATA_DIR = os.path.join(os.environ['LOCALAPPDATA'], 'BackOfficePro', 'data')
     _migrate_legacy_data_dir(DATA_DIR)
 else:

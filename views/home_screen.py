@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt, QTimer, QDateTime
 from PyQt6.QtGui import QFont
 import config.styles as styles
 import controllers.dashboard_controller as dash_ctrl
+import controllers.tasks_controller as tasks_ctrl
 import os
 import sys
 import importlib.util
@@ -203,35 +204,35 @@ class HomeScreen(QWidget):
         import_row.addStretch()
         root.addLayout(import_row)
 
-        # ── Order Today section ───────────────────────────────────────
+        # ── Upcoming Tasks section ──────────────────────────────────────
         sep_ord = QFrame(); sep_ord.setFrameShape(QFrame.Shape.HLine)
         sep_ord.setStyleSheet(f"color: {styles.CLR_BORDER};")
         root.addWidget(sep_ord)
 
-        self._order_today_hdr = QLabel()
-        self._order_today_hdr.setStyleSheet(
+        self._upcoming_hdr = QLabel("Upcoming Tasks")
+        self._upcoming_hdr.setStyleSheet(
             f"font-size: 12px; color: {styles.CLR_EXTRA_DIM}; letter-spacing: 1px; background: transparent;")
-        root.addWidget(self._order_today_hdr)
+        root.addWidget(self._upcoming_hdr)
 
-        # Cards go inside a scroll area so many suppliers don't squash the layout
-        self._order_today_inner = QWidget()
-        self._order_today_inner.setStyleSheet(f"background: {styles.CLR_BG};")
-        self._order_today_container = QVBoxLayout(self._order_today_inner)
-        self._order_today_container.setSpacing(6)
-        self._order_today_container.setContentsMargins(0, 2, 0, 2)
+        # Cards go inside a scroll area so many items don't squash the layout
+        self._upcoming_inner = QWidget()
+        self._upcoming_inner.setStyleSheet(f"background: {styles.CLR_BG};")
+        self._upcoming_container = QVBoxLayout(self._upcoming_inner)
+        self._upcoming_container.setSpacing(6)
+        self._upcoming_container.setContentsMargins(0, 2, 0, 2)
 
-        self._order_today_scroll = QScrollArea()
-        self._order_today_scroll.setWidget(self._order_today_inner)
-        self._order_today_scroll.setWidgetResizable(True)
-        self._order_today_scroll.setMaximumHeight(210)
-        self._order_today_scroll.setHorizontalScrollBarPolicy(
+        self._upcoming_scroll = QScrollArea()
+        self._upcoming_scroll.setWidget(self._upcoming_inner)
+        self._upcoming_scroll.setWidgetResizable(True)
+        self._upcoming_scroll.setMaximumHeight(210)
+        self._upcoming_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._order_today_scroll.setStyleSheet(
+        self._upcoming_scroll.setStyleSheet(
             f"QScrollArea{{border:none;background:{styles.CLR_BG};}}"
             f"QScrollBar:vertical{{background:{styles.CLR_BG_PANEL};width:8px;border-radius:4px;margin:0;}}"
             f"QScrollBar::handle:vertical{{background:{styles.CLR_BORDER};border-radius:4px;min-height:20px;}}"
             "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}")
-        root.addWidget(self._order_today_scroll)
+        root.addWidget(self._upcoming_scroll)
 
         # ── Quick nav buttons ─────────────────────────────────────────
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
@@ -334,67 +335,95 @@ class HomeScreen(QWidget):
             QMessageBox.warning(self, "Import Issue", message)
             self._refresh()
 
-    def _refresh_order_today(self):
-        import controllers.supplier_controller as supplier_ctrl
-        from datetime import date as _date
+    _TASK_BUTTON = {
+        # kind -> (button label, handler method name)
+        "order_due":   ("New PO →",  "_new_po_for"),
+        "po_delivery": ("View PO →", "_view_po"),
+        "rsa_expiry":  ("Renew →",   "_renew_rsa"),
+    }
 
+    def _refresh_upcoming_tasks(self):
         # Clear previous widgets from the layout
-        while self._order_today_container.count():
-            item = self._order_today_container.takeAt(0)
+        while self._upcoming_container.count():
+            item = self._upcoming_container.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         try:
-            due = supplier_ctrl.get_order_due_today()
+            tasks = tasks_ctrl.get_upcoming_tasks()
         except Exception:
-            logging.exception("HomeScreen: failed to load orders due today")
+            logging.exception("HomeScreen: failed to load upcoming tasks")
             return
 
-        today_name = _date.today().strftime('%A')
-        self._order_today_hdr.setText(f"Orders Due Today  —  {today_name}")
-
-        if not due:
-            none_lbl = QLabel("No orders scheduled for today")
+        if not tasks:
+            none_lbl = QLabel("Nothing upcoming")
             none_lbl.setStyleSheet(f"font-size: 12px; color: {styles.CLR_MUTED}; background: transparent;")
-            self._order_today_container.addWidget(none_lbl)
-            self._order_today_container.addStretch()
+            self._upcoming_container.addWidget(none_lbl)
+            self._upcoming_container.addStretch()
             return
 
-        for supplier in due:
+        severity_color = {
+            "overdue": styles.CLR_DANGER,
+            "today":   styles.CLR_ACCENT,
+            "soon":    styles.CLR_WARNING,
+        }
+
+        for task in tasks:
+            border_color = severity_color.get(task["severity"], styles.CLR_ACCENT)
+
+            text_col = QVBoxLayout()
+            text_col.setSpacing(2)
+            title_lbl = QLabel(f"{task['icon']}  {task['title']}")
+            title_lbl.setStyleSheet(
+                f"font-size: 13px; font-weight: bold; color: {styles.CLR_TEXT}; background: transparent;")
+            text_col.addWidget(title_lbl)
+            subtitle_lbl = QLabel(task["subtitle"])
+            subtitle_lbl.setStyleSheet(
+                f"font-size: 11px; color: {styles.CLR_MUTED}; background: transparent;")
+            text_col.addWidget(subtitle_lbl)
+
             row = QHBoxLayout()
             row.setSpacing(12)
-
-            name_lbl = QLabel(f"🛒  {supplier['name']}")
-            name_lbl.setStyleSheet(
-                f"font-size: 13px; font-weight: bold; color: {styles.CLR_TEXT}; background: transparent;")
-            row.addWidget(name_lbl)
+            row.addLayout(text_col)
             row.addStretch()
 
-            po_btn = QPushButton("New PO →")
-            po_btn.setFixedHeight(30)
-            po_btn.setStyleSheet(
+            btn_label, handler_name = self._TASK_BUTTON[task["kind"]]
+            btn = QPushButton(btn_label)
+            btn.setFixedHeight(30)
+            btn.setStyleSheet(
                 f"QPushButton{{background:{styles.CLR_ACCENT};color:white;border:none;"
                 "border-radius:4px;padding:0 14px;font-weight:bold;font-size:12px;}"
                 f"QPushButton:hover{{background:{styles.CLR_ACCENT_HOVER};}}")
-            sid = supplier['id']
-            po_btn.clicked.connect(lambda _, s=sid: self._new_po_for(s))
-            row.addWidget(po_btn)
+            ref_id = task["ref_id"]
+            handler = getattr(self, handler_name)
+            btn.clicked.connect(lambda _, h=handler, r=ref_id: h(r))
+            row.addWidget(btn)
 
             frame = QFrame()
             frame.setStyleSheet(
                 f"QFrame{{background:{styles.CLR_BG_PANEL};border-radius:6px;"
-                f"border-left:4px solid {styles.CLR_ACCENT};}}")
+                f"border-left:4px solid {border_color};}}")
             frame_layout = QHBoxLayout(frame)
             frame_layout.setContentsMargins(12, 6, 12, 6)
             frame_layout.addLayout(row)
-            self._order_today_container.addWidget(frame)
+            self._upcoming_container.addWidget(frame)
 
-        self._order_today_container.addStretch()
+        self._upcoming_container.addStretch()
 
     def _new_po_for(self, supplier_id):
         from views.purchase_orders.po_create import POCreate
         self._po_create_win = POCreate(on_save=self._refresh, supplier_id=supplier_id)
         self._po_create_win.show()
+
+    def _view_po(self, po_id):
+        from views.purchase_orders.po_detail import PODetail
+        self._po_detail_win = PODetail(po_id=po_id, on_save=self._refresh)
+        self._po_detail_win.show()
+
+    def _renew_rsa(self, user_id):
+        from views.settings.settings_users import UsersScreen
+        self._users_win = UsersScreen()
+        self._users_win.show()
 
     def _refresh(self):
         try:
@@ -416,4 +445,4 @@ class HomeScreen(QWidget):
             logging.warning("HomeScreen refresh error: %s", e, exc_info=True)
 
         self._update_import_status()
-        self._refresh_order_today()
+        self._refresh_upcoming_tasks()

@@ -354,3 +354,61 @@ class TestUserAuditLog:
         non_create = [e for e in entries if e["field"] != "role" or e["old_value"] != ""]
         role_changes = [e for e in entries if e["field"] == "role" and e["old_value"] == "STAFF"]
         assert not role_changes, "No role-change entry expected when role did not change"
+
+
+class TestRsaCert:
+    def test_create_stores_rsa_fields(self, test_db):
+        user_model.create("jdoe", "John Doe", "STAFF", "1234",
+                           rsa_cert_number="RSA-123", rsa_expiry_date="2030-01-01")
+        user = user_model.get_by_username("jdoe")
+        assert user["rsa_cert_number"] == "RSA-123"
+        assert user["rsa_expiry_date"] == "2030-01-01"
+
+    def test_create_without_rsa_leaves_fields_null(self, test_db):
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        assert user["rsa_cert_number"] is None
+        assert user["rsa_expiry_date"] is None
+
+    def test_update_sets_rsa_fields(self, test_db):
+        user_model.create("jdoe", "John Doe", "STAFF", "1234")
+        user = user_model.get_by_username("jdoe")
+        user_model.update(user["id"], "jdoe", "John Doe", "STAFF",
+                           rsa_cert_number="RSA-999", rsa_expiry_date="2031-06-15")
+        updated = next(u for u in user_model.get_all() if u["id"] == user["id"])
+        assert updated["rsa_cert_number"] == "RSA-999"
+        assert updated["rsa_expiry_date"] == "2031-06-15"
+
+    def test_get_expiring_rsa_certs_within_window(self, test_db):
+        from datetime import date, timedelta
+        soon = (date.today() + timedelta(days=10)).isoformat()
+        far = (date.today() + timedelta(days=90)).isoformat()
+        user_model.create("soon", "Soon Expiry", "STAFF", "1234",
+                           rsa_cert_number="A", rsa_expiry_date=soon)
+        user_model.create("far", "Far Expiry", "STAFF", "1234",
+                           rsa_cert_number="B", rsa_expiry_date=far)
+        user_model.create("none", "No Cert", "STAFF", "1234")
+
+        results = user_model.get_expiring_rsa_certs(days=30)
+        usernames = {r["username"] for r in results}
+        assert usernames == {"soon"}
+
+    def test_get_expiring_rsa_certs_includes_already_expired(self, test_db):
+        from datetime import date, timedelta
+        expired = (date.today() - timedelta(days=5)).isoformat()
+        user_model.create("expired", "Expired Cert", "STAFF", "1234",
+                           rsa_cert_number="A", rsa_expiry_date=expired)
+
+        results = user_model.get_expiring_rsa_certs(days=30)
+        assert any(r["username"] == "expired" for r in results)
+
+    def test_get_expiring_rsa_certs_excludes_inactive_users(self, test_db):
+        from datetime import date, timedelta
+        soon = (date.today() + timedelta(days=10)).isoformat()
+        user_model.create("jdoe", "John Doe", "STAFF", "1234",
+                           rsa_cert_number="A", rsa_expiry_date=soon)
+        user = user_model.get_by_username("jdoe")
+        user_model.set_active(user["id"], False)
+
+        results = user_model.get_expiring_rsa_certs(days=30)
+        assert results == []

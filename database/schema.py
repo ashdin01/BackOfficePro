@@ -302,7 +302,9 @@ CREATE TABLE IF NOT EXISTS users (
     role            TEXT    NOT NULL DEFAULT 'STAFF'
                         CHECK (role IN ('ADMIN','MANAGER','STAFF')),
     active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    rsa_cert_number TEXT,
+    rsa_expiry_date DATE
 );
 
 INSERT OR IGNORE INTO users (username, full_name, role)

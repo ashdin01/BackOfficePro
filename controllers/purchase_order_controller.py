@@ -81,6 +81,10 @@ def get_all_pos(status=None, archived=False) -> list[dict]:
     return po_model.get_all(status=status, archived=archived)
 
 
+def get_upcoming_deliveries(days=None) -> list[dict]:
+    return po_model.get_upcoming_deliveries(days)
+
+
 def get_po_by_id(po_id) -> dict | None:
     return po_model.get_by_id(po_id)
 
