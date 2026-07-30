@@ -105,13 +105,17 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
     if not configured (caller falls back to standard reorder logic).
 
     Stock ordered now arrives at the next delivery and must last until the
-    delivery after that (the order isn't topped up again until then).
+    delivery after that (the order isn't topped up again until then). Stock
+    on hand today also keeps selling down between now and that arrival, so
+    it's projected forward to the delivery date before being credited
+    against the cover requirement.
 
     Algorithm per product:
-        avg_daily    = total units sold (last 14 days) / 14
-        cover_days   = days_between(next_delivery, following_delivery) + 2  (safety buffer)
-        needed_units = max(0, avg_daily * cover_days - effective_stock)
-        cartons      = ceil(needed_units / pack_qty), minimum 1
+        avg_daily         = total units sold (last 14 days) / 14
+        cover_days        = days_between(next_delivery, following_delivery) + 2  (safety buffer)
+        projected_stock   = effective_stock - avg_daily * days_ahead  (sold down before arrival)
+        needed_units      = max(0, avg_daily * cover_days - projected_stock)
+        cartons           = ceil(needed_units / pack_qty), minimum 1
     """
     delivery_days = supplier_model.get_delivery_days(supplier_id)
     if not delivery_days:
@@ -154,7 +158,8 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
         on_hand         = float(p['on_hand'])
         on_order        = milk_on_order.get(p['barcode'], 0.0)
         effective_stock = on_hand + on_order
-        needed_units    = max(0.0, avg_daily * cover_days - effective_stock)
+        projected_stock = effective_stock - avg_daily * days_ahead
+        needed_units    = max(0.0, avg_daily * cover_days - projected_stock)
         pack_qty        = max(1, int(p['pack_qty']))
         cartons         = max(1, math.ceil(needed_units / pack_qty))
         recs.append({
@@ -166,6 +171,7 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
             'on_hand':          on_hand,
             'on_order':         on_order,
             'effective_stock':  effective_stock,
+            'projected_stock':  round(projected_stock, 1),
             'supplier_sku':     p['supplier_sku'],
             'cartons':          cartons,
             'avg_daily':        round(avg_daily, 1),
@@ -219,6 +225,7 @@ def auto_populate_po_lines(po_id, supplier_id) -> str:
                 f"🥛 Milk forecast: avg {r['avg_daily']}/day × {r['cover_days']} days "
                 f"(delivery {delivery_str}, covering to {following_str} + {SAFETY_DAYS} day buffer)"
                 f"  |  SOH: {int(r['on_hand'])}{on_order_str}"
+                f"  |  Projected at delivery: {r['projected_stock']}"
                 f"  |  {r['pack_qty']} × {r['pack_unit']}"
             )
             if not r['has_sales_data']:

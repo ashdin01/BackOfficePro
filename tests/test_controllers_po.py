@@ -205,6 +205,50 @@ def test_milk_recs_cartons_based_on_avg_sales(test_db, db_conn, dept_id, supplie
     assert r['cover_days'] == r['days_to_delivery'] + 2
 
 
+def test_milk_recs_projects_stock_forward_over_lead_time(
+    test_db, db_conn, dept_id, supplier_id, monkeypatch
+):
+    """Stock on hand today keeps selling down between order date and the
+    delivery arrival — it must be projected forward by avg_daily * days_ahead
+    before being credited against the cover-period requirement, not just
+    used as a today-snapshot."""
+    import controllers.po_reorder_controller as po_reorder_controller
+
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return date(2024, 1, 1)  # a Monday
+
+    monkeypatch.setattr(po_reorder_controller, 'date', FixedDate)
+
+    _setup_dairy_milk(db_conn, dept_id, supplier_id, delivery_days='THU')
+    db_conn.execute(
+        "INSERT INTO stock_on_hand (barcode, quantity) VALUES ('9300000011111', 50)"
+    )
+    db_conn.execute(
+        "INSERT INTO plu_barcode_map (plu, barcode) VALUES (55555, '9300000011111')"
+    )
+    for i in range(1, 15):
+        d = (date(2024, 1, 1) - timedelta(days=i)).isoformat()
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES (?, '55555', 'MILK 2L', 10, 35.00)
+        """, (d,))
+    db_conn.commit()
+
+    recs = get_milk_order_recommendations(supplier_id)
+    assert len(recs) == 1
+    r = recs[0]
+    assert r['avg_daily'] == 10.0
+    assert r['days_to_delivery'] == 3          # Mon -> Thu
+    assert r['cover_days'] == 9                # Thu -> next Thu (7) + 2 safety days
+    assert r['effective_stock'] == 50.0
+    # 50 on hand is sold down at 10/day for the 3 days until delivery arrives
+    assert r['projected_stock'] == 20.0
+    # needed = avg_daily * cover_days - projected_stock = 10*9 - 20 = 70
+    assert r['cartons'] == 70
+
+
 def test_milk_recs_high_soh_still_returns_minimum_one(test_db, db_conn, dept_id, supplier_id):
     _setup_dairy_milk(db_conn, dept_id, supplier_id)
     # Set SOH very high so needed_units would be negative
