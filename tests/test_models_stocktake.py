@@ -328,6 +328,48 @@ class TestVarianceReportGroupFilter:
         assert not any(r["barcode"] == product_barcode for r in rows)
 
 
+class TestVarianceReportSupplierFilter:
+    def test_supplier_filtered_session_includes_linked_product(
+        self, test_db, db_conn, product_barcode, supplier_id
+    ):
+        db_conn.execute(
+            "INSERT INTO product_suppliers (barcode, supplier_id) VALUES (?, ?)",
+            (product_barcode, supplier_id)
+        )
+        db_conn.commit()
+
+        sid = stocktake_model.create_session("Supplier Session", supplier_id=supplier_id)
+        rows = stocktake_model.get_variance_report(sid)
+        assert any(r["barcode"] == product_barcode for r in rows)
+
+    def test_supplier_filtered_session_excludes_unlinked_product(
+        self, test_db, db_conn, product_barcode, supplier_id
+    ):
+        db_conn.execute("INSERT INTO suppliers (code, name) VALUES ('OTH', 'Other Supplier')")
+        db_conn.commit()
+        other_id = db_conn.execute(
+            "SELECT id FROM suppliers WHERE code='OTH'"
+        ).fetchone()["id"]
+        # product_barcode is only linked to supplier_id, not other_id
+        db_conn.execute(
+            "INSERT INTO product_suppliers (barcode, supplier_id) VALUES (?, ?)",
+            (product_barcode, supplier_id)
+        )
+        db_conn.commit()
+
+        sid = stocktake_model.create_session("Other Supplier Session", supplier_id=other_id)
+        rows = stocktake_model.get_variance_report(sid)
+        assert not any(r["barcode"] == product_barcode for r in rows)
+
+
+class TestSessionScopeExclusivity:
+    def test_department_and_supplier_together_raises(self, test_db, dept_id, supplier_id):
+        with pytest.raises(ValueError):
+            stocktake_model.create_session(
+                "Bad Session", department_id=dept_id, supplier_id=supplier_id
+            )
+
+
 # ── TestImportFromCsv ─────────────────────────────────────────────────────────
 
 class TestImportFromCsv:

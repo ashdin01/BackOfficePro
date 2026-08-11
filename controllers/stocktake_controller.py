@@ -5,9 +5,11 @@ def get_all_sessions() -> list[dict]:
     return stocktake_model.get_all_sessions()
 
 
-def create_session(label, department_id=None, group_id=None, notes='', created_by='') -> int:
+def create_session(label, department_id=None, group_id=None, supplier_id=None,
+                    notes='', created_by='') -> int:
     return stocktake_model.create_session(label, department_id=department_id,
-                                          group_id=group_id, notes=notes, created_by=created_by)
+                                          group_id=group_id, supplier_id=supplier_id,
+                                          notes=notes, created_by=created_by)
 
 
 def get_session(session_id) -> dict | None:

@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS stocktake_sessions (
     label           TEXT    NOT NULL,
     department_id   INTEGER,
     group_id        INTEGER,
+    supplier_id     INTEGER,
     status          TEXT    NOT NULL DEFAULT 'OPEN'
                         CHECK (status IN ('OPEN','CLOSED')),
     started_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -228,7 +229,8 @@ CREATE TABLE IF NOT EXISTS stocktake_sessions (
     created_by      TEXT,
     notes           TEXT,
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
-    FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL
+    FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL,
+    FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)      ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS stocktake_counts (

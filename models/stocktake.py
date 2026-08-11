@@ -11,10 +11,12 @@ def get_all_sessions():
         return conn.execute("""
             SELECT st.*, d.name as dept_name,
                    pg.name as group_name,
+                   s.name as supplier_name,
                    COUNT(sc.id) as line_count
             FROM stocktake_sessions st
             LEFT JOIN departments d     ON st.department_id = d.id
             LEFT JOIN product_groups pg ON st.group_id = pg.id
+            LEFT JOIN suppliers s        ON st.supplier_id = s.id
             LEFT JOIN stocktake_counts sc ON sc.session_id = st.id
             GROUP BY st.id
             ORDER BY st.started_at DESC
@@ -24,20 +26,23 @@ def get_all_sessions():
 def get_session(session_id):
     with db_conn() as conn:
         return conn.execute("""
-            SELECT st.*, d.name as dept_name, pg.name as group_name
+            SELECT st.*, d.name as dept_name, pg.name as group_name, s.name as supplier_name
             FROM stocktake_sessions st
             LEFT JOIN departments d     ON st.department_id = d.id
             LEFT JOIN product_groups pg ON st.group_id = pg.id
+            LEFT JOIN suppliers s        ON st.supplier_id = s.id
             WHERE st.id = ?
         """, (session_id,)).fetchone()
 
 
-def create_session(label, department_id=None, group_id=None, notes='', created_by=''):
+def create_session(label, department_id=None, group_id=None, supplier_id=None, notes='', created_by=''):
+    if department_id and supplier_id:
+        raise ValueError("A stocktake session cannot be scoped by both department and supplier")
     with db_conn() as conn:
         cur = conn.execute("""
-            INSERT INTO stocktake_sessions (label, department_id, group_id, notes, created_by)
-            VALUES (?, ?, ?, ?, ?)
-        """, (label, department_id, group_id, notes, created_by))
+            INSERT INTO stocktake_sessions (label, department_id, group_id, supplier_id, notes, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (label, department_id, group_id, supplier_id, notes, created_by))
         session_id = cur.lastrowid
         conn.commit()
         return session_id
@@ -299,9 +304,9 @@ def import_from_sqlite(session_id, filepath):
 
 def get_variance_report(session_id):
     """
-    Returns all products relevant to this session's department(s),
-    showing SOH vs counted qty and variance. Products not yet counted
-    are included with counted_qty = None.
+    Returns all products relevant to this session's scope (department,
+    group, or supplier), showing SOH vs counted qty and variance. Products
+    not yet counted are included with counted_qty = None.
     """
     with db_conn() as conn:
         session = conn.execute(
@@ -315,6 +320,14 @@ def get_variance_report(session_id):
         if session and session['group_id']:
             extra_filters.append("AND p.group_id = ?")
             params_base.append(session['group_id'])
+        if session and session['supplier_id']:
+            extra_filters.append("""
+                AND EXISTS (
+                    SELECT 1 FROM product_suppliers ps
+                    WHERE ps.barcode = p.barcode AND ps.supplier_id = ?
+                )
+            """)
+            params_base.append(session['supplier_id'])
 
         return conn.execute(f"""
             SELECT

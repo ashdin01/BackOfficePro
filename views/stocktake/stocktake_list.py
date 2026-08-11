@@ -9,6 +9,7 @@ from utils.error_dialog import show_error
 from views.base_view import BaseView
 import controllers.stocktake_controller as stocktake_ctrl
 import controllers.department_controller as dept_ctrl
+import controllers.supplier_controller as supplier_ctrl
 
 
 class StocktakeList(BaseView):
@@ -61,9 +62,12 @@ class StocktakeList(BaseView):
             self.table.insertRow(r)
             self.table.setItem(r, 0, QTableWidgetItem(str(row['id'])))
             self.table.setItem(r, 1, QTableWidgetItem(row['label']))
-            scope = row['dept_name'] or 'All Departments'
-            if row['dept_name'] and row['group_name']:
+            if row['supplier_name']:
+                scope = f"Supplier: {row['supplier_name']}"
+            elif row['dept_name'] and row['group_name']:
                 scope = f"{row['dept_name']} > {row['group_name']}"
+            else:
+                scope = row['dept_name'] or 'All Departments'
             self.table.setItem(r, 2, QTableWidgetItem(scope))
             status_item = QTableWidgetItem(row['status'])
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -106,6 +110,7 @@ class NewSessionDialog(QDialog):
         self.setMinimumWidth(420)
         self.created_id = None
         self._depts = dept_ctrl.get_all()
+        self._suppliers = supplier_ctrl.get_all()
         self._build_ui()
 
     def _build_ui(self):
@@ -115,6 +120,10 @@ class NewSessionDialog(QDialog):
 
         self.label = QLineEdit()
         self.label.setPlaceholderText("e.g. Full Stocktake March 2026")
+
+        self.scope_type = QComboBox()
+        self.scope_type.addItems(["Department", "Supplier"])
+        self.scope_type.currentIndexChanged.connect(self._on_scope_type_changed)
 
         self.dept = QComboBox()
         self.dept.addItem("All Departments", None)
@@ -127,15 +136,23 @@ class NewSessionDialog(QDialog):
 
         self.dept.currentIndexChanged.connect(self._on_dept_changed)
 
+        self.supplier = QComboBox()
+        for s in self._suppliers:
+            self.supplier.addItem(s['name'], s['id'])
+
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(60)
         self.notes.setPlaceholderText("Optional notes...")
 
-        form.addRow("Label *",    self.label)
-        form.addRow("Department", self.dept)
-        form.addRow("Group",      self.group)
-        form.addRow("Notes",      self.notes)
+        form.addRow("Label *",      self.label)
+        form.addRow("Stocktake By", self.scope_type)
+        form.addRow("Department",   self.dept)
+        form.addRow("Group",        self.group)
+        form.addRow("Supplier",     self.supplier)
+        form.addRow("Notes",        self.notes)
         layout.addLayout(form)
+        self._form = form
+        self._on_scope_type_changed()
 
         layout.addSpacing(8)
         btns = QHBoxLayout()
@@ -152,6 +169,12 @@ class NewSessionDialog(QDialog):
         from PyQt6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Escape"), self, self.reject)
         self.label.setFocus()
+
+    def _on_scope_type_changed(self):
+        by_supplier = self.scope_type.currentText() == "Supplier"
+        self._form.setRowVisible(self.dept, not by_supplier)
+        self._form.setRowVisible(self.group, not by_supplier)
+        self._form.setRowVisible(self.supplier, by_supplier)
 
     def _on_dept_changed(self):
         dept_id = self.dept.currentData()
@@ -171,11 +194,18 @@ class NewSessionDialog(QDialog):
         if not label:
             QMessageBox.warning(self, "Validation", "Please enter a label for this session.")
             return
+
+        by_supplier = self.scope_type.currentText() == "Supplier"
+        if by_supplier and self.supplier.currentData() is None:
+            QMessageBox.warning(self, "Validation", "Please select a supplier.")
+            return
+
         try:
             self.created_id = stocktake_ctrl.create_session(
                 label=label,
-                department_id=self.dept.currentData(),
-                group_id=self.group.currentData(),
+                department_id=None if by_supplier else self.dept.currentData(),
+                group_id=None if by_supplier else self.group.currentData(),
+                supplier_id=self.supplier.currentData() if by_supplier else None,
                 notes=self.notes.toPlainText(),
             )
             self.accept()

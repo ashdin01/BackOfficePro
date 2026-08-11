@@ -33,6 +33,11 @@ class TestSessionLifecycle:
         result = st_ctrl.get_session(sid)
         assert result['department_id'] == dept_id
 
+    def test_create_session_with_supplier(self, test_db, supplier_id):
+        sid = st_ctrl.create_session('Supplier Session', supplier_id=supplier_id, created_by='test')
+        result = st_ctrl.get_session(sid)
+        assert result['supplier_id'] == supplier_id
+
 
 class TestCounts:
     def test_get_counts_empty_for_new_session(self, test_db, session_id):

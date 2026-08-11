@@ -23,6 +23,7 @@ import controllers.settings_controller as settings_ctrl
 import controllers.department_controller as department_ctrl
 import controllers.product_controller as product_ctrl
 import controllers.stocktake_controller as stocktake_ctrl
+import controllers.supplier_controller as supplier_ctrl
 import controllers.bundle_controller as bundle_ctrl
 import controllers.sales_report_controller as sales_ctrl
 import controllers.purchase_order_controller as po_ctrl
@@ -228,6 +229,12 @@ def get_department_groups(dept_id):
     return jsonify([{'id': r['id'], 'code': r['code'], 'name': r['name']} for r in rows])
 
 
+@app.route("/api/v1/suppliers")
+def get_suppliers():
+    rows = supplier_ctrl.get_all(active_only=True)
+    return jsonify([{'id': r['id'], 'code': r['code'], 'name': r['name']} for r in rows])
+
+
 @app.route("/api/v1/products")
 def list_products():
     """
@@ -276,11 +283,17 @@ def create_session():
     label = str(data.get("label", "")).strip()
     if not label:
         return _err("MISSING_FIELD", "label required", 400)
-    dept_id    = data.get("department_id")
-    group_id   = data.get("group_id")
-    notes      = data.get("notes", "")
-    created_by = data.get("created_by", "Android")
-    session_id = stocktake_ctrl.create_session(label, dept_id, group_id, notes, created_by)
+    dept_id     = data.get("department_id")
+    group_id    = data.get("group_id")
+    supplier_id = data.get("supplier_id")
+    notes       = data.get("notes", "")
+    created_by  = data.get("created_by", "Android")
+    try:
+        session_id = stocktake_ctrl.create_session(
+            label, dept_id, group_id, supplier_id, notes, created_by
+        )
+    except ValueError as e:
+        return _err("INVALID_PARAM", str(e), 400)
     return jsonify({"id": session_id}), 201
 
 

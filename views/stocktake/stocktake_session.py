@@ -156,7 +156,9 @@ class StocktakeSession(BaseView):
         session = stocktake_ctrl.get_session(self.session_id)
         self._session = session
         status = session['status']
-        if session['dept_name'] and session['group_name']:
+        if session['supplier_name']:
+            scope = f"Supplier: {session['supplier_name']}"
+        elif session['dept_name'] and session['group_name']:
             scope = f"{session['dept_name']} > {session['group_name']}"
         else:
             scope = session['dept_name'] or 'All Departments'

@@ -192,6 +192,14 @@ def test_department_groups_empty_for_unknown_department(api_client):
     assert r.get_json() == []
 
 
+def test_suppliers_returns_created_supplier(api_client, supplier_id):
+    client, key = api_client
+    r = client.get("/api/v1/suppliers", headers=_h(key))
+    assert r.status_code == 200
+    suppliers = r.get_json()
+    assert any(s["id"] == supplier_id and s["name"] == "Test Supplier" for s in suppliers)
+
+
 # ── Products list ─────────────────────────────────────────────────────────────
 
 def test_products_list_returns_list(api_client):
@@ -302,6 +310,30 @@ def test_session_create_returns_id(api_client):
 def test_session_create_missing_label_is_400(api_client):
     client, key = api_client
     r = client.post("/api/v1/sessions", json={}, headers=_h(key))
+    assert r.status_code == 400
+
+
+def test_session_create_with_supplier_id(api_client, supplier_id):
+    client, key = api_client
+    r = client.post(
+        "/api/v1/sessions",
+        json={"label": "Supplier Session", "supplier_id": supplier_id},
+        headers=_h(key)
+    )
+    assert r.status_code == 201
+    sid = r.get_json()["id"]
+
+    session = client.get(f"/api/v1/sessions/{sid}", headers=_h(key)).get_json()
+    assert session["supplier_id"] == supplier_id
+
+
+def test_session_create_with_department_and_supplier_is_400(api_client, dept_id, supplier_id):
+    client, key = api_client
+    r = client.post(
+        "/api/v1/sessions",
+        json={"label": "Bad Session", "department_id": dept_id, "supplier_id": supplier_id},
+        headers=_h(key)
+    )
     assert r.status_code == 400
 
 

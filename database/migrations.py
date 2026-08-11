@@ -2623,6 +2623,16 @@ def migrate_v64(conn):
     conn.commit()
 
 
+def migrate_v65(conn):
+    """Add supplier_id to stocktake_sessions so a stocktake can be scoped to
+    everything a supplier sells, as an alternative to department/group scoping."""
+    _add_column(conn, """
+        ALTER TABLE stocktake_sessions ADD COLUMN supplier_id INTEGER
+            REFERENCES suppliers(id) ON DELETE SET NULL
+    """)
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2687,4 +2697,5 @@ _MIGRATIONS: dict[int, tuple] = {
     62: (migrate_v62, "old_cost/new_cost/value_delta columns on stock_movements for REVALUE tracking"),
     63: (migrate_v63, "backfill corrected checksums for migrate_v40, v42, and v53-v62"),
     64: (migrate_v64, "rsa_cert_number, rsa_expiry_date columns on users"),
+    65: (migrate_v65, "supplier_id on stocktake_sessions for by-supplier stocktake scoping"),
 }
