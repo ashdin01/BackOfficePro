@@ -170,6 +170,19 @@ class TestAdjustCallbacks:
         assert stock_adjust_view.clear_btn.isEnabled()
         assert received == [True]
 
+    def test_done_returns_focus_to_search_for_next_product(
+        self, stock_adjust_view, monkeypatch
+    ):
+        """Enter-key cycle: search -> product -> qty -> reason -> Apply ->
+        confirm -> back to search, ready for the next product."""
+        import views.stock_adjust.stock_adjust_view as _mod
+        monkeypatch.setattr(_mod, "QMessageBox", MagicMock())
+        stock_adjust_view.qty_spin.setFocus()  # simulate focus being elsewhere beforehand
+
+        stock_adjust_view._on_adjust_done(42, [])
+
+        assert stock_adjust_view.focusWidget() is stock_adjust_view.search
+
     def test_error_shows_critical_and_reenables_buttons(self, stock_adjust_view, monkeypatch):
         import views.stock_adjust.stock_adjust_view as _mod
         mock_mb = MagicMock()

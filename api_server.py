@@ -599,6 +599,10 @@ def receive_purchase_order(po_id):
     try:
         po_ctrl.receive_po_atomic(po_id, po['po_number'], line_receipts, final_status,
                                   supplier_invoice_number=invoice_number)
+    except ValueError as e:
+        # Most likely the PO's status changed (e.g. received elsewhere) between
+        # the pre-check above and the atomic transaction's own status guard.
+        return _err("INVALID_STATUS", str(e), 409)
     except Exception as e:
         logging.exception("PO receive failed po_id=%s", po_id)
         return _err("RECEIVE_FAILED", str(e), 500)

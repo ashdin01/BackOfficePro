@@ -14,6 +14,7 @@ from views.base_view import BaseView
 class POList(BaseView):
     def __init__(self):
         super().__init__()
+        self._receive_windows = {}   # po_id -> open POReceive window
         self._build_ui()
         self._startup_cleanup()
         self.load()
@@ -342,8 +343,15 @@ class POList(BaseView):
                     "Only SENT or PARTIAL orders can be received."
                 )
                 return
+            existing = self._receive_windows.get(po_id)
+            if existing is not None and existing.isVisible():
+                existing.raise_()
+                existing.activateWindow()
+                return
+
             from views.purchase_orders.po_receive import POReceive
             self.receive_win = POReceive(po_id=po_id, on_save=self._load)
+            self._receive_windows[po_id] = self.receive_win
             self.receive_win.show()
 
     def _update_po(self):

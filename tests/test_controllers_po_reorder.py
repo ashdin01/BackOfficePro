@@ -18,6 +18,7 @@ from controllers.purchase_order_controller import (
     get_po_lines,
     receive_po_atomic,
     get_po_by_id,
+    update_po_status,
 )
 
 
@@ -221,6 +222,7 @@ class TestGetReceivedLineCount:
     def test_count_increments_after_receipt(self, test_db, supplier_id,
                                              product_barcode, gst_free_barcode):
         po_id = create_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         add_po_line(po_id, product_barcode, 'Widget', ordered_qty=5, unit_cost=2.00)
         add_po_line(po_id, gst_free_barcode, 'GST Free', ordered_qty=3, unit_cost=1.00)
         lines = get_po_lines(po_id)

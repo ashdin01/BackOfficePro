@@ -604,8 +604,8 @@ class StockAdjustView(QWidget):
         self.clear_btn.setEnabled(True)
         self.stock_changed.emit()
         stock_events.changed.emit()
-        self.qty_spin.setFocus()
-        self.qty_spin.selectAll()
+        self.search.setFocus()
+        self.search.selectAll()
 
     def _on_adjust_error(self, msg):
         QMessageBox.critical(self, "Error", msg)

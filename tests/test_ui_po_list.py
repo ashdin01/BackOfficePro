@@ -144,6 +144,40 @@ class TestOpenReceive:
         po_list_view._open_receive()
         mock_cls.assert_called_once_with(po_id=pid, on_save=po_list_view._load)
 
+    def test_second_call_reuses_existing_visible_window(self, po_list_view, supplier_id, monkeypatch):
+        """Opening Receive twice for the same PO while the first window is
+        still open must focus the existing window, not open a second one."""
+        pid = _make_po(supplier_id, status='SENT')
+        po_list_view.load()
+        _select_row(po_list_view.active_table, pid)
+        import views.purchase_orders.po_receive as _recv_mod
+        mock_cls = MagicMock()
+        mock_instance = mock_cls.return_value
+        mock_instance.isVisible.return_value = True
+        monkeypatch.setattr(_recv_mod, 'POReceive', mock_cls)
+
+        po_list_view._open_receive()
+        po_list_view._open_receive()
+
+        mock_cls.assert_called_once_with(po_id=pid, on_save=po_list_view._load)
+        mock_instance.raise_.assert_called_once()
+        mock_instance.activateWindow.assert_called_once()
+
+    def test_reopens_after_previous_window_closed(self, po_list_view, supplier_id, monkeypatch):
+        pid = _make_po(supplier_id, status='SENT')
+        po_list_view.load()
+        _select_row(po_list_view.active_table, pid)
+        import views.purchase_orders.po_receive as _recv_mod
+        mock_cls = MagicMock()
+        mock_instance = mock_cls.return_value
+        mock_instance.isVisible.return_value = False  # closed
+        monkeypatch.setattr(_recv_mod, 'POReceive', mock_cls)
+
+        po_list_view._open_receive()
+        po_list_view._open_receive()
+
+        assert mock_cls.call_count == 2
+
     def test_ro_type_requires_sent_status(self, po_list_view, supplier_id, monkeypatch):
         pid = _make_po(supplier_id, status='DRAFT', po_type='RO')
         po_list_view.load()

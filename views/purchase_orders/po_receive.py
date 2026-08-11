@@ -325,10 +325,10 @@ class POReceive(BaseView):
         self.table.setColumnWidth(4, 120)
         self.table.setColumnWidth(5, 110)
         self.table.setColumnWidth(6, 100)   # Weight (kg)
-        self.table.setColumnWidth(7, 120)   # Cost
+        self.table.setColumnWidth(7, 170)   # Cost ($/kg or unit) ex. GST
         self.table.setColumnWidth(8, 110)   # Cost inc. Tax
         self.table.setColumnWidth(9,  70)   # Promo
-        self.table.setColumnWidth(10, 110)  # Line Total ex. GST
+        self.table.setColumnWidth(10, 150)  # Line Total ex. GST
         self.table.setColumnWidth(11, 120)  # Line Total inc. Tax
         layout.addWidget(self.table)
 
@@ -365,7 +365,7 @@ class POReceive(BaseView):
         self.charges_table.setColumnWidth(2, 150)
         self.charges_table.setFixedHeight(110)
         self.charges_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.charges_table.itemChanged.connect(self._update_total)
+        self.charges_table.itemChanged.connect(self._on_charge_item_changed)
         layout.addWidget(self.charges_table)
 
         btns = QHBoxLayout()
@@ -411,6 +411,7 @@ class POReceive(BaseView):
         self.charges_table.setCellWidget(r, 1, tax_combo)
         amt_item = QTableWidgetItem("0.00")
         amt_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        amt_item.setData(Qt.ItemDataRole.UserRole, 0.0)
         self.charges_table.setItem(r, 2, amt_item)
         self.charges_table.blockSignals(False)
         self._update_total()
@@ -420,6 +421,26 @@ class POReceive(BaseView):
         if row >= 0:
             self.charges_table.removeRow(row)
             self._update_total()
+
+    def _on_charge_item_changed(self, item):
+        """Parse+validate the Amount column once, on entry, storing the
+        canonical float in UserRole — rather than re-parsing formatted
+        display text every time totals are recalculated."""
+        if item.column() == 2:
+            self.charges_table.blockSignals(True)
+            try:
+                value = float(item.text().strip().replace("$", "").replace(",", "") or 0)
+                if value < 0:
+                    raise ValueError("amount cannot be negative")
+                item.setData(Qt.ItemDataRole.UserRole, value)
+                item.setBackground(QColor(self.BG))
+                item.setToolTip("")
+            except ValueError:
+                item.setData(Qt.ItemDataRole.UserRole, None)
+                item.setBackground(QColor(styles.CLR_DANGER))
+                item.setToolTip("Enter a valid non-negative amount")
+            self.charges_table.blockSignals(False)
+        self._update_total()
 
     def _open_product(self, index):
         row = index.row()
@@ -451,6 +472,10 @@ class POReceive(BaseView):
         # (line, pack_qty, qty_input, cost_input, promo_checkbox, lt_item,
         #  remaining_units, is_variable_weight, weight_input)
         self._inputs = []
+        # row -> (line_total_ex, line_total_inc) as canonical floats, kept in
+        # sync by _refresh_line — avoids re-parsing formatted "$1,234.00"
+        # display text back into a number every time totals are recalculated.
+        self._line_totals = {}
 
         for line in self.lines:
             if line['is_note']:
@@ -546,12 +571,12 @@ class POReceive(BaseView):
             self.table.setItem(r, 10, lt_item)
             # ── Col 11: Line Total inc. Tax — read only ──────────────────
             lt_inc_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            lt_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
+            lt_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
             self.table.setItem(r, 11, lt_inc_item)
             # ── Col 10: Cost inc. GST — read only ────────────────────
             cost_inc = current_cost * (1 + tax_rate / 100)
             cost_inc_item = self._cell(f"${cost_inc:.4f}", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            cost_inc_item.setForeground(__import__('PyQt6.QtGui', fromlist=['QColor']).QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else __import__('PyQt6.QtGui', fromlist=['QColor']).QColor('#aaaaaa'))
+            cost_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
             self.table.setItem(r, 8, cost_inc_item)
 
             # ── Signal connections ────────────────────────────────────
@@ -629,10 +654,12 @@ class POReceive(BaseView):
             qty        = qty_input.value()
             line_total = qty * cost
 
-        lt_item.setText(f"${round_half_up(line_total):.2f}")
-        line_total_inc = amount_inc_from_ex(line_total, tax_rate)
-        lt_inc_item.setText(f"${round_half_up(line_total_inc):.2f}")
-        from PyQt6.QtGui import QColor
+        line_total_ex  = round_half_up(line_total)
+        line_total_inc = round_half_up(amount_inc_from_ex(line_total, tax_rate))
+        self._line_totals[row] = (line_total_ex, line_total_inc)
+
+        lt_item.setText(f"${line_total_ex:.2f}")
+        lt_inc_item.setText(f"${line_total_inc:.2f}")
         lt_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
         cost_inc = amount_inc_from_ex(cost, tax_rate)
         cost_inc_item = self.table.item(row, 8)
@@ -646,34 +673,29 @@ class POReceive(BaseView):
         total_inc = 0.0
         gst_total = 0.0
         promo_total = 0.0
-        for entry in self._inputs:
-            tax_rate = entry[9] if len(entry) > 9 else 0.0
-            lt_inc_item = entry[10] if len(entry) > 10 else None
-            _, _, _, _, promo_cb, lt_item = entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]
-            try:
-                ex_val = float(lt_item.text().replace("$", "").replace(",", ""))
-                inc_val = float(lt_inc_item.text().replace("$", "").replace(",", "")) if lt_inc_item else ex_val
-                total_inc += inc_val
-                gst_total += inc_val - ex_val
-                if promo_cb.isChecked():
-                    promo_total += inc_val
-            except (ValueError, AttributeError):
-                pass
-        # Additional charges
+        for row, entry in enumerate(self._inputs):
+            promo_cb = entry[4]
+            ex_val, inc_val = self._line_totals.get(row, (0.0, 0.0))
+            total_inc += inc_val
+            gst_total += inc_val - ex_val
+            if promo_cb.isChecked():
+                promo_total += inc_val
+        # Additional charges — amounts are validated and cached in UserRole
+        # by _on_charge_item_changed when entered; an unparsed/invalid entry
+        # (UserRole None) is excluded here but still flagged red for the user
+        # and blocks Confirm Receipt (see _confirm).
         if self.charges_table is not None:
             for cr in range(self.charges_table.rowCount()):
-                try:
-                    amt_item = self.charges_table.item(cr, 2)
-                    if not amt_item:
-                        continue
-                    amt = float(amt_item.text().replace("$", "").replace(",", ""))
+                amt_item = self.charges_table.item(cr, 2)
+                if not amt_item:
+                    continue
+                amt = amt_item.data(Qt.ItemDataRole.UserRole)
+                if amt is not None:
                     tax_combo = self.charges_table.cellWidget(cr, 1)
                     charge_tax = tax_combo.currentData() if tax_combo else 0.0
                     total_inc += amt
                     if charge_tax > 0:
                         gst_total += gst_from_inclusive(amt, charge_tax)
-                except (ValueError, AttributeError):
-                    pass
         subtotal = round_half_up(total_inc - gst_total)
         gst = round_half_up(gst_total)
         total_inc = round_half_up(total_inc)
@@ -717,6 +739,20 @@ class POReceive(BaseView):
             f"QLineEdit:focus {{ border-color: {styles.CLR_ACCENT_HOVER}; }}"
         )
 
+        if self.charges_table is not None:
+            for cr in range(self.charges_table.rowCount()):
+                amt_item = self.charges_table.item(cr, 2)
+                if amt_item is not None and amt_item.data(Qt.ItemDataRole.UserRole) is None:
+                    desc_item = self.charges_table.item(cr, 0)
+                    desc = (desc_item.text() if desc_item else '') or f"row {cr + 1}"
+                    QMessageBox.warning(
+                        self, "Invalid Charge Amount",
+                        f"The amount for charge '{desc}' isn't a valid non-negative "
+                        "number. Please fix it before confirming receipt."
+                    )
+                    self.charges_table.setCurrentCell(cr, 2)
+                    return
+
         po = po_ctrl.get_po_by_id(self.po_id)
         po_number = po['po_number']
 
@@ -726,6 +762,34 @@ class POReceive(BaseView):
                 f"{po_number} has status '{po['status']}' and cannot be received again."
             )
             return
+
+        partial_carton_lines = []
+        for entry in self._inputs:
+            line, pack_qty, qty_input, cost_input, promo_cb, \
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
+            qty = qty_input.value()
+            if qty > 0 and pack_qty > 1 and qty % pack_qty != 0:
+                cartons = max(1, math.ceil(qty / pack_qty))
+                partial_carton_lines.append((line['description'], qty, pack_qty, cartons))
+
+        if partial_carton_lines:
+            detail = "\n".join(
+                f"  •  {desc}: {qty} units (pack of {pk}) — will be recorded "
+                f"as {cartons} carton(s) received"
+                for desc, qty, pk, cartons in partial_carton_lines
+            )
+            reply = QMessageBox.question(
+                self, "Partial Carton Quantity",
+                "These line(s) aren't a whole number of cartons:\n\n"
+                f"{detail}\n\n"
+                "Stock on hand will be credited exactly what you entered, but "
+                "the PO's recorded carton count will round up — if this "
+                "wasn't intentional (e.g. a mis-typed quantity), go back and "
+                "fix it now.\n\nContinue anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         promo_count = sum(
             1 for entry in self._inputs
@@ -771,25 +835,23 @@ class POReceive(BaseView):
 
         status = PO_STATUS_RECEIVED if all_received else PO_STATUS_PARTIAL
 
-        # Collect additional charges
+        # Collect additional charges — amounts already validated above, so
+        # every row's UserRole is a real float here.
         charges = []
         if self.charges_table is not None:
             for cr in range(self.charges_table.rowCount()):
-                try:
-                    desc_item = self.charges_table.item(cr, 0)
-                    amt_item  = self.charges_table.item(cr, 2)
-                    tax_combo = self.charges_table.cellWidget(cr, 1)
-                    if not amt_item:
-                        continue
-                    amt      = float(amt_item.text().replace("$", "").replace(",", "") or 0)
-                    tax_rate = tax_combo.currentData() if tax_combo else 0.0
-                    charges.append({
-                        'description':   (desc_item.text() if desc_item else '') or 'Charge',
-                        'tax_rate':      tax_rate,
-                        'amount_inc_tax': amt,
-                    })
-                except (ValueError, AttributeError):
-                    pass
+                desc_item = self.charges_table.item(cr, 0)
+                amt_item  = self.charges_table.item(cr, 2)
+                tax_combo = self.charges_table.cellWidget(cr, 1)
+                if not amt_item:
+                    continue
+                amt      = amt_item.data(Qt.ItemDataRole.UserRole) or 0.0
+                tax_rate = tax_combo.currentData() if tax_combo else 0.0
+                charges.append({
+                    'description':   (desc_item.text() if desc_item else '') or 'Charge',
+                    'tax_rate':      tax_rate,
+                    'amount_inc_tax': amt,
+                })
 
         try:
             po_ctrl.receive_po_atomic(self.po_id, po_number, line_receipts, status,

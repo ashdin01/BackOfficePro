@@ -20,9 +20,10 @@ def po_id(test_db, supplier_id):
 
 class TestReceiveAtomic:
     def _setup_line(self, po_id, product_barcode, ordered_qty=10, pack_qty=6):
-        """Add a line and return the line dict."""
+        """Add a line, mark the PO SENT (receive_atomic requires SENT/PARTIAL), and return the line dict."""
         lines_model.add(po_id, product_barcode, "Test Product",
                         ordered_qty, 2.00, "", pack_qty)
+        po_model.update_status(po_id, constants.PO_STATUS_SENT)
         return lines_model.get_by_po(po_id)[0]
 
     def _make_receipt(self, line_id, barcode, new_received_qty=10,
@@ -198,6 +199,50 @@ class TestReceiveAtomic:
         ).fetchall()
         conn.close()
         assert rows == []
+
+    def test_receive_atomic_rejects_draft_po(self, test_db, po_id, product_barcode):
+        """A PO must be SENT/PARTIAL to be received — DRAFT is not enough."""
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        po_model.update_status(po_id, "DRAFT")
+        receipt = self._make_receipt(line["id"], product_barcode, qty_units=6)
+
+        with pytest.raises(ValueError, match="DRAFT"):
+            po_ctrl.receive_po_atomic(po_id, po["po_number"], [receipt], "RECEIVED")
+
+    def test_receive_atomic_rejects_already_received_po_and_does_not_double_credit(
+        self, test_db, po_id, product_barcode
+    ):
+        """
+        Simulates the race this guard exists for: the PO's status changed
+        (e.g. received by another caller) between the caller's own pre-check
+        and this call. receive_atomic must catch it itself rather than
+        trusting the caller, and must not touch stock on hand.
+        """
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        receipt = self._make_receipt(line["id"], product_barcode, qty_units=6)
+        po_model.update_status(po_id, "RECEIVED")
+
+        soh_before = soh_model.get_by_barcode(product_barcode)
+        qty_before = soh_before["quantity"] if soh_before else 0
+
+        with pytest.raises(ValueError, match="RECEIVED"):
+            po_ctrl.receive_po_atomic(po_id, po["po_number"], [receipt], "RECEIVED")
+
+        soh_after = soh_model.get_by_barcode(product_barcode)
+        qty_after = soh_after["quantity"] if soh_after else 0
+        assert qty_after == qty_before
+
+    def test_receive_atomic_allows_partial_status(self, test_db, po_id, product_barcode):
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        po_model.update_status(po_id, "PARTIAL")
+        receipt = self._make_receipt(line["id"], product_barcode, qty_units=6)
+
+        po_ctrl.receive_po_atomic(po_id, po["po_number"], [receipt], "RECEIVED")
+
+        assert po_model.get_by_id(po_id)["status"] == "RECEIVED"
 
 
 # ── TestValidateCharges ───────────────────────────────────────────────────────

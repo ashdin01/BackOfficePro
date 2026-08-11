@@ -15,6 +15,7 @@ import controllers.product_controller as product_ctrl
 
 def _received_po(supplier_id, product_barcode, ordered=10, received=6, unit_cost=2.00):
     po_id = po_ctrl.create_po(supplier_id)
+    po_ctrl.update_po_status(po_id, 'SENT')
     po_ctrl.add_po_line(po_id, product_barcode, 'Test Product', ordered, unit_cost=unit_cost)
     line = po_ctrl.get_po_lines(po_id)[0]
     po_ctrl.receive_po_atomic(

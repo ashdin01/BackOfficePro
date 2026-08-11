@@ -271,6 +271,7 @@ class TestReceivePO:
 
     def test_full_receipt_sets_status_received(self, test_db, supplier_id, product_barcode, db_conn):
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=5, cost=2.00)
         line = _get_lines(po_id)[0]
         po = get_po_by_id(po_id)
@@ -283,6 +284,7 @@ class TestReceivePO:
 
     def test_receipt_increases_soh(self, test_db, supplier_id, product_barcode, db_conn):
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=10, cost=2.00)
         line = _get_lines(po_id)[0]
         po = get_po_by_id(po_id)
@@ -299,6 +301,7 @@ class TestReceivePO:
 
     def test_partial_receipt_sets_partial_status(self, test_db, supplier_id, product_barcode):
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=10, cost=2.00)
         line = _get_lines(po_id)[0]
         po = get_po_by_id(po_id)
@@ -311,6 +314,7 @@ class TestReceivePO:
 
     def test_get_unreceived_lines_after_partial(self, test_db, supplier_id, product_barcode):
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=10, cost=2.00)
         line = _get_lines(po_id)[0]
         po = get_po_by_id(po_id)
@@ -325,6 +329,7 @@ class TestReceivePO:
 
     def test_get_received_line_count(self, test_db, supplier_id, product_barcode, gst_free_barcode):
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=5, cost=2.00)
         _add_line(po_id, gst_free_barcode, desc='GST Free', qty=3, cost=1.00)
         lines = _get_lines(po_id)
@@ -339,6 +344,7 @@ class TestReceivePO:
 
     def test_receipt_stores_supplier_invoice_number(self, test_db, supplier_id, product_barcode):
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=5, cost=2.00)
         line = _get_lines(po_id)[0]
         po = get_po_by_id(po_id)
@@ -353,6 +359,7 @@ class TestReceivePO:
 
     def test_receipt_with_charge_stored(self, test_db, supplier_id, product_barcode):
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=5, cost=2.00)
         line = _get_lines(po_id)[0]
         po = get_po_by_id(po_id)
@@ -422,6 +429,7 @@ class TestModelWrapperDelegation:
     def test_reverse_po_delegates(self, test_db, supplier_id, product_barcode):
         from controllers.purchase_order_controller import reverse_po
         po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
         _add_line(po_id, product_barcode, qty=5, cost=2.00)
         line = _get_lines(po_id)[0]
         po = get_po_by_id(po_id)

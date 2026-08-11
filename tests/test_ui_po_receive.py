@@ -4,6 +4,7 @@ Requires pytest-qt (installed) and a live display (DISPLAY=:0).
 """
 import pytest
 from unittest.mock import MagicMock, patch
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 import controllers.purchase_order_controller as po_ctrl
@@ -17,6 +18,22 @@ def sent_po(db_conn, supplier_id, product_barcode):
     po_id = po_ctrl.create_po(supplier_id, delivery_date="2026-07-01")
     po_ctrl.update_po_status(po_id, "SENT")
     po_ctrl.add_po_line(po_id, product_barcode, "Test Product", 5, unit_cost=2.00)
+    return po_id
+
+
+@pytest.fixture()
+def sent_po_multi_pack(db_conn, supplier_id, product_barcode):
+    """SENT PO with one product line (2 cartons of 6, pack_qty=6).
+
+    POReceive derives cartons math from the *product's* current pack_qty
+    (matching po_detail.py / po_lines.py), not the po_line's own pack_qty
+    column, so the product row must be updated too.
+    """
+    db_conn.execute("UPDATE products SET pack_qty=6 WHERE barcode=?", (product_barcode,))
+    db_conn.commit()
+    po_id = po_ctrl.create_po(supplier_id, delivery_date="2026-07-01")
+    po_ctrl.update_po_status(po_id, "SENT")
+    po_ctrl.add_po_line(po_id, product_barcode, "Test Product", 2, unit_cost=2.00, pack_qty=6)
     return po_id
 
 
@@ -172,6 +189,56 @@ class TestConfirm:
 
         mock_mb.warning.assert_called_once()
 
+    def test_partial_carton_qty_prompts_extra_confirmation(
+        self, qtbot, monkeypatch, sent_po_multi_pack
+    ):
+        """Entering a qty that isn't a whole number of cartons (pack_qty=6,
+        qty=5) must prompt an extra confirmation before receiving."""
+        from views.purchase_orders.po_receive import POReceive
+        w = POReceive(sent_po_multi_pack)
+        qtbot.addWidget(w)
+        mock_mb = _yes(monkeypatch)
+        w.supplier_invoice_input.setText("INV-001")
+        qty_input = w.table.cellWidget(0, 5)
+        qty_input.setValue(5)  # pack_qty=6 — not a whole carton
+
+        w._confirm()
+
+        # One dialog for the partial-carton warning, one for the receipt confirm
+        assert mock_mb.question.call_count == 2
+        assert po_ctrl.get_po_by_id(sent_po_multi_pack)["status"] == "PARTIAL"
+
+    def test_declining_partial_carton_warning_blocks_receipt(
+        self, qtbot, monkeypatch, sent_po_multi_pack
+    ):
+        from views.purchase_orders.po_receive import POReceive
+        w = POReceive(sent_po_multi_pack)
+        qtbot.addWidget(w)
+        _no(monkeypatch)
+        w.supplier_invoice_input.setText("INV-001")
+        qty_input = w.table.cellWidget(0, 5)
+        qty_input.setValue(5)  # pack_qty=6 — not a whole carton
+
+        w._confirm()
+
+        assert po_ctrl.get_po_by_id(sent_po_multi_pack)["status"] == "SENT"
+
+    def test_whole_carton_qty_skips_partial_carton_warning(
+        self, qtbot, monkeypatch, sent_po_multi_pack
+    ):
+        from views.purchase_orders.po_receive import POReceive
+        w = POReceive(sent_po_multi_pack)
+        qtbot.addWidget(w)
+        mock_mb = _yes(monkeypatch)
+        w.supplier_invoice_input.setText("INV-001")
+        qty_input = w.table.cellWidget(0, 5)
+        qty_input.setValue(6)  # exactly one carton
+
+        w._confirm()
+
+        # Only the ordinary receipt-confirm dialog, no partial-carton warning
+        assert mock_mb.question.call_count == 1
+
     def test_receive_failure_shows_error_not_crash(self, po_receive_view, monkeypatch, sent_po):
         _yes(monkeypatch)
         po_receive_view.supplier_invoice_input.setText("INV-001")
@@ -187,3 +254,49 @@ class TestConfirm:
 
         # PO status unchanged since the atomic write raised
         assert po_ctrl.get_po_by_id(sent_po)["status"] == "SENT"
+
+
+# ── Additional Charges ────────────────────────────────────────────────────────
+
+class TestCharges:
+    def test_valid_amount_stored_as_canonical_float(self, po_receive_view):
+        po_receive_view._add_charge()
+        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item.setText("15.00")
+
+        po_receive_view._on_charge_item_changed(amt_item)
+
+        assert amt_item.data(Qt.ItemDataRole.UserRole) == 15.00
+        assert "15.00" in po_receive_view.total_label.text()
+
+    def test_invalid_amount_flagged_and_excluded_from_total(self, po_receive_view):
+        po_receive_view._add_charge()
+        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item.setText("not a number")
+
+        po_receive_view._on_charge_item_changed(amt_item)
+
+        assert amt_item.data(Qt.ItemDataRole.UserRole) is None
+
+    def test_invalid_amount_blocks_confirm(self, po_receive_view, monkeypatch, sent_po):
+        mock_mb = _yes(monkeypatch)
+        po_receive_view.supplier_invoice_input.setText("INV-001")
+        po_receive_view._receive_all()
+        po_receive_view._add_charge()
+        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item.setText("abc")
+        po_receive_view._on_charge_item_changed(amt_item)
+
+        po_receive_view._confirm()
+
+        mock_mb.warning.assert_called_once()
+        assert po_ctrl.get_po_by_id(sent_po)["status"] == "SENT"
+
+    def test_negative_amount_rejected(self, po_receive_view):
+        po_receive_view._add_charge()
+        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item.setText("-5.00")
+
+        po_receive_view._on_charge_item_changed(amt_item)
+
+        assert amt_item.data(Qt.ItemDataRole.UserRole) is None

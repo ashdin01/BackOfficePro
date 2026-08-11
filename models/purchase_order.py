@@ -1,6 +1,6 @@
 import logging
 from database.connection import db_conn
-from config.constants import PO_STATUS_CANCELLED
+from config.constants import PO_STATUS_CANCELLED, PO_STATUS_SENT, PO_STATUS_PARTIAL
 from datetime import datetime, timedelta
 
 
@@ -318,6 +318,13 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
         description (non-empty str), tax_rate (0–100), amount_inc_tax (>= 0)
 
     Raises ValueError for invalid charge data before any DB writes.
+    Raises ValueError if the PO is not currently SENT/PARTIAL — checked
+    inside this transaction (via BEGIN IMMEDIATE) rather than by the caller,
+    so two concurrent receive attempts on the same PO (e.g. the desktop app
+    and the mobile receive API both hitting the same SQLite file) can't both
+    pass a stale pre-check and double-credit stock. The loser blocks on
+    SQLite's write lock (existing "database is locked" retry handles that)
+    and then correctly sees the winner's already-applied status.
     Raises on any other error; the caller must not catch silently.
     """
     if charges:
@@ -328,6 +335,18 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
     who = get_user()
     src = get_source()
     with db_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        po_row = conn.execute(
+            "SELECT status FROM purchase_orders WHERE id=?", (po_id,)
+        ).fetchone()
+        if not po_row:
+            raise ValueError(f"Purchase order {po_id} not found")
+        if po_row['status'] not in (PO_STATUS_SENT, PO_STATUS_PARTIAL):
+            raise ValueError(
+                f"{po_number} cannot be received — status is "
+                f"'{po_row['status']}' (expected {PO_STATUS_SENT} or {PO_STATUS_PARTIAL})"
+            )
+
         for r in line_receipts:
             fields = ["received_qty=?", "received_weight=?"]
             params = [r['new_received_qty'], r.get('new_received_weight', 0)]
