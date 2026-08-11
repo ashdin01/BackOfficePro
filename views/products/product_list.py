@@ -10,6 +10,8 @@ from views.base_view import BaseView
 from views.widgets.search_bar import SearchBar
 from views.widgets.table_items import NumItem
 from utils.error_dialog import show_error
+from utils.calculations import amount_inc_from_ex
+from config.constants import GP_WARN_THRESHOLD, GP_BAD_THRESHOLD
 import controllers.product_controller as product_ctrl
 import config.styles as styles
 import csv
@@ -102,10 +104,10 @@ class ProductList(KeyboardMixin, BaseView):
 
         # ── Table ─────────────────────────────────────────────────────
         self.table = QTableWidget()
-        self.table.setColumnCount(13)
+        self.table.setColumnCount(15)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "PLU", "Description", "Brand", "Department", "Group", "Supplier",
-            "Unit", "Sell Price", "Cost Price", "On Hand", "Status", "Online"
+            "Unit", "Sell Price", "Cost (inc. Tax)", "GP %", "Tax", "On Hand", "Status", "Online"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -117,10 +119,12 @@ class ProductList(KeyboardMixin, BaseView):
         self.table.setColumnWidth(6,  100)
         self.table.setColumnWidth(7,   45)
         self.table.setColumnWidth(8,   80)
-        self.table.setColumnWidth(9,   80)
-        self.table.setColumnWidth(10,  65)
-        self.table.setColumnWidth(11,  70)
-        self.table.setColumnWidth(12,  60)
+        self.table.setColumnWidth(9,   95)  # Cost (inc. Tax)
+        self.table.setColumnWidth(10,  60)  # GP %
+        self.table.setColumnWidth(11,  45)  # Tax
+        self.table.setColumnWidth(12,  65)
+        self.table.setColumnWidth(13,  70)
+        self.table.setColumnWidth(14,  60)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setMinimumSectionSize(45)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -199,7 +203,27 @@ class ProductList(KeyboardMixin, BaseView):
             self.table.setItem(r, 6,  QTableWidgetItem(row['supplier_name'] or ''))
             self.table.setItem(r, 7,  QTableWidgetItem(row['unit'] or ''))
             self.table.setItem(r, 8,  NumItem(f"${row['sell_price']:.2f}"))
-            self.table.setItem(r, 9,  NumItem(f"${row['cost_price']:.2f}"))
+            tax_rate = row['tax_rate'] or 0
+            cost_inc_tax = amount_inc_from_ex(row['cost_price'], tax_rate)
+            self.table.setItem(r, 9,  NumItem(f"${cost_inc_tax:.2f}"))
+            gp = product_ctrl.calculate_gross_profit(row['sell_price'], row['cost_price'], tax_rate)
+            if gp is None:
+                gp_item = NumItem("--")
+                gp_item.setForeground(QColor(styles.CLR_GP_NONE))
+            else:
+                gp_item = NumItem(f"{gp:.1f}%")
+                gp_color = (styles.CLR_GP_OK   if gp >= GP_WARN_THRESHOLD else
+                            styles.CLR_GP_WARN if gp >= GP_BAD_THRESHOLD  else
+                            styles.CLR_GP_BAD)
+                gp_item.setForeground(QColor(gp_color))
+            gp_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(r, 10, gp_item)
+            tax_item = QTableWidgetItem("Y" if tax_rate > 0 else "N")
+            tax_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            tax_item.setForeground(
+                QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#666666')
+            )
+            self.table.setItem(r, 11, tax_item)
             soh_item = NumItem(str(soh_qty))
             soh_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if is_warning:
@@ -210,7 +234,7 @@ class ProductList(KeyboardMixin, BaseView):
                 soh_item.setForeground(QColor(styles.CLR_ORANGE))
             else:
                 soh_item.setForeground(QColor(styles.CLR_DANGER_ALT))
-            self.table.setItem(r, 10, soh_item)
+            self.table.setItem(r, 12, soh_item)
             status_text = "Active" if is_active else "INACTIVE"
             status_item = QTableWidgetItem(status_text)
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -220,7 +244,7 @@ class ProductList(KeyboardMixin, BaseView):
                 status_item.setForeground(QColor('#666666'))
             else:
                 status_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
-            self.table.setItem(r, 11, status_item)
+            self.table.setItem(r, 13, status_item)
             is_online = bool(row['online_available'] if 'online_available' in row.keys() else 0)
             online_item = QTableWidgetItem("✓" if is_online else "—")
             online_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -231,7 +255,7 @@ class ProductList(KeyboardMixin, BaseView):
                 "Listed on shop.littleredapple.com.au" if is_online
                 else "Not listed online — right-click to enable"
             )
-            self.table.setItem(r, 12, online_item)
+            self.table.setItem(r, 14, online_item)
             if row_color:
                 for col in range(self.table.columnCount()):
                     item = self.table.item(r, col)
@@ -239,8 +263,8 @@ class ProductList(KeyboardMixin, BaseView):
                         item.setBackground(row_color)
         self.table.setSortingEnabled(True)
         active_count   = sum(1 for r in range(self.table.rowCount())
-                             if self.table.item(r, 11)
-                             and self.table.item(r, 11).text() == "Active")
+                             if self.table.item(r, 13)
+                             and self.table.item(r, 13).text() == "Active")
         inactive_count = self.table.rowCount() - active_count
         status_parts = [f"{self.table.rowCount()} products"]
         if inactive_with_stock > 0:
@@ -284,7 +308,7 @@ class ProductList(KeyboardMixin, BaseView):
         if row < 0:
             return
         barcode = self.table.item(row, 0).text()
-        online_item = self.table.item(row, 12)
+        online_item = self.table.item(row, 14)
         is_online = online_item and online_item.text() == "✓"
 
         menu = QMenu(self)

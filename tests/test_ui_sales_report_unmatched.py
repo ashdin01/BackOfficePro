@@ -14,9 +14,15 @@ Requires pytest-qt (installed) and a live display (DISPLAY=:0).
 """
 import pytest
 from unittest.mock import MagicMock
+from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 import controllers.sales_report_controller as sales_ctrl
+
+# Tests set date_from to (today - 7) - 30 = today - 37 days. A sale dated
+# relative to "today" (rather than a hardcoded calendar date) stays inside
+# that window no matter when the suite actually runs.
+SALE_DATE = QDate.currentDate().addDays(-35).toString("yyyy-MM-dd")
 
 
 def _insert_sale(db_conn, sale_date, plu, plu_name="Item", qty=1, sales_dollars=1.0):
@@ -53,7 +59,7 @@ class TestUnmatchedBanner:
 
     def test_hidden_when_all_plus_matched(self, qtbot, test_db, db_conn, product_barcode):
         _map_plu_to_barcode(db_conn, 501, product_barcode)
-        _insert_sale(db_conn, "2026-07-01", 501, "Matched Item")
+        _insert_sale(db_conn, SALE_DATE, 501, "Matched Item")
         db_conn.commit()
 
         from views.reports.sales_report_view import SalesReportView
@@ -65,7 +71,7 @@ class TestUnmatchedBanner:
         assert w.unmatched_banner.isHidden()
 
     def test_shown_with_correct_count_when_unmatched(self, qtbot, test_db, db_conn):
-        _insert_sale(db_conn, "2026-07-01", 999, "Mystery Item")
+        _insert_sale(db_conn, SALE_DATE, 999, "Mystery Item")
         db_conn.commit()
 
         from views.reports.sales_report_view import SalesReportView
@@ -78,8 +84,8 @@ class TestUnmatchedBanner:
         assert "1 unmatched PLU" in w.unmatched_banner.text()
 
     def test_pluralised_for_multiple_unmatched(self, qtbot, test_db, db_conn):
-        _insert_sale(db_conn, "2026-07-01", 998, "Mystery A")
-        _insert_sale(db_conn, "2026-07-01", 999, "Mystery B")
+        _insert_sale(db_conn, SALE_DATE, 998, "Mystery A")
+        _insert_sale(db_conn, SALE_DATE, 999, "Mystery B")
         db_conn.commit()
 
         from views.reports.sales_report_view import SalesReportView
@@ -93,7 +99,7 @@ class TestUnmatchedBanner:
     def test_matching_a_plu_hides_the_banner_on_reload(
         self, qtbot, test_db, db_conn, product_barcode
     ):
-        _insert_sale(db_conn, "2026-07-01", 501, "Now Matched")
+        _insert_sale(db_conn, SALE_DATE, 501, "Now Matched")
         db_conn.commit()
 
         from views.reports.sales_report_view import SalesReportView
