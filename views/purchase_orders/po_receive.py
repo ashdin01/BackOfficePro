@@ -508,11 +508,17 @@ class POReceive(BaseView):
             self.table.setItem(r, 4, self._cell(str(received_units), Qt.AlignmentFlag.AlignCenter))
 
             # ── Col 5: Receiving Now (always items, always integer) ──
+            # Max is not capped at remaining_units — deliveries sometimes
+            # arrive with more stock than was ordered, and the user should
+            # be able to record what actually turned up. Over-receiving is
+            # flagged with a highlighted border and confirmed at Confirm
+            # Receipt time instead of being blocked here.
             qty_input = QSpinBox()
             qty_input.setMinimum(0)
-            qty_input.setMaximum(max(0, remaining_units))
+            qty_input.setMaximum(999999)
             qty_input.setSingleStep(pack_qty)
             qty_input.setValue(0)
+            qty_input.setToolTip("Units received now")
             self.table.setCellWidget(r, 5, qty_input)
 
             # ── Col 6: Weight (kg) — weighed items only ──────────────
@@ -667,7 +673,28 @@ class POReceive(BaseView):
             cost_inc_item.setText(f"${cost_inc:.4f}")
             cost_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
         self._refresh_promo_colour(row)
+        self._refresh_over_receive_highlight(row)
         self._update_total()
+
+    def _refresh_over_receive_highlight(self, row):
+        """Give the Receiving Now spinner a warning border when the entered
+        qty exceeds what's still remaining on the order (over-receiving)."""
+        line, pack_qty, qty_input, cost_input, promo_cb, lt_item, \
+            remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = self._inputs[row]
+
+        if qty_input.value() > remaining_units:
+            over = qty_input.value() - remaining_units
+            qty_input.setStyleSheet(
+                f"QSpinBox {{ background: {self.BG_ALT}; color: {self.FG};"
+                f" border: 2px solid {styles.CLR_WARNING}; border-radius: 3px; padding: 2px 4px; }}"
+            )
+            qty_input.setToolTip(
+                f"⚠ Over-receiving — {over} more than the {remaining_units} "
+                "unit(s) remaining on this order."
+            )
+        else:
+            qty_input.setStyleSheet("")
+            qty_input.setToolTip("Units received now")
 
     def _update_total(self):
         total_inc = 0.0
@@ -762,6 +789,33 @@ class POReceive(BaseView):
                 f"{po_number} has status '{po['status']}' and cannot be received again."
             )
             return
+
+        over_received_lines = []
+        for entry in self._inputs:
+            line, pack_qty, qty_input, cost_input, promo_cb, \
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
+            qty = qty_input.value()
+            if qty > remaining_units:
+                over_received_lines.append((line['description'], qty, remaining_units, qty - remaining_units))
+
+        if over_received_lines:
+            detail = "\n".join(
+                f"  •  {desc}: receiving {qty} unit(s) — only {remaining} remaining "
+                f"on order ({over} over)"
+                for desc, qty, remaining, over in over_received_lines
+            )
+            reply = QMessageBox.warning(
+                self, "Over-Received Stock",
+                "These line(s) are receiving MORE than what remains on the order:\n\n"
+                f"{detail}\n\n"
+                "Stock on hand will be credited the full quantity entered. "
+                "If this wasn't intentional (e.g. a mis-typed quantity), go back and "
+                "fix it now.\n\nContinue with the over-received quantity?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         partial_carton_lines = []
         for entry in self._inputs:

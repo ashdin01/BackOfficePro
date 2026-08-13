@@ -256,6 +256,66 @@ class TestConfirm:
         assert po_ctrl.get_po_by_id(sent_po)["status"] == "SENT"
 
 
+# ── Over-receiving ───────────────────────────────────────────────────────────
+
+class TestOverReceive:
+    def test_qty_input_accepts_more_than_ordered(self, po_receive_view):
+        """Ordered 5 — spinner must no longer cap at the remaining quantity."""
+        qty_input = po_receive_view.table.cellWidget(0, 5)
+        qty_input.setValue(7)
+        assert qty_input.value() == 7
+
+    def test_over_receive_highlights_qty_input(self, po_receive_view):
+        import config.styles as styles
+        qty_input = po_receive_view.table.cellWidget(0, 5)
+        qty_input.setValue(7)  # ordered 5
+        assert styles.CLR_WARNING in qty_input.styleSheet()
+
+        qty_input.setValue(5)  # back within the ordered amount
+        assert qty_input.styleSheet() == ""
+
+    def test_over_receive_prompts_warning_and_confirming_receives_full_qty(
+        self, po_receive_view, monkeypatch, sent_po, product_barcode
+    ):
+        import models.stock_on_hand as soh_model
+        mock_mb = _yes(monkeypatch)
+        mock_mb.warning.return_value = QMessageBox.StandardButton.Yes
+        po_receive_view.supplier_invoice_input.setText("INV-001")
+        qty_input = po_receive_view.table.cellWidget(0, 5)
+        qty_input.setValue(7)  # ordered 5
+
+        po_receive_view._confirm()
+
+        mock_mb.warning.assert_called_once()
+        assert po_ctrl.get_po_by_id(sent_po)["status"] == "RECEIVED"
+        soh = soh_model.get_by_barcode(product_barcode)
+        assert soh["quantity"] == 7
+
+    def test_declining_over_receive_warning_blocks_receipt(
+        self, po_receive_view, monkeypatch, sent_po
+    ):
+        mock_mb = _yes(monkeypatch)
+        mock_mb.warning.return_value = QMessageBox.StandardButton.No
+        po_receive_view.supplier_invoice_input.setText("INV-001")
+        qty_input = po_receive_view.table.cellWidget(0, 5)
+        qty_input.setValue(7)  # ordered 5
+
+        po_receive_view._confirm()
+
+        mock_mb.warning.assert_called_once()
+        assert po_ctrl.get_po_by_id(sent_po)["status"] == "SENT"
+
+    def test_exact_qty_skips_over_receive_warning(self, po_receive_view, monkeypatch, sent_po):
+        mock_mb = _yes(monkeypatch)
+        po_receive_view.supplier_invoice_input.setText("INV-001")
+        po_receive_view._receive_all()  # fills exactly the remaining amount
+
+        po_receive_view._confirm()
+
+        mock_mb.warning.assert_not_called()
+        assert po_ctrl.get_po_by_id(sent_po)["status"] == "RECEIVED"
+
+
 # ── Additional Charges ────────────────────────────────────────────────────────
 
 class TestCharges:
