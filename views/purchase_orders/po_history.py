@@ -10,6 +10,7 @@ from utils.error_dialog import show_error
 from utils.po_type_helpers import fmt_money
 from views.purchase_orders.po_history_data import compute_po_history_data
 import config.styles as styles
+from config.constants import PO_CHARGE_TYPES
 import controllers.purchase_order_controller as po_ctrl
 import controllers.product_controller as product_ctrl
 import controllers.supplier_controller as supplier_ctrl
@@ -122,12 +123,12 @@ class POHistory(QWidget):
             layout.addWidget(chg_lbl)
 
             self.charges_table = QTableWidget()
-            self.charges_table.setColumnCount(4)
+            self.charges_table.setColumnCount(5)
             self.charges_table.setHorizontalHeaderLabels(
-                ["Description", "Tax %", "Amount ex. GST", "Amount inc. GST"]
+                ["Type", "Description", "Tax %", "Amount ex. GST", "Amount inc. GST"]
             )
             self.charges_table.horizontalHeader().setSectionResizeMode(
-                0, QHeaderView.ResizeMode.Stretch)
+                1, QHeaderView.ResizeMode.Stretch)
             self.charges_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
             self.charges_table.setAlternatingRowColors(True)
             self.charges_table.verticalHeader().setVisible(False)
@@ -211,12 +212,13 @@ class POHistory(QWidget):
         if self.charges_table is not None:
             self.charges_table.setRowCount(len(data.charges))
             for r, cd in enumerate(data.charges):
-                self.charges_table.setItem(r, 0, _item(cd.description))
-                self.charges_table.setItem(r, 1, _item(
+                self.charges_table.setItem(r, 0, _item(PO_CHARGE_TYPES.get(cd.charge_type, cd.charge_type), _CENTER))
+                self.charges_table.setItem(r, 1, _item(cd.description))
+                self.charges_table.setItem(r, 2, _item(
                     f"{cd.tax_r:.0f}%" if cd.tax_r > 0 else "GST Free", _CENTER,
                     colour=styles.CLR_SUCCESS_ALT if cd.tax_r > 0 else '#555'))
-                self.charges_table.setItem(r, 2, _item(f"${cd.amt_ex:.2f}", _RIGHT))
-                self.charges_table.setItem(r, 3, _item(f"${cd.amt_inc:.2f}", _RIGHT,
+                self.charges_table.setItem(r, 3, _item(f"${cd.amt_ex:.2f}", _RIGHT))
+                self.charges_table.setItem(r, 4, _item(f"${cd.amt_inc:.2f}", _RIGHT,
                                                         colour=styles.CLR_SUCCESS_ALT if cd.tax_r > 0 else None))
 
         total_label = "Credit Total" if data.is_return else "Invoice Total"
@@ -294,9 +296,10 @@ class POHistory(QWidget):
                 if data.charges:
                     w.writerow([])
                     w.writerow(["Additional Charges"])
-                    w.writerow(["Description", "Tax %", "Amount ex. GST", "Amount inc. GST"])
+                    w.writerow(["Type", "Description", "Tax %", "Amount ex. GST", "Amount inc. GST"])
                     for cd in data.charges:
                         w.writerow([
+                            PO_CHARGE_TYPES.get(cd.charge_type, cd.charge_type),
                             cd.description,
                             f"{cd.tax_r:.0f}",
                             f"{cd.amt_ex:.2f}",
@@ -456,10 +459,11 @@ class POHistory(QWidget):
             story.append(Spacer(1, 2*mm))
             chg_data = [[
                 Paragraph(h, _s(8, bold=True))
-                for h in ["Description", "Tax %", "Amount ex. GST", "Amount inc. GST"]
+                for h in ["Type", "Description", "Tax %", "Amount ex. GST", "Amount inc. GST"]
             ]]
             for cd in data.charges:
                 chg_data.append([
+                    Paragraph(PO_CHARGE_TYPES.get(cd.charge_type, cd.charge_type), _s(8)),
                     Paragraph(cd.description,      _s(8)),
                     Paragraph(f"{cd.tax_r:.0f}%",  _s(8, align=TA_CENTER)),
                     Paragraph(f"${cd.amt_ex:.2f}", _s(8, align=TA_RIGHT)),
@@ -467,7 +471,7 @@ class POHistory(QWidget):
                 ])
             story.append(Table(
                 chg_data,
-                colWidths=[100*mm, 25*mm, 40*mm, 40*mm],
+                colWidths=[30*mm, 70*mm, 25*mm, 40*mm, 40*mm],
                 style=TableStyle([
                     ("BACKGROUND",    (0,0),(-1,0),  C_LGREY),
                     ("GRID",          (0,0),(-1,-1), 0.3, C_BORDER),

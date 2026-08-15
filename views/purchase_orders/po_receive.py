@@ -10,11 +10,15 @@ import math
 from utils.calculations import round_half_up, amount_inc_from_ex, gst_from_inclusive
 import controllers.product_controller as product_ctrl
 import controllers.purchase_order_controller as po_ctrl
-from config.constants import PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT
+from config.constants import (
+    PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT,
+    PO_CHARGE_TYPES, PO_CHARGE_TYPE_OTHER, PO_CHARGE_TYPE_ROUNDING,
+)
 import config.styles as styles
 from utils.error_dialog import show_error
 from utils.stock_events import stock_events
 from views.base_view import BaseView
+from views.purchase_orders.add_charge_dialog import AddChargeDialog
 
 
 
@@ -339,7 +343,7 @@ class POReceive(BaseView):
 
         # ── Additional Charges ────────────────────────────────────
         charges_header = QHBoxLayout()
-        charges_lbl = QLabel("Additional Charges  (freight, fuel levy, surcharges etc.)")
+        charges_lbl = QLabel("Additional Charges  (freight, fuel levy, rounding, surcharges etc.)")
         charges_lbl.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 11px; font-weight: bold;")
         charges_header.addWidget(charges_lbl)
         charges_header.addStretch()
@@ -356,13 +360,16 @@ class POReceive(BaseView):
         layout.addLayout(charges_header)
 
         self.charges_table = QTableWidget()
-        self.charges_table.setColumnCount(3)
-        self.charges_table.setHorizontalHeaderLabels(["Description", "Tax Type", "Amount inc. Tax"])
-        self.charges_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.charges_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.charges_table.setColumnCount(4)
+        self.charges_table.setHorizontalHeaderLabels(
+            ["Type", "Description", "Tax Type", "Amount inc. Tax"])
+        self.charges_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.charges_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.charges_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.charges_table.setColumnWidth(1, 130)
-        self.charges_table.setColumnWidth(2, 150)
+        self.charges_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.charges_table.setColumnWidth(0, 90)
+        self.charges_table.setColumnWidth(2, 130)
+        self.charges_table.setColumnWidth(3, 150)
         self.charges_table.setFixedHeight(110)
         self.charges_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.charges_table.itemChanged.connect(self._on_charge_item_changed)
@@ -400,19 +407,36 @@ class POReceive(BaseView):
 
     def _add_charge(self):
         from PyQt6.QtWidgets import QComboBox
+
+        dlg = AddChargeDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        data = dlg.data()
+
         r = self.charges_table.rowCount()
         self.charges_table.blockSignals(True)
         self.charges_table.insertRow(r)
-        self.charges_table.setItem(r, 0, QTableWidgetItem("Freight"))
+
+        type_item = QTableWidgetItem(PO_CHARGE_TYPES.get(data['charge_type'], data['charge_type']))
+        type_item.setData(Qt.ItemDataRole.UserRole, data['charge_type'])
+        type_item.setFlags(type_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.charges_table.setItem(r, 0, type_item)
+
+        self.charges_table.setItem(r, 1, QTableWidgetItem(data['description']))
+
         tax_combo = QComboBox()
         tax_combo.addItem("GST (10%)", 10.0)
         tax_combo.addItem("GST Free (0%)", 0.0)
+        idx = tax_combo.findData(data['tax_rate'])
+        tax_combo.setCurrentIndex(idx if idx >= 0 else 0)
         tax_combo.currentIndexChanged.connect(self._update_total)
-        self.charges_table.setCellWidget(r, 1, tax_combo)
-        amt_item = QTableWidgetItem("0.00")
+        self.charges_table.setCellWidget(r, 2, tax_combo)
+
+        amt_item = QTableWidgetItem(f"{data['amount_inc_tax']:.2f}")
         amt_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        amt_item.setData(Qt.ItemDataRole.UserRole, 0.0)
-        self.charges_table.setItem(r, 2, amt_item)
+        amt_item.setData(Qt.ItemDataRole.UserRole, data['amount_inc_tax'])
+        self.charges_table.setItem(r, 3, amt_item)
+
         self.charges_table.blockSignals(False)
         self._update_total()
 
@@ -425,20 +449,24 @@ class POReceive(BaseView):
     def _on_charge_item_changed(self, item):
         """Parse+validate the Amount column once, on entry, storing the
         canonical float in UserRole — rather than re-parsing formatted
-        display text every time totals are recalculated."""
-        if item.column() == 2:
+        display text every time totals are recalculated. Negative amounts
+        are only valid for a ROUNDING-type charge (set via the Add Charge
+        popup and shown read-only in the Type column of the same row)."""
+        if item.column() == 3:
             self.charges_table.blockSignals(True)
+            type_item = self.charges_table.item(item.row(), 0)
+            charge_type = type_item.data(Qt.ItemDataRole.UserRole) if type_item else PO_CHARGE_TYPE_OTHER
             try:
                 value = float(item.text().strip().replace("$", "").replace(",", "") or 0)
-                if value < 0:
-                    raise ValueError("amount cannot be negative")
+                if value < 0 and charge_type != PO_CHARGE_TYPE_ROUNDING:
+                    raise ValueError("amount cannot be negative for this charge type")
                 item.setData(Qt.ItemDataRole.UserRole, value)
                 item.setBackground(QColor(self.BG))
                 item.setToolTip("")
             except ValueError:
                 item.setData(Qt.ItemDataRole.UserRole, None)
                 item.setBackground(QColor(styles.CLR_DANGER))
-                item.setToolTip("Enter a valid non-negative amount")
+                item.setToolTip("Enter a valid amount (negative allowed only for Rounding)")
             self.charges_table.blockSignals(False)
         self._update_total()
 
@@ -713,12 +741,12 @@ class POReceive(BaseView):
         # and blocks Confirm Receipt (see _confirm).
         if self.charges_table is not None:
             for cr in range(self.charges_table.rowCount()):
-                amt_item = self.charges_table.item(cr, 2)
+                amt_item = self.charges_table.item(cr, 3)
                 if not amt_item:
                     continue
                 amt = amt_item.data(Qt.ItemDataRole.UserRole)
                 if amt is not None:
-                    tax_combo = self.charges_table.cellWidget(cr, 1)
+                    tax_combo = self.charges_table.cellWidget(cr, 2)
                     charge_tax = tax_combo.currentData() if tax_combo else 0.0
                     total_inc += amt
                     if charge_tax > 0:
@@ -768,16 +796,17 @@ class POReceive(BaseView):
 
         if self.charges_table is not None:
             for cr in range(self.charges_table.rowCount()):
-                amt_item = self.charges_table.item(cr, 2)
+                amt_item = self.charges_table.item(cr, 3)
                 if amt_item is not None and amt_item.data(Qt.ItemDataRole.UserRole) is None:
-                    desc_item = self.charges_table.item(cr, 0)
+                    desc_item = self.charges_table.item(cr, 1)
                     desc = (desc_item.text() if desc_item else '') or f"row {cr + 1}"
                     QMessageBox.warning(
                         self, "Invalid Charge Amount",
-                        f"The amount for charge '{desc}' isn't a valid non-negative "
-                        "number. Please fix it before confirming receipt."
+                        f"The amount for charge '{desc}' isn't a valid number "
+                        "(negative amounts are only allowed for a Rounding charge). "
+                        "Please fix it before confirming receipt."
                     )
-                    self.charges_table.setCurrentCell(cr, 2)
+                    self.charges_table.setCurrentCell(cr, 3)
                     return
 
         po = po_ctrl.get_po_by_id(self.po_id)
@@ -894,14 +923,18 @@ class POReceive(BaseView):
         charges = []
         if self.charges_table is not None:
             for cr in range(self.charges_table.rowCount()):
-                desc_item = self.charges_table.item(cr, 0)
-                amt_item  = self.charges_table.item(cr, 2)
-                tax_combo = self.charges_table.cellWidget(cr, 1)
+                type_item = self.charges_table.item(cr, 0)
+                desc_item = self.charges_table.item(cr, 1)
+                tax_combo = self.charges_table.cellWidget(cr, 2)
+                amt_item  = self.charges_table.item(cr, 3)
                 if not amt_item:
                     continue
                 amt      = amt_item.data(Qt.ItemDataRole.UserRole) or 0.0
                 tax_rate = tax_combo.currentData() if tax_combo else 0.0
+                charge_type = (type_item.data(Qt.ItemDataRole.UserRole) if type_item else None) \
+                    or PO_CHARGE_TYPE_OTHER
                 charges.append({
+                    'charge_type':    charge_type,
                     'description':   (desc_item.text() if desc_item else '') or 'Charge',
                     'tax_rate':      tax_rate,
                     'amount_inc_tax': amt,

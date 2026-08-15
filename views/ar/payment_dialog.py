@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QDate
 from datetime import date
+from utils.money_field import money_field
 
 
 class PaymentDialog(QDialog):
@@ -23,9 +24,8 @@ class PaymentDialog(QDialog):
         self.amount = QDoubleSpinBox()
         self.amount.setRange(0.01, 9999999)
         self.amount.setDecimals(2)
-        self.amount.setPrefix("$")
         self.amount.setValue(outstanding)
-        form.addRow("Amount *", self.amount)
+        form.addRow("Amount *", money_field(self.amount))
 
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)

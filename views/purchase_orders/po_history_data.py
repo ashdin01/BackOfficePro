@@ -34,6 +34,7 @@ class LineData:
 
 @dataclasses.dataclass
 class ChargeData:
+    charge_type: str
     description: str
     tax_r: float
     amt_ex: float
@@ -125,6 +126,7 @@ def compute_po_history_data(po_id: int, po=None) -> POHistoryData:
         charge_ex  += amt_ex
         charge_gst += round_half_up(amt_inc - amt_ex)
         charge_results.append(ChargeData(
+            charge_type=c['charge_type'],
             description=c['description'],
             tax_r=tax_r,
             amt_ex=amt_ex,

@@ -614,6 +614,66 @@ def receive_purchase_order(po_id):
     }), 200
 
 
+# ── Order Prep (market order preparation) ─────────────────────────────────────
+
+@app.route("/api/v1/order-prep/<int:supplier_id>/items", methods=["GET"])
+def get_order_prep_items(supplier_id):
+    """Items linked to a supplier for market order prep — min/max, current SOH,
+    and last order qty. Consumed by the mobile Order Prep screen."""
+    items = po_ctrl.get_order_prep_items(supplier_id)
+    return jsonify([{
+        'barcode':           i['barcode'],
+        'description':       i['description'],
+        'unit':              i['unit'],
+        'pack_qty':          int(i['pack_qty']),
+        'pack_unit':         i['pack_unit'],
+        'reorder_point':     i['reorder_point'],
+        'reorder_max':       i['reorder_max'],
+        'cost_price':        i['cost_price'],
+        'on_hand':           i['on_hand'],
+        'last_ordered_qty':  i['last_ordered_qty'],
+        'last_ordered_date': i['last_ordered_date'] or '',
+    } for i in items])
+
+
+@app.route("/api/v1/order-prep/draft", methods=["POST"])
+def create_order_prep_draft():
+    """
+    Create a DRAFT purchase order from the mobile Order Prep screen.
+
+    Body:
+        supplier_id  int   required
+        notes        str   optional
+        lines        list  [{barcode: str, cartons: number}, ...]
+    """
+    data = request.get_json(force=True) or {}
+    supplier_id = data.get("supplier_id")
+    if not isinstance(supplier_id, int):
+        return _err("MISSING_FIELD", "supplier_id required", 400)
+    notes = str(data.get("notes", ""))[:2000]
+    lines = data.get("lines")
+    if not isinstance(lines, list) or not lines:
+        return _err("BAD_REQUEST", "'lines' must be a non-empty list", 400)
+
+    for entry in lines:
+        if not isinstance(entry, dict) or not entry.get("barcode") or "cartons" not in entry:
+            return _err("BAD_REQUEST", "each line needs barcode and cartons", 400)
+        try:
+            float(entry["cartons"])
+        except (TypeError, ValueError):
+            return _err("BAD_REQUEST", f"invalid cartons for {entry.get('barcode')}", 400)
+
+    try:
+        result = po_ctrl.create_order_prep_draft(supplier_id, lines, notes=notes, created_by="Android")
+    except ValueError as e:
+        return _err("BAD_REQUEST", str(e), 400)
+    except Exception:
+        logging.exception("Order prep draft creation failed supplier_id=%s", supplier_id)
+        return _err("DRAFT_FAILED", "Could not create draft PO", 500)
+
+    return jsonify(result), 201
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BackOfficePro API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default 0.0.0.0)")

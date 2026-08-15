@@ -142,7 +142,7 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
            group_id, department_id, supplier_id, unit,
            sell_price, cost_price, tax_rate, reorder_point, reorder_max=0,
            variable_weight=0, expected=1, active=1, auto_reorder=0, online_available=0,
-           online_notes=''):
+           online_notes='', order_prep_include=0):
     from models.audit_log import record_changes
     from database.audit_context import get_user
     with db_conn() as conn:
@@ -153,13 +153,13 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
                 group_id=?, department_id=?, supplier_id=?, unit=?,
                 sell_price=?, cost_price=?, tax_rate=?, reorder_point=?,
                 reorder_max=?, variable_weight=?, expected=?, active=?, auto_reorder=?,
-                online_available=?, online_notes=?, updated_at=CURRENT_TIMESTAMP
+                online_available=?, online_notes=?, order_prep_include=?, updated_at=CURRENT_TIMESTAMP
             WHERE barcode=?
         """, (description, brand, plu, supplier_sku, pack_qty, pack_unit,
               group_id, department_id, supplier_id, unit, sell_price,
               cost_price, tax_rate, reorder_point, reorder_max,
               variable_weight, expected, active, auto_reorder, online_available,
-              online_notes or None, barcode))
+              online_notes or None, order_prep_include, barcode))
         new = dict(description=description, brand=brand, plu=plu, supplier_sku=supplier_sku,
                    pack_qty=pack_qty, pack_unit=pack_unit, group_id=group_id,
                    department_id=department_id, supplier_id=supplier_id, unit=unit,
@@ -167,7 +167,7 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
                    reorder_point=reorder_point, reorder_max=reorder_max,
                    variable_weight=variable_weight, expected=expected,
                    active=active, auto_reorder=auto_reorder, online_available=online_available,
-                   online_notes=online_notes)
+                   online_notes=online_notes, order_prep_include=order_prep_include)
         record_changes(conn, 'product', barcode, dict(old) if old else {}, new, get_user())
         conn.commit()
 
@@ -186,6 +186,24 @@ def set_online_available(barcode: str, value: int) -> None:
         record_changes(conn, 'product', barcode,
                        {'online_available': old['online_available'] if old else None},
                        {'online_available': value}, get_user())
+        conn.commit()
+
+
+def set_order_prep_include(barcode: str, value: int) -> None:
+    """Toggle whether a product appears on the mobile Order Prep app's list."""
+    from models.audit_log import record_changes
+    from database.audit_context import get_user
+    with db_conn() as conn:
+        old = conn.execute(
+            "SELECT order_prep_include FROM products WHERE barcode=?", (barcode,)
+        ).fetchone()
+        conn.execute(
+            "UPDATE products SET order_prep_include=?, updated_at=CURRENT_TIMESTAMP WHERE barcode=?",
+            (value, barcode)
+        )
+        record_changes(conn, 'product', barcode,
+                       {'order_prep_include': old['order_prep_include'] if old else None},
+                       {'order_prep_include': value}, get_user())
         conn.commit()
 
 

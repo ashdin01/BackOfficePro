@@ -7,6 +7,7 @@ from PyQt6.QtGui import QShortcut, QKeySequence
 import controllers.purchase_order_controller as po_controller
 import config.styles as styles
 from utils.po_type_helpers import po_unit_mode
+from utils.money_field import money_field
 from views.purchase_orders.item_lookup_dialog import ItemLookupDialog
 
 
@@ -71,7 +72,6 @@ class AddLineDialog(QDialog):
 
         self.unit_cost = QDoubleSpinBox()
         self.unit_cost.setMaximum(99999)
-        self.unit_cost.setPrefix("$")
         self.unit_cost.setDecimals(4)
         self.unit_cost.installEventFilter(self)
 
@@ -85,7 +85,7 @@ class AddLineDialog(QDialog):
         form.addRow("Supplier SKU",    self.sku_label)
         form.addRow("Qty (Units) *" if self._unit_mode else "Qty (Cartons) *", self.qty)
         form.addRow("",                self.unit_preview)
-        form.addRow("Unit Cost",       self.unit_cost)
+        form.addRow("Unit Cost",       money_field(self.unit_cost))
         form.addRow("Notes",           self.notes)
         layout.addLayout(form)
 

@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QShortcut, QKeySequence
 import controllers.bundle_controller as bundle_ctrl
 import config.styles as styles
+from utils.money_field import money_field
 
 
 class BundleEdit(QWidget):
@@ -54,11 +55,10 @@ class BundleEdit(QWidget):
         form.addRow("Required Qty *", self._req_qty)
 
         self._price = QDoubleSpinBox()
-        self._price.setPrefix("$")
         self._price.setMaximum(99999)
         self._price.setDecimals(2)
         self._price.setValue(self._bundle['price'] if self._bundle else 0.0)
-        form.addRow("Bundle Price *", self._price)
+        form.addRow("Bundle Price *", money_field(self._price))
 
         self._active = QCheckBox("Active")
         self._active.setChecked(bool(self._bundle['active']) if self._bundle else True)

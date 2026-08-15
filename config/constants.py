@@ -34,6 +34,19 @@ PO_DOC_TITLES = {
     PO_TYPE_IO: 'INVOICE ONLY',
 }
 
+# PO receiving — additional charge types (freight, fuel levy, rounding, etc.)
+PO_CHARGE_TYPE_FREIGHT   = 'FREIGHT'
+PO_CHARGE_TYPE_FUEL_LEVY = 'FUEL_LEVY'
+PO_CHARGE_TYPE_ROUNDING  = 'ROUNDING'   # only charge type allowed a negative amount
+PO_CHARGE_TYPE_OTHER     = 'OTHER'
+
+PO_CHARGE_TYPES = {
+    PO_CHARGE_TYPE_FREIGHT:   'Freight',
+    PO_CHARGE_TYPE_FUEL_LEVY: 'Fuel Levy',
+    PO_CHARGE_TYPE_ROUNDING:  'Rounding',
+    PO_CHARGE_TYPE_OTHER:     'Other',
+}
+
 # Stocktake statuses
 STOCKTAKE_OPEN      = 'OPEN'
 STOCKTAKE_CLOSED    = 'CLOSED'

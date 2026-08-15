@@ -62,7 +62,7 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
                  group_id, department_id, supplier_id, unit, sell_price, cost_price,
                  tax_rate, reorder_point, reorder_max, variable_weight, expected,
                  active, auto_reorder, product_suppliers, online_available=0,
-                 online_notes='') -> None:
+                 online_notes='', order_prep_include=0) -> None:
     """
     Save product fields and supplier associations.
     Raises ValueError on validation failure.
@@ -100,12 +100,17 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
         auto_reorder=auto_reorder,
         online_available=online_available,
         online_notes=online_notes,
+        order_prep_include=order_prep_include,
     )
     ps_model.save_for_barcode(barcode, product_suppliers)
 
 
 def set_online_available(barcode: str, value: bool) -> None:
     product_model.set_online_available(barcode, int(value))
+
+
+def set_order_prep_include(barcode: str, value: bool) -> None:
+    product_model.set_order_prep_include(barcode, int(value))
 
 
 def get_product_suppliers(barcode, fallback_supplier_id=None,

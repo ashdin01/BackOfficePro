@@ -80,6 +80,35 @@ def get_items_for_supplier(supplier_id=None) -> list:
             """).fetchall()
 
 
+def get_order_prep_items(supplier_id) -> list:
+    """
+    Active products linked to supplier_id and flagged order_prep_include, for
+    market order preparation (the mobile Order Prep screen). Staff opt products
+    in via the product list in BackOfficePro — typically the Fresh department's
+    fruit & veg. Unlike get_reorder_candidates, this returns every opted-in
+    product regardless of current stock — the phone app lets the user re-count
+    on-hand qty on the spot and recomputes what's needed from that, rather than
+    trusting the desktop's last-synced SOH figure.
+    Returns list of dicts with barcode, description, unit, reorder_point,
+    reorder_max, cost_price, on_hand, pack_qty, pack_unit.
+    """
+    with db_conn() as conn:
+        rows = conn.execute("""
+            SELECT p.barcode, p.description, p.unit,
+                   p.reorder_point, COALESCE(p.reorder_max, 0) AS reorder_max,
+                   COALESCE(p.cost_price, 0.0) AS cost_price,
+                   COALESCE(soh.quantity, 0) AS on_hand,
+                   COALESCE(ps.pack_qty, p.pack_qty, 1) AS pack_qty,
+                   COALESCE(ps.pack_unit, p.pack_unit, 'EA') AS pack_unit
+            FROM products p
+            JOIN product_suppliers ps ON p.barcode = ps.barcode AND ps.supplier_id = ?
+            LEFT JOIN stock_on_hand soh ON p.barcode = soh.barcode
+            WHERE p.active = 1 AND p.order_prep_include = 1
+            ORDER BY p.description
+        """, (supplier_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_milk_products(supplier_id) -> list:
     """
     Products in the DAIRY department / MILK group for a given supplier.

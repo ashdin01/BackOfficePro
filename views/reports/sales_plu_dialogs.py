@@ -20,6 +20,7 @@ from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 import config.styles as styles
 import controllers.sales_report_controller as sales_ctrl
 from utils.error_dialog import show_error
+from utils.money_field import money_field
 from views.widgets.table_items import item as _item, RIGHT, CENTER
 from views.widgets.table_utils import make_table as _make_table
 
@@ -145,14 +146,14 @@ class _AddProductDialog(QDialog):
         form.addRow(opt("Unit Size"), self.f_unit_size)
 
         self.f_cost = QDoubleSpinBox(); self.f_cost.setRange(0,99999)
-        self.f_cost.setDecimals(2); self.f_cost.setPrefix("$")
+        self.f_cost.setDecimals(2)
         self.f_cost.setValue(float(pf.get("cost_price") or 0))
-        form.addRow(opt("Cost Price"), self.f_cost)
+        form.addRow(opt("Cost Price"), money_field(self.f_cost))
 
         self.f_sell = QDoubleSpinBox(); self.f_sell.setRange(0,99999)
-        self.f_sell.setDecimals(2); self.f_sell.setPrefix("$")
+        self.f_sell.setDecimals(2)
         self.f_sell.setValue(float(pf.get("sell_price") or 0))
-        form.addRow(opt("Sell Price"), self.f_sell)
+        form.addRow(opt("Sell Price"), money_field(self.f_sell))
 
         self.f_gp = QLabel("—"); self.f_gp.setStyleSheet(f"color:{styles.CLR_SUCCESS};")
         self.f_cost.valueChanged.connect(self._update_gp)

@@ -390,6 +390,76 @@ class TestReceivePO:
         # PO status must be unchanged after a rejected receipt
         assert get_po_by_id(po_id)['status'] == 'DRAFT'
 
+    def test_charge_type_defaults_to_other_when_omitted(self, test_db, supplier_id, product_barcode):
+        po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
+        _add_line(po_id, product_barcode, qty=5, cost=2.00)
+        line = _get_lines(po_id)[0]
+        po = get_po_by_id(po_id)
+        charges = [{'description': 'Handling fee', 'tax_rate': 0.0, 'amount_inc_tax': 5.00}]
+        receive_po_atomic(
+            po_id, po['po_number'],
+            [self._make_receipt(line, 5)],
+            final_status='RECEIVED',
+            charges=charges,
+        )
+        stored = get_po_charges(po_id)
+        assert stored[0]['charge_type'] == 'OTHER'
+
+    def test_rounding_charge_may_be_negative(self, test_db, supplier_id, product_barcode):
+        po_id = _make_po(supplier_id)
+        update_po_status(po_id, 'SENT')
+        _add_line(po_id, product_barcode, qty=5, cost=2.00)
+        line = _get_lines(po_id)[0]
+        po = get_po_by_id(po_id)
+        charges = [{
+            'charge_type': 'ROUNDING', 'description': 'Rounding',
+            'tax_rate': 0.0, 'amount_inc_tax': -0.04,
+        }]
+        receive_po_atomic(
+            po_id, po['po_number'],
+            [self._make_receipt(line, 5)],
+            final_status='RECEIVED',
+            charges=charges,
+        )
+        stored = get_po_charges(po_id)
+        assert stored[0]['charge_type'] == 'ROUNDING'
+        assert stored[0]['amount_inc_tax'] == pytest.approx(-0.04)
+
+    def test_non_rounding_charge_rejects_negative_amount(self, test_db, supplier_id, product_barcode):
+        po_id = _make_po(supplier_id)
+        _add_line(po_id, product_barcode, qty=5, cost=2.00)
+        line = _get_lines(po_id)[0]
+        po = get_po_by_id(po_id)
+        bad_charges = [{
+            'charge_type': 'FREIGHT', 'description': 'Freight',
+            'tax_rate': 10.0, 'amount_inc_tax': -5.00,
+        }]
+        with pytest.raises(ValueError):
+            receive_po_atomic(
+                po_id, po['po_number'],
+                [self._make_receipt(line, 5)],
+                final_status='RECEIVED',
+                charges=bad_charges,
+            )
+
+    def test_unrecognised_charge_type_rejected(self, test_db, supplier_id, product_barcode):
+        po_id = _make_po(supplier_id)
+        _add_line(po_id, product_barcode, qty=5, cost=2.00)
+        line = _get_lines(po_id)[0]
+        po = get_po_by_id(po_id)
+        bad_charges = [{
+            'charge_type': 'NOT_A_REAL_TYPE', 'description': 'Mystery charge',
+            'tax_rate': 10.0, 'amount_inc_tax': 5.00,
+        }]
+        with pytest.raises(ValueError):
+            receive_po_atomic(
+                po_id, po['po_number'],
+                [self._make_receipt(line, 5)],
+                final_status='RECEIVED',
+                charges=bad_charges,
+            )
+
 
 # ── Close PO Force ─────────────────────────────────────────────────────────────
 

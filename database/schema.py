@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS products (
     auto_reorder    INTEGER DEFAULT 0    CHECK (auto_reorder IN (0,1)),
     online_available INTEGER NOT NULL DEFAULT 0 CHECK (online_available IN (0,1)),
     online_notes    TEXT,
+    order_prep_include INTEGER NOT NULL DEFAULT 0 CHECK (order_prep_include IN (0,1)),
     FOREIGN KEY (department_id) REFERENCES departments(id)    ON DELETE RESTRICT,
     FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)      ON DELETE SET NULL,
     FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL
@@ -489,9 +490,12 @@ CREATE INDEX IF NOT EXISTS idx_bank_txn_profile ON bank_transactions(profile_id)
 CREATE TABLE IF NOT EXISTS po_charges (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     po_id           INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    charge_type     TEXT NOT NULL DEFAULT 'OTHER'
+                        CHECK (charge_type IN ('FREIGHT','FUEL_LEVY','ROUNDING','OTHER')),
     description     TEXT NOT NULL DEFAULT '',
     tax_rate        REAL NOT NULL DEFAULT 0 CHECK (tax_rate BETWEEN 0 AND 100),
-    amount_inc_tax  REAL NOT NULL DEFAULT 0 CHECK (amount_inc_tax >= 0)
+    amount_inc_tax  REAL NOT NULL DEFAULT 0
+                        CHECK (amount_inc_tax >= 0 OR charge_type = 'ROUNDING')
 );
 CREATE INDEX IF NOT EXISTS idx_po_charges_po ON po_charges(po_id);
 

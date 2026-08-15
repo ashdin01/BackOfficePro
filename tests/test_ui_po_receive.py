@@ -58,6 +58,34 @@ def _yes(monkeypatch):
     return mock_mb
 
 
+def _stub_add_charge_dialog(monkeypatch, charge_type='OTHER', description='Charge',
+                             tax_rate=0.0, amount_inc_tax=0.01):
+    """Stand in for AddChargeDialog so _add_charge() doesn't block on a real
+    modal — pretends the user picked the given type/description/tax/amount
+    and clicked Add."""
+    import views.purchase_orders.po_receive as _mod
+    from PyQt6.QtWidgets import QDialog
+
+    data = {
+        'charge_type': charge_type,
+        'description': description,
+        'tax_rate': tax_rate,
+        'amount_inc_tax': amount_inc_tax,
+    }
+
+    class _StubDialog:
+        def __init__(self, parent=None):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def data(self):
+            return data
+
+    monkeypatch.setattr(_mod, 'AddChargeDialog', _StubDialog)
+
+
 def _no(monkeypatch):
     import views.purchase_orders.po_receive as _mod
     mock_mb = MagicMock(spec=QMessageBox)
@@ -319,9 +347,10 @@ class TestOverReceive:
 # ── Additional Charges ────────────────────────────────────────────────────────
 
 class TestCharges:
-    def test_valid_amount_stored_as_canonical_float(self, po_receive_view):
+    def test_valid_amount_stored_as_canonical_float(self, po_receive_view, monkeypatch):
+        _stub_add_charge_dialog(monkeypatch, charge_type='FREIGHT', description='Freight')
         po_receive_view._add_charge()
-        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item = po_receive_view.charges_table.item(0, 3)
         amt_item.setText("15.00")
 
         po_receive_view._on_charge_item_changed(amt_item)
@@ -329,9 +358,10 @@ class TestCharges:
         assert amt_item.data(Qt.ItemDataRole.UserRole) == 15.00
         assert "15.00" in po_receive_view.total_label.text()
 
-    def test_invalid_amount_flagged_and_excluded_from_total(self, po_receive_view):
+    def test_invalid_amount_flagged_and_excluded_from_total(self, po_receive_view, monkeypatch):
+        _stub_add_charge_dialog(monkeypatch, charge_type='FREIGHT', description='Freight')
         po_receive_view._add_charge()
-        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item = po_receive_view.charges_table.item(0, 3)
         amt_item.setText("not a number")
 
         po_receive_view._on_charge_item_changed(amt_item)
@@ -340,10 +370,11 @@ class TestCharges:
 
     def test_invalid_amount_blocks_confirm(self, po_receive_view, monkeypatch, sent_po):
         mock_mb = _yes(monkeypatch)
+        _stub_add_charge_dialog(monkeypatch, charge_type='FREIGHT', description='Freight')
         po_receive_view.supplier_invoice_input.setText("INV-001")
         po_receive_view._receive_all()
         po_receive_view._add_charge()
-        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item = po_receive_view.charges_table.item(0, 3)
         amt_item.setText("abc")
         po_receive_view._on_charge_item_changed(amt_item)
 
@@ -352,11 +383,38 @@ class TestCharges:
         mock_mb.warning.assert_called_once()
         assert po_ctrl.get_po_by_id(sent_po)["status"] == "SENT"
 
-    def test_negative_amount_rejected(self, po_receive_view):
+    def test_negative_amount_rejected_for_non_rounding_charge(self, po_receive_view, monkeypatch):
+        _stub_add_charge_dialog(monkeypatch, charge_type='FREIGHT', description='Freight')
         po_receive_view._add_charge()
-        amt_item = po_receive_view.charges_table.item(0, 2)
+        amt_item = po_receive_view.charges_table.item(0, 3)
         amt_item.setText("-5.00")
 
         po_receive_view._on_charge_item_changed(amt_item)
 
         assert amt_item.data(Qt.ItemDataRole.UserRole) is None
+
+    def test_negative_amount_allowed_for_rounding_charge(self, po_receive_view, monkeypatch):
+        _stub_add_charge_dialog(monkeypatch, charge_type='ROUNDING', description='Rounding')
+        po_receive_view._add_charge()
+        amt_item = po_receive_view.charges_table.item(0, 3)
+        amt_item.setText("-0.05")
+
+        po_receive_view._on_charge_item_changed(amt_item)
+
+        assert amt_item.data(Qt.ItemDataRole.UserRole) == pytest.approx(-0.05)
+        assert amt_item.data(Qt.ItemDataRole.UserRole) is not None
+
+    def test_charge_type_carried_through_to_confirm(self, po_receive_view, monkeypatch, sent_po):
+        _yes(monkeypatch)
+        _stub_add_charge_dialog(monkeypatch, charge_type='FUEL_LEVY',
+                                 description='Fuel Levy', tax_rate=10.0, amount_inc_tax=3.30)
+        po_receive_view.supplier_invoice_input.setText("INV-001")
+        po_receive_view._receive_all()
+        po_receive_view._add_charge()
+
+        po_receive_view._confirm()
+
+        stored = po_ctrl.get_po_charges(sent_po)
+        assert len(stored) == 1
+        assert stored[0]["charge_type"] == "FUEL_LEVY"
+        assert stored[0]["description"] == "Fuel Levy"

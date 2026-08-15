@@ -2633,6 +2633,68 @@ def migrate_v65(conn):
     conn.commit()
 
 
+def migrate_v66(conn):
+    """Add charge_type to po_charges (FREIGHT/FUEL_LEVY/ROUNDING/OTHER) and
+    relax the amount_inc_tax CHECK so ROUNDING charges may be negative —
+    every other charge type still must be >= 0.
+
+    Existing rows are backfilled by matching their free-text description,
+    falling back to OTHER when nothing matches. Table is recreated
+    (rename-create-copy-drop) because SQLite can't ALTER an existing CHECK
+    constraint.
+    """
+    conn.executescript("""
+        PRAGMA foreign_keys       = OFF;
+        PRAGMA legacy_alter_table = ON;
+        BEGIN TRANSACTION;
+
+        ALTER TABLE po_charges RENAME TO po_charges_old;
+        CREATE TABLE po_charges (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_id           INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            charge_type     TEXT NOT NULL DEFAULT 'OTHER'
+                                CHECK (charge_type IN ('FREIGHT','FUEL_LEVY','ROUNDING','OTHER')),
+            description     TEXT NOT NULL DEFAULT '',
+            tax_rate        REAL NOT NULL DEFAULT 0 CHECK (tax_rate BETWEEN 0 AND 100),
+            amount_inc_tax  REAL NOT NULL DEFAULT 0
+                                CHECK (amount_inc_tax >= 0 OR charge_type = 'ROUNDING')
+        );
+        INSERT INTO po_charges (id, po_id, charge_type, description, tax_rate, amount_inc_tax)
+            SELECT id, po_id,
+                   CASE
+                       WHEN description LIKE 'freight%'  THEN 'FREIGHT'
+                       WHEN description LIKE 'fuel%'     THEN 'FUEL_LEVY'
+                       WHEN description LIKE 'round%'    THEN 'ROUNDING'
+                       ELSE 'OTHER'
+                   END,
+                   description, tax_rate, MAX(amount_inc_tax, 0)
+            FROM po_charges_old;
+        DROP TABLE po_charges_old;
+
+        CREATE INDEX IF NOT EXISTS idx_po_charges_po ON po_charges(po_id);
+
+        COMMIT;
+        PRAGMA legacy_alter_table = OFF;
+        PRAGMA foreign_keys       = ON;
+    """)
+    conn.commit()
+
+
+def migrate_v67(conn):
+    """Add order_prep_include flag to products for the mobile Order Prep app.
+
+    Products with order_prep_include = 1 appear on the phone's market order
+    list for their linked supplier. Staff tag lines manually via the product
+    list in BackOfficePro — typically the Fresh department's fruit & veg.
+    """
+    _add_column(conn, """
+        ALTER TABLE products ADD COLUMN order_prep_include
+            INTEGER NOT NULL DEFAULT 0 CHECK (order_prep_include IN (0,1))
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_products_order_prep ON products(order_prep_include)")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2698,4 +2760,6 @@ _MIGRATIONS: dict[int, tuple] = {
     63: (migrate_v63, "backfill corrected checksums for migrate_v40, v42, and v53-v62"),
     64: (migrate_v64, "rsa_cert_number, rsa_expiry_date columns on users"),
     65: (migrate_v65, "supplier_id on stocktake_sessions for by-supplier stocktake scoping"),
+    66: (migrate_v66, "po_charges.charge_type (freight/fuel levy/rounding/other) + negative amount allowed for rounding"),
+    67: (migrate_v67, "order_prep_include flag on products for the mobile Order Prep app"),
 }

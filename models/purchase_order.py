@@ -1,6 +1,9 @@
 import logging
 from database.connection import db_conn
-from config.constants import PO_STATUS_CANCELLED, PO_STATUS_SENT, PO_STATUS_PARTIAL
+from config.constants import (
+    PO_STATUS_CANCELLED, PO_STATUS_SENT, PO_STATUS_PARTIAL,
+    PO_CHARGE_TYPES, PO_CHARGE_TYPE_OTHER, PO_CHARGE_TYPE_ROUNDING,
+)
 from datetime import datetime, timedelta
 
 
@@ -15,6 +18,9 @@ def _validate_charges(charges: list) -> None:
         desc = c.get('description', '')
         if not isinstance(desc, str) or not desc.strip():
             raise ValueError(f"{tag}: description must be a non-empty string")
+        charge_type = c.get('charge_type') or PO_CHARGE_TYPE_OTHER
+        if charge_type not in PO_CHARGE_TYPES:
+            raise ValueError(f"{tag}: charge_type {charge_type!r} is not recognised")
         try:
             tax_rate = float(c['tax_rate'])
         except (TypeError, ValueError, KeyError):
@@ -25,8 +31,10 @@ def _validate_charges(charges: list) -> None:
             amount = float(c['amount_inc_tax'])
         except (TypeError, ValueError, KeyError):
             raise ValueError(f"{tag}: amount_inc_tax must be a number, got {c.get('amount_inc_tax')!r}")
-        if amount < 0.0:
-            raise ValueError(f"{tag}: amount_inc_tax {amount} must be >= 0")
+        if amount < 0.0 and charge_type != PO_CHARGE_TYPE_ROUNDING:
+            raise ValueError(
+                f"{tag}: amount_inc_tax {amount} must be >= 0 (only {PO_CHARGE_TYPE_ROUNDING} may be negative)"
+            )
 
 
 def _next_po_number(conn):
@@ -315,7 +323,10 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
         qty_units   (number of individual units being received, for SOH)
 
     charges is an optional list of dicts:
-        description (non-empty str), tax_rate (0–100), amount_inc_tax (>= 0)
+        description (non-empty str), tax_rate (0–100), amount_inc_tax,
+        charge_type (one of config.constants.PO_CHARGE_TYPES; defaults to
+        OTHER). amount_inc_tax must be >= 0 unless charge_type is ROUNDING,
+        which may be negative to record a downward rounding adjustment.
 
     Raises ValueError for invalid charge data before any DB writes.
     Raises ValueError if the PO is not currently SENT/PARTIAL — checked
@@ -418,9 +429,10 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
             conn.execute("DELETE FROM po_charges WHERE po_id=?", (po_id,))
             for c in charges:
                 conn.execute(
-                    "INSERT INTO po_charges (po_id, description, tax_rate, amount_inc_tax)"
-                    " VALUES (?,?,?,?)",
-                    (po_id, c['description'].strip(),
+                    "INSERT INTO po_charges (po_id, charge_type, description, tax_rate, amount_inc_tax)"
+                    " VALUES (?,?,?,?,?)",
+                    (po_id, c.get('charge_type') or PO_CHARGE_TYPE_OTHER,
+                     c['description'].strip(),
                      float(c['tax_rate']),
                      float(c['amount_inc_tax']))
                 )

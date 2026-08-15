@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 import controllers.ar_controller as ar_ctrl
 from utils.error_dialog import show_error
+from utils.money_field import money_field
 
 
 class CustomerEdit(QWidget):
@@ -68,14 +69,13 @@ class CustomerEdit(QWidget):
 
         self.credit_limit = QDoubleSpinBox()
         self.credit_limit.setRange(0, 9999999)
-        self.credit_limit.setPrefix("$")
         self.credit_limit.setDecimals(2)
 
         self.active = QCheckBox("Active")
         self.active.setChecked(True)
 
         f3.addRow("Payment Terms",  self.terms)
-        f3.addRow("Credit Limit",   self.credit_limit)
+        f3.addRow("Credit Limit",   money_field(self.credit_limit))
         f3.addRow("",               self.active)
         root.addWidget(grp3)
 

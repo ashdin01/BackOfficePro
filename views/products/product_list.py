@@ -104,10 +104,11 @@ class ProductList(KeyboardMixin, BaseView):
 
         # ── Table ─────────────────────────────────────────────────────
         self.table = QTableWidget()
-        self.table.setColumnCount(15)
+        self.table.setColumnCount(16)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "PLU", "Description", "Brand", "Department", "Group", "Supplier",
-            "Unit", "Sell Price", "Cost (inc. Tax)", "GP %", "Tax", "On Hand", "Status", "Online"
+            "Unit", "Sell Price", "Cost (inc. Tax)", "GP %", "Tax", "On Hand", "Status", "Online",
+            "Order Prep"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -125,6 +126,7 @@ class ProductList(KeyboardMixin, BaseView):
         self.table.setColumnWidth(12,  65)
         self.table.setColumnWidth(13,  70)
         self.table.setColumnWidth(14,  60)
+        self.table.setColumnWidth(15,  85)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setMinimumSectionSize(45)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -256,6 +258,17 @@ class ProductList(KeyboardMixin, BaseView):
                 else "Not listed online — right-click to enable"
             )
             self.table.setItem(r, 14, online_item)
+            is_order_prep = bool(row['order_prep_include'] if 'order_prep_include' in row.keys() else 0)
+            order_prep_item = QTableWidgetItem("✓" if is_order_prep else "—")
+            order_prep_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            order_prep_item.setForeground(
+                QColor(styles.CLR_SUCCESS_ALT) if is_order_prep else QColor('#555555')
+            )
+            order_prep_item.setToolTip(
+                "Shown on the mobile Order Prep list" if is_order_prep
+                else "Not on the mobile Order Prep list — right-click to enable"
+            )
+            self.table.setItem(r, 15, order_prep_item)
             if row_color:
                 for col in range(self.table.columnCount()):
                     item = self.table.item(r, col)
@@ -310,6 +323,8 @@ class ProductList(KeyboardMixin, BaseView):
         barcode = self.table.item(row, 0).text()
         online_item = self.table.item(row, 14)
         is_online = online_item and online_item.text() == "✓"
+        order_prep_item = self.table.item(row, 15)
+        is_order_prep = order_prep_item and order_prep_item.text() == "✓"
 
         menu = QMenu(self)
         if not self._read_only:
@@ -323,6 +338,12 @@ class ProductList(KeyboardMixin, BaseView):
             act_toggle = QAction("🌐  Add to Online Shop", self)
         act_toggle.triggered.connect(lambda: self._toggle_online(barcode, not is_online))
         menu.addAction(act_toggle)
+        if is_order_prep:
+            act_prep = QAction("📱  Remove from Order Prep", self)
+        else:
+            act_prep = QAction("📱  Add to Order Prep", self)
+        act_prep.triggered.connect(lambda: self._toggle_order_prep(barcode, not is_order_prep))
+        menu.addAction(act_prep)
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _toggle_online(self, barcode: str, enable: bool):
@@ -332,6 +353,16 @@ class ProductList(KeyboardMixin, BaseView):
         except Exception as e:
             from utils.error_dialog import show_error
             show_error(self, "Could not update online status.", e)
+            return
+        self._reload_with_search()
+
+    def _toggle_order_prep(self, barcode: str, enable: bool):
+        import controllers.product_controller as pc
+        try:
+            pc.set_order_prep_include(barcode, enable)
+        except Exception as e:
+            from utils.error_dialog import show_error
+            show_error(self, "Could not update Order Prep status.", e)
             return
         self._reload_with_search()
 

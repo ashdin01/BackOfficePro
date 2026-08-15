@@ -104,6 +104,72 @@ def create_po(supplier_id, delivery_date=None, notes='', created_by='', po_type=
                            notes=notes, created_by=created_by, po_type=po_type)
 
 
+# ── Order Prep (market order preparation, mobile) ─────────────────────────────
+
+def get_order_prep_items(supplier_id) -> list[dict]:
+    """
+    Items linked to supplier_id for the mobile Order Prep screen: current
+    min/max, current SOH, and the most recent qty ordered from this supplier.
+    """
+    import models.product_queries as product_queries_model
+
+    items = product_queries_model.get_order_prep_items(supplier_id)
+    if not items:
+        return []
+    last_ordered = lines_model.get_last_ordered([r['barcode'] for r in items], supplier_id)
+    for item in items:
+        lo = last_ordered.get(item['barcode'])
+        item['last_ordered_qty']  = lo['ordered_qty'] if lo else None
+        item['last_ordered_date'] = lo['order_date']  if lo else None
+    return items
+
+
+def create_order_prep_draft(supplier_id, lines, notes='', created_by='Android') -> dict:
+    """
+    Create a DRAFT PO from the mobile Order Prep screen.
+
+    lines: [{barcode, cartons}, ...] — cartons becomes each line's ordered_qty,
+    matching how ordered_qty is used everywhere else (a count of the supplier's
+    pack size, not individual units).
+
+    Raises ValueError if supplier_id/lines are invalid, or a barcode is unknown.
+    """
+    import models.product as product_model
+    import models.product_suppliers as ps_model
+
+    if not lines:
+        raise ValueError("No lines to order")
+
+    resolved = []
+    for entry in lines:
+        barcode = entry['barcode']
+        cartons = float(entry['cartons'])
+        if cartons <= 0:
+            continue
+        product = product_model.get_by_barcode(barcode)
+        if not product:
+            raise ValueError(f"Unknown barcode: {barcode}")
+        supplier_link = ps_model.get_for_barcode_and_supplier(barcode, supplier_id)
+        pack_qty = int(supplier_link['pack_qty']) if supplier_link else int(product['pack_qty'] or 1)
+        resolved.append({
+            'barcode':     barcode,
+            'description': product['description'],
+            'cartons':     cartons,
+            'unit_cost':   product['cost_price'] or 0,
+            'pack_qty':    max(1, pack_qty),
+        })
+    if not resolved:
+        raise ValueError("No lines with quantity > 0")
+
+    po_id = po_model.create(supplier_id, notes=notes, created_by=created_by, po_type='PO')
+    for r in resolved:
+        lines_model.add(po_id=po_id, barcode=r['barcode'], description=r['description'],
+                        ordered_qty=r['cartons'], unit_cost=r['unit_cost'], pack_qty=r['pack_qty'])
+
+    po = po_model.get_by_id(po_id)
+    return {'po_id': po_id, 'po_number': po['po_number'], 'line_count': len(resolved)}
+
+
 def update_po_status(po_id, status) -> None:
     po_model.update_status(po_id, status)
 

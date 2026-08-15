@@ -109,6 +109,34 @@ def get_unreceived(po_id) -> list:
         ).fetchall()]
 
 
+def get_last_ordered(barcodes, supplier_id) -> dict:
+    """
+    Most recent order line for each barcode from this supplier, ignoring
+    cancelled/reversed POs. Used by the mobile Order Prep screen to show
+    "last ordered: N on DATE" alongside the current min/max and on-hand count.
+    Returns {barcode: {ordered_qty, pack_qty, po_number, order_date}}.
+    """
+    if not barcodes:
+        return {}
+    with db_conn() as conn:
+        placeholders = ','.join('?' * len(barcodes))
+        rows = conn.execute(f"""
+            SELECT l.barcode, l.ordered_qty, l.pack_qty, po.po_number,
+                   COALESCE(po.delivery_date, po.created_at) AS order_date
+            FROM po_lines l
+            JOIN purchase_orders po ON po.id = l.po_id
+            WHERE po.supplier_id = ? AND l.barcode IN ({placeholders})
+              AND l.is_note = 0
+              AND po.status NOT IN ('CANCELLED', 'REVERSED')
+            ORDER BY po.created_at DESC
+        """, (supplier_id, *barcodes)).fetchall()
+        result = {}
+        for r in rows:
+            if r['barcode'] not in result:   # first row per barcode = most recent
+                result[r['barcode']] = dict(r)
+        return result
+
+
 def get_on_order_units(barcodes) -> dict:
     """
     Units already committed on open (DRAFT/SENT) POs, keyed by barcode.

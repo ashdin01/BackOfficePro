@@ -13,6 +13,7 @@ import controllers.ar_controller as ar_ctrl
 import controllers.product_controller as product_ctrl
 import config.styles as styles
 from utils.error_dialog import show_error
+from utils.money_field import money_field
 from utils.text_search import matches_all_words
 from views.base_view import BaseView, BaseDialog
 from views.widgets.search_bar import SearchBar
@@ -526,8 +527,7 @@ class _LineDialog(QDialog):
         self.unit_price = QDoubleSpinBox()
         self.unit_price.setRange(0, 9999999)
         self.unit_price.setDecimals(4)
-        self.unit_price.setPrefix("$")
-        form.addRow("Unit Price *", self.unit_price)
+        form.addRow("Unit Price *", money_field(self.unit_price))
 
         self.discount = QDoubleSpinBox()
         self.discount.setRange(0, 100)

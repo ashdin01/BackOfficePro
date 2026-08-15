@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QDate
 from utils.keyboard_mixin import KeyboardMixin
 from utils.validators import validate_abn, validate_email, validate_phone, validate_bsb
 from utils.error_dialog import show_error
+from utils.money_field import money_field
 import controllers.supplier_controller as supplier_ctrl
 import config.styles as styles
 
@@ -55,7 +56,6 @@ class SupplierEdit(KeyboardMixin, QWidget):
         self.phone   = QLineEdit()
         self.order_minimum = QDoubleSpinBox()
         self.order_minimum.setMaximum(999999)
-        self.order_minimum.setPrefix("$")
         self.order_minimum.setDecimals(2)
         self.account = QLineEdit()
         self.terms   = QLineEdit()
@@ -71,7 +71,7 @@ class SupplierEdit(KeyboardMixin, QWidget):
         details_form.addRow("ABN",            self.abn)
         details_form.addRow("Contact Name",   self.contact)
         details_form.addRow("Phone",          self.phone)
-        details_form.addRow("Order Minimum",  self.order_minimum)
+        details_form.addRow("Order Minimum",  money_field(self.order_minimum))
         details_form.addRow("Account No.",    self.account)
         details_form.addRow("Payment Terms",  self.terms)
         details_form.addRow("Address",        self.address)

@@ -85,6 +85,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._auto_reorder      = bool(p['auto_reorder']) if 'auto_reorder' in p.keys() else False
         self._online_available  = bool(p['online_available'] if 'online_available' in p.keys() else 0)
         self._online_notes      = (p['online_notes'] if 'online_notes' in p.keys() and p['online_notes'] else '')
+        self._order_prep_include = bool(p['order_prep_include'] if 'order_prep_include' in p.keys() else 0)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -264,6 +265,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         third_col.addLayout(r)
 
         r, self.lbl_online = ro_row("Online Shop", "Yes" if self._online_available else "No", self._edit_online_available)
+        third_col.addLayout(r)
+
+        r, self.lbl_order_prep = ro_row("Order Prep App", "Yes" if self._order_prep_include else "No", self._edit_order_prep_include)
         third_col.addLayout(r)
 
         third_col.addStretch()
@@ -773,6 +777,18 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._online_available = (val == "Yes")
             self.lbl_online.setText(val)
 
+    def _edit_order_prep_include(self):
+        val = choice_popup(
+            "Order Prep App",
+            "Show this product on the mobile Order Prep list for its supplier?",
+            ["No", "Yes"],
+            "Yes" if self._order_prep_include else "No",
+            self,
+        )
+        if val is not None:
+            self._order_prep_include = (val == "Yes")
+            self.lbl_order_prep.setText(val)
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     def _dept_name(self):
@@ -1003,9 +1019,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         price_spin = QDoubleSpinBox()
         price_spin.setMaximum(99999)
         price_spin.setDecimals(2)
-        price_spin.setPrefix("$")
         price_spin.setValue(round(self._sell_price * 6, 2))
-        form.addRow("Sell Price *", price_spin)
+        form.addRow("Sell Price *", money_field(price_spin))
 
         lay.addLayout(form)
         lay.addSpacing(4)
@@ -1094,9 +1109,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         price_spin = QDoubleSpinBox()
         price_spin.setMaximum(99999)
         price_spin.setDecimals(2)
-        price_spin.setPrefix("$")
         price_spin.setValue(su['sell_price'])
-        form.addRow("Sell Price *", price_spin)
+        form.addRow("Sell Price *", money_field(price_spin))
 
         lay.addLayout(form)
         lay.addSpacing(4)
@@ -1333,6 +1347,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 auto_reorder=int(self._auto_reorder),
                 online_available=int(self._online_available),
                 online_notes=self._txt_notes.toPlainText().strip(),
+                order_prep_include=int(self._order_prep_include),
                 product_suppliers=self._product_suppliers,
             )
             if self.on_save:
