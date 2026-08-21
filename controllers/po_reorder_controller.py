@@ -7,8 +7,8 @@ import models.plu_barcode_map as plu_map_model
 import models.product_queries as product_queries_model
 import models.supplier as supplier_model
 
-SAFETY_DAYS  = 2
-SALES_WINDOW = 14
+SAFETY_DAYS  = 1
+SALES_WINDOW = 28
 
 
 def get_reorder_recommendations(supplier_id) -> list[dict]:
@@ -111,8 +111,8 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
     against the cover requirement.
 
     Algorithm per product:
-        avg_daily         = total units sold (last 14 days) / 14
-        cover_days        = days_between(next_delivery, following_delivery) + 2  (safety buffer)
+        avg_daily         = total units sold (last SALES_WINDOW days) / SALES_WINDOW
+        cover_days        = days_between(next_delivery, following_delivery) + SAFETY_DAYS
         projected_stock   = effective_stock - avg_daily * days_ahead  (sold down before arrival)
         needed_units      = max(0, avg_daily * cover_days - projected_stock)
         cartons           = ceil(needed_units / pack_qty), minimum 1
@@ -153,8 +153,8 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
     recs = []
     for p in products:
         plu             = barcode_to_plu.get(p['barcode'])
-        total_14day     = plu_sales.get(plu, 0.0) if plu else 0.0
-        avg_daily       = total_14day / SALES_WINDOW
+        total_sales     = plu_sales.get(plu, 0.0) if plu else 0.0
+        avg_daily       = total_sales / SALES_WINDOW
         on_hand         = float(p['on_hand'])
         on_order        = milk_on_order.get(p['barcode'], 0.0)
         effective_stock = on_hand + on_order
@@ -179,7 +179,7 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
             'days_to_delivery': days_ahead,
             'next_delivery':    next_delivery,
             'following_delivery': following_delivery,
-            'has_sales_data':   plu is not None and total_14day > 0,
+            'has_sales_data':   plu is not None and total_sales > 0,
         })
     return recs
 
