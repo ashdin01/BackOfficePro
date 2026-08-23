@@ -185,9 +185,9 @@ def test_milk_recs_cartons_based_on_avg_sales(test_db, db_conn, dept_id, supplie
         "INSERT INTO plu_barcode_map (plu, barcode) VALUES (?, ?)",
         (77777, '9300000011111')
     )
-    # Add 14 days of sales: 7 units/day → avg_daily = 7
+    # Add 28 days of sales: 7 units/day → avg_daily = 7
     today = date.today()
-    for i in range(1, 15):
+    for i in range(1, 29):
         d = (today - timedelta(days=i)).isoformat()
         db_conn.execute("""
             INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
@@ -200,9 +200,9 @@ def test_milk_recs_cartons_based_on_avg_sales(test_db, db_conn, dept_id, supplie
     r = recs[0]
     assert r['avg_daily'] == 7.0
     assert r['has_sales_data'] is True
-    # cover_days = days_ahead + 2 (SAFETY_DAYS), cartons >= 1
+    # cover_days = days_ahead + 1 (SAFETY_DAYS), cartons >= 1
     assert r['cartons'] >= 1
-    assert r['cover_days'] == r['days_to_delivery'] + 2
+    assert r['cover_days'] == r['days_to_delivery'] + 1
 
 
 def test_milk_recs_projects_stock_forward_over_lead_time(
@@ -228,7 +228,7 @@ def test_milk_recs_projects_stock_forward_over_lead_time(
     db_conn.execute(
         "INSERT INTO plu_barcode_map (plu, barcode) VALUES (55555, '9300000011111')"
     )
-    for i in range(1, 15):
+    for i in range(1, 29):
         d = (date(2024, 1, 1) - timedelta(days=i)).isoformat()
         db_conn.execute("""
             INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
@@ -241,12 +241,12 @@ def test_milk_recs_projects_stock_forward_over_lead_time(
     r = recs[0]
     assert r['avg_daily'] == 10.0
     assert r['days_to_delivery'] == 3          # Mon -> Thu
-    assert r['cover_days'] == 9                # Thu -> next Thu (7) + 2 safety days
+    assert r['cover_days'] == 8                # Thu -> next Thu (7) + 1 safety day
     assert r['effective_stock'] == 50.0
     # 50 on hand is sold down at 10/day for the 3 days until delivery arrives
     assert r['projected_stock'] == 20.0
-    # needed = avg_daily * cover_days - projected_stock = 10*9 - 20 = 70
-    assert r['cartons'] == 70
+    # needed = avg_daily * cover_days - projected_stock = 10*8 - 20 = 60
+    assert r['cartons'] == 60
 
 
 def test_milk_recs_high_soh_still_returns_minimum_one(test_db, db_conn, dept_id, supplier_id):

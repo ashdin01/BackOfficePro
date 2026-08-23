@@ -50,7 +50,8 @@ def get_items_for_supplier(supplier_id=None) -> list:
     Return active products for the item lookup dialog.
     If supplier_id is given, return all products linked to that supplier via
     product_suppliers (not just those whose default supplier matches).
-    Rows include: supplier_name, barcode, description, pack_qty, pack_unit, cost_price.
+    Rows include: supplier_name, barcode, description, pack_qty, pack_unit,
+    cost_price, supplier_sku.
     """
     with db_conn() as conn:
         if supplier_id:
@@ -59,7 +60,8 @@ def get_items_for_supplier(supplier_id=None) -> list:
                        p.barcode, p.description,
                        COALESCE(ps.pack_qty, p.pack_qty, 1) AS pack_qty,
                        COALESCE(ps.pack_unit, p.pack_unit, 'EA') AS pack_unit,
-                       COALESCE(p.cost_price, 0.0) AS cost_price
+                       COALESCE(p.cost_price, 0.0) AS cost_price,
+                       COALESCE(ps.supplier_sku, p.supplier_sku, '') AS supplier_sku
                 FROM products p
                 JOIN product_suppliers ps ON p.barcode = ps.barcode AND ps.supplier_id = ?
                 JOIN suppliers s ON s.id = ?
@@ -72,7 +74,8 @@ def get_items_for_supplier(supplier_id=None) -> list:
                        p.barcode, p.description,
                        COALESCE(p.pack_qty, 1) AS pack_qty,
                        COALESCE(p.pack_unit, 'EA') AS pack_unit,
-                       COALESCE(p.cost_price, 0.0) AS cost_price
+                       COALESCE(p.cost_price, 0.0) AS cost_price,
+                       COALESCE(p.supplier_sku, '') AS supplier_sku
                 FROM products p
                 LEFT JOIN suppliers s ON p.supplier_id = s.id
                 WHERE p.active = 1

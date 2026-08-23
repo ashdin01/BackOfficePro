@@ -22,7 +22,7 @@ class ItemLookupDialog(QDialog):
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Search:"))
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Filter by supplier, barcode or description...")
+        self.search_input.setPlaceholderText("Filter by supplier, barcode, description or supplier SKU...")
         self._filter_timer = QTimer()
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(500)
@@ -32,15 +32,16 @@ class ItemLookupDialog(QDialog):
         layout.addLayout(search_row)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(
-            ["Supplier", "Barcode", "Description", "Pack Size", "Cost Price"]
+            ["Supplier", "Barcode", "Description", "Supplier SKU", "Pack Size", "Cost Price"]
         )
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 200)
         self.table.setColumnWidth(1, 110)
-        self.table.setColumnWidth(3, 110)
-        self.table.setColumnWidth(4, 100)
+        self.table.setColumnWidth(3, 120)
+        self.table.setColumnWidth(4, 110)
+        self.table.setColumnWidth(5, 100)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(self._on_accept)
@@ -69,10 +70,11 @@ class ItemLookupDialog(QDialog):
             self.table.setItem(row, 0, QTableWidgetItem(r['supplier_name']))
             self.table.setItem(row, 1, QTableWidgetItem(r['barcode']))
             self.table.setItem(row, 2, QTableWidgetItem(r['description']))
-            self.table.setItem(row, 3, QTableWidgetItem(pack_str))
+            self.table.setItem(row, 3, QTableWidgetItem(r.get('supplier_sku') or ''))
+            self.table.setItem(row, 4, QTableWidgetItem(pack_str))
             cost_item = QTableWidgetItem(f"${r['cost_price']:.2f}")
             cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(row, 4, cost_item)
+            self.table.setItem(row, 5, cost_item)
 
     def _filter(self, text):
         text = text.lower()
@@ -80,7 +82,8 @@ class ItemLookupDialog(QDialog):
             r for r in self._all_rows
             if (text in r['supplier_name'].lower()
                 or text in r['barcode'].lower()
-                or text in r['description'].lower())
+                or text in r['description'].lower()
+                or text in (r.get('supplier_sku') or '').lower())
         ]
         self._populate(filtered)
 
@@ -91,6 +94,6 @@ class ItemLookupDialog(QDialog):
             return
         self.selected = {
             "barcode": self.table.item(row, 1).text(),
-            "cost_price": float(self.table.item(row, 4).text().replace("$", "") or 0),
+            "cost_price": float(self.table.item(row, 5).text().replace("$", "") or 0),
         }
         self.accept()
