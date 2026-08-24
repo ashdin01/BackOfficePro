@@ -78,7 +78,7 @@ def compute_po_history_data(po_id: int, po=None) -> POHistoryData:
         if line['is_note']:
             continue
         product   = product_ctrl.get_product_by_barcode(line['barcode'])
-        pack_qty  = int(product['pack_qty'])  if product and product['pack_qty']  else 1
+        pack_qty  = int(line['pack_qty']) if line['pack_qty'] else 1
         pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
         tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
         pack_str  = f"{pack_qty} × {pack_unit}" if pack_qty > 1 else pack_unit

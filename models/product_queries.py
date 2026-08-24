@@ -45,42 +45,65 @@ def get_auto_reorder_items(supplier_id) -> list:
         """, (supplier_id,)).fetchall()]
 
 
-def get_items_for_supplier(supplier_id=None) -> list:
+def get_items_for_supplier(supplier_id=None, search_term='') -> list:
     """
     Return active products for the item lookup dialog.
     If supplier_id is given, return all products linked to that supplier via
     product_suppliers (not just those whose default supplier matches).
     Rows include: supplier_name, barcode, description, pack_qty, pack_unit,
     cost_price, supplier_sku.
+
+    search_term uses the same multi-word search as the main Products window
+    (models.product.search): split into words, every word must appear
+    somewhere in description, barcode, brand, department, supplier, PLU, or
+    supplier SKU — e.g. "oasis dip" finds "OASIS BEETROOT DIP".
     """
+    words = [w.strip() for w in search_term.strip().split() if w.strip()]
+    word_clauses = []
+    params = []
+    for word in words:
+        like = f"%{word}%"
+        word_clauses.append(
+            "(p.description LIKE ? OR p.barcode LIKE ? OR p.brand LIKE ? OR "
+            "d.name LIKE ? OR s.name LIKE ? OR p.plu LIKE ? OR {sku} LIKE ?)"
+        )
+        params.extend([like, like, like, like, like, like, like])
+    search_where = (" AND " + " AND ".join(word_clauses)) if word_clauses else ""
+
     with db_conn() as conn:
         if supplier_id:
-            return conn.execute("""
+            sku_expr = "COALESCE(ps.supplier_sku, p.supplier_sku, '')"
+            where = search_where.format(sku=sku_expr)
+            return conn.execute(f"""
                 SELECT COALESCE(s.name, '') AS supplier_name,
                        p.barcode, p.description,
                        COALESCE(ps.pack_qty, p.pack_qty, 1) AS pack_qty,
                        COALESCE(ps.pack_unit, p.pack_unit, 'EA') AS pack_unit,
                        COALESCE(p.cost_price, 0.0) AS cost_price,
-                       COALESCE(ps.supplier_sku, p.supplier_sku, '') AS supplier_sku
+                       {sku_expr} AS supplier_sku
                 FROM products p
                 JOIN product_suppliers ps ON p.barcode = ps.barcode AND ps.supplier_id = ?
                 JOIN suppliers s ON s.id = ?
-                WHERE p.active = 1
+                LEFT JOIN departments d ON d.id = p.department_id
+                WHERE p.active = 1{where}
                 ORDER BY p.description ASC
-            """, (supplier_id, supplier_id)).fetchall()
+            """, [supplier_id, supplier_id, *params]).fetchall()
         else:
-            return conn.execute("""
+            sku_expr = "COALESCE(p.supplier_sku, '')"
+            where = search_where.format(sku=sku_expr)
+            return conn.execute(f"""
                 SELECT COALESCE(s.name, '') AS supplier_name,
                        p.barcode, p.description,
                        COALESCE(p.pack_qty, 1) AS pack_qty,
                        COALESCE(p.pack_unit, 'EA') AS pack_unit,
                        COALESCE(p.cost_price, 0.0) AS cost_price,
-                       COALESCE(p.supplier_sku, '') AS supplier_sku
+                       {sku_expr} AS supplier_sku
                 FROM products p
                 LEFT JOIN suppliers s ON p.supplier_id = s.id
-                WHERE p.active = 1
+                LEFT JOIN departments d ON d.id = p.department_id
+                WHERE p.active = 1{where}
                 ORDER BY supplier_name ASC, p.description ASC
-            """).fetchall()
+            """, params).fetchall()
 
 
 def get_order_prep_items(supplier_id) -> list:

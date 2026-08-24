@@ -1,10 +1,11 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QDialogButtonBox, QMessageBox,
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 import controllers.purchase_order_controller as po_controller
+from views.widgets.search_bar import SearchBar
 
 
 class ItemLookupDialog(QDialog):
@@ -21,13 +22,12 @@ class ItemLookupDialog(QDialog):
 
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Search:"))
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Filter by supplier, barcode, description or supplier SKU...")
-        self._filter_timer = QTimer()
-        self._filter_timer.setSingleShot(True)
-        self._filter_timer.setInterval(500)
-        self._filter_timer.timeout.connect(lambda: self._filter(self.search_input.text()))
-        self.search_input.textChanged.connect(lambda _: self._filter_timer.start())
+        self.search_input = SearchBar(
+            placeholder="Search barcode, description, brand, department or supplier SKU…"
+        )
+        self.search_input.search_changed.connect(
+            lambda: self._search(self.search_input.text())
+        )
         search_row.addWidget(self.search_input)
         layout.addLayout(search_row)
 
@@ -54,12 +54,15 @@ class ItemLookupDialog(QDialog):
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
 
-        self._load_products()
+        self.search_input.setFocus()
+        self._search('')
 
-    def _load_products(self):
-        rows = po_controller.get_items_for_supplier(self.supplier_id)
-        self._all_rows = [dict(r) for r in rows]
-        self._populate(self._all_rows)
+    def _search(self, term):
+        """Multi-word AND search — same logic as the main Products window
+        (models.product.search), scoped to items linked to this PO's
+        supplier. An empty term returns the full supplier item list."""
+        rows = po_controller.get_items_for_supplier(self.supplier_id, term)
+        self._populate([dict(r) for r in rows])
 
     def _populate(self, rows):
         self.table.setRowCount(0)
@@ -75,17 +78,6 @@ class ItemLookupDialog(QDialog):
             cost_item = QTableWidgetItem(f"${r['cost_price']:.2f}")
             cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 5, cost_item)
-
-    def _filter(self, text):
-        text = text.lower()
-        filtered = [
-            r for r in self._all_rows
-            if (text in r['supplier_name'].lower()
-                or text in r['barcode'].lower()
-                or text in r['description'].lower()
-                or text in (r.get('supplier_sku') or '').lower())
-        ]
-        self._populate(filtered)
 
     def _on_accept(self):
         row = self.table.currentRow()

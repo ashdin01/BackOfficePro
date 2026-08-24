@@ -105,11 +105,16 @@ class ProductEdit(KeyboardMixin, QWidget):
             )
             layout.addWidget(banner)
 
-        def ro_row(field_label, value, on_edit):
+        def ro_row(field_label, value, on_edit, force_enabled=False):
+            # force_enabled lets a specific row stay clickable for STAFF even
+            # though the rest of Product Detail is locked — used for Manage
+            # Suppliers, which STAFF may open to view (not edit). The icon
+            # switches to an eye so it reads as "view", not "edit".
             row = QHBoxLayout()
-            btn = QPushButton("✎")
+            view_only = self._read_only and force_enabled
+            btn = QPushButton("👁" if view_only else "✎")
             btn.setFixedSize(28, 28)
-            if self._read_only:
+            if self._read_only and not force_enabled:
                 btn.setEnabled(False)
                 btn.setStyleSheet("background: transparent; border: none;")
             else:
@@ -164,10 +169,12 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_plu = ro_row("PLU", self._plu or "—", self._edit_plu)
         left_col.addLayout(r)
 
-        r, self.lbl_supplier = ro_row("Supplier (default)", self._supplier_name(), self._edit_supplier)
+        r, self.lbl_supplier = ro_row("Supplier (default)", self._supplier_name(),
+                                       self._edit_supplier, force_enabled=True)
         left_col.addLayout(r)
 
-        r, self.lbl_supplier_sku = ro_row("Supplier SKU", self._supplier_sku_display(), self._edit_supplier_sku)
+        r, self.lbl_supplier_sku = ro_row("Supplier SKU", self._supplier_sku_display(),
+                                           self._edit_supplier_sku, force_enabled=True)
         left_col.addLayout(r)
 
         r, self.lbl_dept = ro_row("Department", self._dept_name(), self._edit_dept)
@@ -480,32 +487,38 @@ class ProductEdit(KeyboardMixin, QWidget):
             QComboBox, QHBoxLayout, QVBoxLayout
         )
         dlg = QDialog(self)
-        dlg.setWindowTitle("Manage Suppliers")
-        dlg.setMinimumWidth(740)
+        dlg.setWindowTitle("Manage Suppliers  [View Only]" if self._read_only else "Manage Suppliers")
+        dlg.setMinimumWidth(820)
         dlg.setMinimumHeight(320)
         layout = QVBoxLayout(dlg)
         layout.setSpacing(10)
         layout.setContentsMargins(16, 16, 16, 16)
 
-        note = QLabel(
+        note_text = (
+            "Suppliers linked to this product, their SKU, pack size, and last cost. "
+            "Contact a manager to make changes."
+            if self._read_only else
             "The Default supplier determines which purchase orders this product appears in. "
             "Set the Supplier SKU and carton pack size per supplier."
         )
+        note = QLabel(note_text)
         note.setStyleSheet(styles.STYLE_LABEL_MUTED)
         note.setWordWrap(True)
         layout.addWidget(note)
 
         self._sup_table = QTableWidget()
-        self._sup_table.setColumnCount(6)
+        self._sup_table.setColumnCount(7)
         self._sup_table.setHorizontalHeaderLabels(
-            ["Supplier", "Supplier SKU", "Pack Qty", "Unit", "Default", ""]
+            ["Supplier", "Supplier SKU", "Pack Qty", "Unit",
+             "Cost Price (ex GST)", "Default", ""]
         )
         self._sup_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._sup_table.setColumnWidth(1, 150)
         self._sup_table.setColumnWidth(2, 75)
         self._sup_table.setColumnWidth(3, 65)
-        self._sup_table.setColumnWidth(4, 110)
-        self._sup_table.setColumnWidth(5, 50)
+        self._sup_table.setColumnWidth(4, 120)
+        self._sup_table.setColumnWidth(5, 110)
+        self._sup_table.setColumnWidth(6, 50)
         self._sup_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._sup_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._sup_table.verticalHeader().setVisible(False)
@@ -514,12 +527,13 @@ class ProductEdit(KeyboardMixin, QWidget):
         layout.addWidget(self._sup_table)
 
         btn_row = QHBoxLayout()
-        btn_add = QPushButton("+ Add Supplier")
-        btn_add.setFixedHeight(30)
-        btn_add.clicked.connect(self._add_supplier_popup)
-        btn_row.addWidget(btn_add)
+        if not self._read_only:
+            btn_add = QPushButton("+ Add Supplier")
+            btn_add.setFixedHeight(30)
+            btn_add.clicked.connect(self._add_supplier_popup)
+            btn_row.addWidget(btn_add)
         btn_row.addStretch()
-        btn_done = QPushButton("Done")
+        btn_done = QPushButton("Close" if self._read_only else "Done")
         btn_done.setFixedHeight(32)
         btn_done.setStyleSheet(
             f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
@@ -535,41 +549,70 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.lbl_supplier.setText(self._supplier_name())
         self.lbl_supplier_sku.setText(self._supplier_sku_display())
 
+    def _ro_cell(self, text):
+        """Plain, non-editable, centred table cell — used for Manage Suppliers
+        in STAFF's view-only mode, in place of the normally-editable widgets."""
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
+
     def _refresh_sup_table(self):
         self._sup_table.setUpdatesEnabled(False)
         self._sup_table.setRowCount(len(self._product_suppliers))
         for r, entry in enumerate(self._product_suppliers):
             self._sup_table.setItem(r, 0, QTableWidgetItem(entry['supplier_name']))
 
-            # Col 1 — Supplier SKU (inline QLineEdit)
-            sku_edit = QLineEdit(entry.get('supplier_sku') or '')
-            sku_edit.setPlaceholderText("e.g. BIP-240")
-            sku_edit.textChanged.connect(
-                lambda text, i=r: self._product_suppliers[i].__setitem__('supplier_sku', text.strip())
-            )
-            self._sup_table.setCellWidget(r, 1, sku_edit)
+            if self._read_only:
+                # Col 1 — Supplier SKU (plain text)
+                self._sup_table.setItem(r, 1, self._ro_cell(entry.get('supplier_sku') or '—'))
 
-            # Col 2 — Pack Qty (inline QSpinBox)
-            qty_spin = QSpinBox()
-            qty_spin.setMinimum(1)
-            qty_spin.setMaximum(9999)
-            qty_spin.setValue(entry.get('pack_qty') or 1)
-            qty_spin.valueChanged.connect(
-                lambda val, i=r: self._product_suppliers[i].__setitem__('pack_qty', val)
-            )
-            self._sup_table.setCellWidget(r, 2, qty_spin)
+                # Col 2 — Pack Qty (plain text)
+                self._sup_table.setItem(r, 2, self._ro_cell(str(entry.get('pack_qty') or 1)))
 
-            # Col 3 — Pack Unit (inline QComboBox)
-            unit_cb = QComboBox()
-            unit_cb.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
-            unit_cb.setCurrentText(entry.get('pack_unit') or 'EA')
-            unit_cb.currentTextChanged.connect(
-                lambda text, i=r: self._product_suppliers[i].__setitem__('pack_unit', text)
-            )
-            self._sup_table.setCellWidget(r, 3, unit_cb)
+                # Col 3 — Pack Unit (plain text)
+                self._sup_table.setItem(r, 3, self._ro_cell(entry.get('pack_unit') or 'EA'))
+            else:
+                # Col 1 — Supplier SKU (inline QLineEdit)
+                sku_edit = QLineEdit(entry.get('supplier_sku') or '')
+                sku_edit.setPlaceholderText("e.g. BIP-240")
+                sku_edit.textChanged.connect(
+                    lambda text, i=r: self._product_suppliers[i].__setitem__('supplier_sku', text.strip())
+                )
+                self._sup_table.setCellWidget(r, 1, sku_edit)
 
-            # Col 4 — Default toggle
-            if entry['is_default']:
+                # Col 2 — Pack Qty (inline QSpinBox)
+                qty_spin = QSpinBox()
+                qty_spin.setMinimum(1)
+                qty_spin.setMaximum(9999)
+                qty_spin.setValue(entry.get('pack_qty') or 1)
+                qty_spin.valueChanged.connect(
+                    lambda val, i=r: self._product_suppliers[i].__setitem__('pack_qty', val)
+                )
+                self._sup_table.setCellWidget(r, 2, qty_spin)
+
+                # Col 3 — Pack Unit (inline QComboBox)
+                unit_cb = QComboBox()
+                unit_cb.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
+                unit_cb.setCurrentText(entry.get('pack_unit') or 'EA')
+                unit_cb.currentTextChanged.connect(
+                    lambda text, i=r: self._product_suppliers[i].__setitem__('pack_unit', text)
+                )
+                self._sup_table.setCellWidget(r, 3, unit_cb)
+
+            # Col 4 — Cost Price ex GST: read-only, most recent cost on file
+            # for this supplier from PO history. Not editable here — blank
+            # when this supplier has never had a PO line for the product.
+            last_cost = entry.get('last_cost')
+            cost_text = f"${last_cost:.4f}" if last_cost is not None else "—"
+            self._sup_table.setItem(r, 4, self._ro_cell(cost_text))
+
+            # Col 5 — Default
+            if self._read_only:
+                self._sup_table.setItem(
+                    r, 5, self._ro_cell("★ Default" if entry['is_default'] else "")
+                )
+            elif entry['is_default']:
                 btn_def = QPushButton("★ Default")
                 btn_def.setEnabled(False)
                 btn_def.setFixedHeight(26)
@@ -577,18 +620,20 @@ class ProductEdit(KeyboardMixin, QWidget):
                     f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
                     "border-radius: 3px; font-weight: bold; }"
                 )
+                self._sup_table.setCellWidget(r, 5, btn_def)
             else:
                 btn_def = QPushButton("Set Default")
                 btn_def.setFixedHeight(26)
                 btn_def.clicked.connect(lambda _, i=r: self._set_default_supplier(i))
-            self._sup_table.setCellWidget(r, 4, btn_def)
+                self._sup_table.setCellWidget(r, 5, btn_def)
 
-            # Col 5 — Remove
-            btn_rem = QPushButton("✕")
-            btn_rem.setFixedHeight(26)
-            btn_rem.setStyleSheet(f"color: {styles.CLR_DANGER_ALT}; font-weight: bold;")
-            btn_rem.clicked.connect(lambda _, i=r: self._remove_supplier(i))
-            self._sup_table.setCellWidget(r, 5, btn_rem)
+            # Col 6 — Remove (hidden entirely in view-only mode)
+            if not self._read_only:
+                btn_rem = QPushButton("✕")
+                btn_rem.setFixedHeight(26)
+                btn_rem.setStyleSheet(f"color: {styles.CLR_DANGER_ALT}; font-weight: bold;")
+                btn_rem.clicked.connect(lambda _, i=r: self._remove_supplier(i))
+                self._sup_table.setCellWidget(r, 6, btn_rem)
 
         self._sup_table.setUpdatesEnabled(True)
 

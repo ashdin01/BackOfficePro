@@ -40,15 +40,17 @@ def get_auto_reorder_items(supplier_id) -> list[dict]:
     return product_queries_model.get_auto_reorder_items(supplier_id)
 
 
-def get_items_for_supplier(supplier_id=None) -> list[dict]:
+def get_items_for_supplier(supplier_id=None, search_term='') -> list[dict]:
     """
     Return active products for the item lookup dialog.
     If supplier_id is given, return all products linked to that supplier via
     product_suppliers (not just those whose default supplier matches).
     Rows include: supplier_name, barcode, description, pack_qty, pack_unit,
     cost_price, supplier_sku.
+    search_term applies the same multi-word search as the main Products
+    window — see models.product_queries.get_items_for_supplier.
     """
-    return product_queries_model.get_items_for_supplier(supplier_id)
+    return product_queries_model.get_items_for_supplier(supplier_id, search_term)
 
 
 def get_sales_for_barcode(barcode) -> dict | None:

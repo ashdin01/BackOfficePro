@@ -124,13 +124,13 @@ class TestGetStockOnOrderDetail:
         """, (supplier_id,))
         po_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         db_conn.execute("""
-            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, unit_cost)
-            VALUES (?, ?, 'Pack Product', 4, 0, 3.00)
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, unit_cost, pack_qty)
+            VALUES (?, ?, 'Pack Product', 4, 0, 3.00, 6)
         """, (po_id, bc))
         db_conn.commit()
         rows = get_stock_on_order_detail(bc)
         assert len(rows) == 1
-        assert rows[0]['qty_units'] == 24  # 4 cartons × 6 units
+        assert rows[0]['qty_units'] == 24  # 4 cartons × 6 units (the line's own pack size, not the product's current default)
 
     def test_ro_type_uses_units_not_cartons(self, test_db, db_conn, dept_id, supplier_id):
         """RO ordered_qty is already in units — must NOT be multiplied by pack_qty."""

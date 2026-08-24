@@ -117,10 +117,16 @@ def get_product_suppliers(barcode, fallback_supplier_id=None,
                           fallback_sku='', fallback_pack_qty=1, fallback_pack_unit='EA') -> list[dict]:
     """
     Return supplier entries for a product as a list of dicts:
-    {supplier_id, supplier_name, is_default, supplier_sku, pack_qty, pack_unit}
+    {supplier_id, supplier_name, is_default, supplier_sku, pack_qty, pack_unit,
+     last_cost}
+    last_cost is the most recent cost (ex GST) actually paid/quoted to that
+    supplier for this barcode, read from PO history — None when this
+    supplier has never had a PO line for it (shown blank, not $0.00). It is
+    informational only; there is nowhere to edit it here.
     Falls back to a single-entry list when the junction table has no rows and
     fallback_supplier_id is given (products not yet migrated to v14+).
     """
+    last_cost = po_lines_model.get_last_cost_by_supplier(barcode)
     rows = ps_model.get_by_barcode(barcode)
     if rows:
         return [
@@ -129,7 +135,8 @@ def get_product_suppliers(barcode, fallback_supplier_id=None,
              'is_default':    bool(r['is_default']),
              'supplier_sku':  r['supplier_sku'] or '',
              'pack_qty':      int(r['pack_qty']) if r['pack_qty'] else 1,
-             'pack_unit':     r['pack_unit'] or 'EA'}
+             'pack_unit':     r['pack_unit'] or 'EA',
+             'last_cost':     last_cost.get(r['supplier_id'])}
             for r in rows
         ]
     if fallback_supplier_id:
@@ -138,7 +145,8 @@ def get_product_suppliers(barcode, fallback_supplier_id=None,
         name = sup['name'] if sup else '-- None --'
         return [{'supplier_id': fallback_supplier_id, 'supplier_name': name, 'is_default': True,
                  'supplier_sku': fallback_sku, 'pack_qty': fallback_pack_qty,
-                 'pack_unit': fallback_pack_unit}]
+                 'pack_unit': fallback_pack_unit,
+                 'last_cost': last_cost.get(fallback_supplier_id)}]
     return []
 
 

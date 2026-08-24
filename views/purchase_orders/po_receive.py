@@ -512,7 +512,7 @@ class POReceive(BaseView):
             self.table.insertRow(r)
 
             product      = product_ctrl.get_product_by_barcode(line['barcode'])
-            pack_qty     = int(product['pack_qty']) if product and product['pack_qty'] else 1
+            pack_qty     = int(line['pack_qty']) if line['pack_qty'] else 1
             pack_unit    = (product['pack_unit'] or 'EA') if product else 'EA'
             current_cost = float(product['cost_price']) if product else 0.0
             is_vw        = bool(product['variable_weight']) if product else False

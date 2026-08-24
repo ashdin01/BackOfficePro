@@ -210,7 +210,7 @@ def _gst_paid(conn, d_from, d_to) -> dict:
                pol.received_weight,
                COALESCE(NULLIF(pol.actual_cost, 0), pol.unit_cost) AS unit_cost,
                COALESCE(p.tax_rate, 0) AS tax_rate,
-               COALESCE(p.pack_qty, 1) AS pack_qty,
+               COALESCE(pol.pack_qty, 1) AS pack_qty,
                COALESCE(p.variable_weight, 0) AS variable_weight
         FROM po_lines pol
         JOIN purchase_orders po ON po.id = pol.po_id

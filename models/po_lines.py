@@ -137,6 +137,33 @@ def get_last_ordered(barcodes, supplier_id) -> dict:
         return result
 
 
+def get_last_cost_by_supplier(barcode) -> dict:
+    """
+    Most recent cost (ex GST) on file for this product from each supplier
+    that has ever had a PO line for it, ignoring cancelled/reversed POs.
+    Prefers actual_cost (what was actually invoiced/received) over unit_cost
+    (what was ordered at), same convention as the PO receipt screen.
+    Returns {supplier_id: cost}. A supplier with no PO history for this
+    barcode is simply absent — callers should treat that as "no price on
+    file" rather than defaulting to 0.
+    """
+    with db_conn() as conn:
+        rows = conn.execute("""
+            SELECT po.supplier_id,
+                   COALESCE(NULLIF(l.actual_cost, 0), l.unit_cost) AS cost
+            FROM po_lines l
+            JOIN purchase_orders po ON po.id = l.po_id
+            WHERE l.barcode = ? AND l.is_note = 0
+              AND po.status NOT IN ('CANCELLED', 'REVERSED')
+            ORDER BY po.created_at DESC
+        """, (barcode,)).fetchall()
+        result = {}
+        for r in rows:
+            if r['supplier_id'] not in result:   # first row per supplier = most recent
+                result[r['supplier_id']] = float(r['cost'])
+        return result
+
+
 def get_on_order_units(barcodes) -> dict:
     """
     Units already committed on open (DRAFT/SENT) POs, keyed by barcode.
@@ -154,12 +181,11 @@ def get_on_order_units(barcodes) -> dict:
                        CASE WHEN po.po_type IN ('IO', 'RO')
                             THEN MAX(0.0, pl.ordered_qty - pl.received_qty)
                             ELSE MAX(0.0, pl.ordered_qty - pl.received_qty)
-                                 * COALESCE(p.pack_qty, 1)
+                                 * COALESCE(pl.pack_qty, 1)
                        END
                    ), 0.0) AS on_order_units
             FROM po_lines pl
             JOIN purchase_orders po ON pl.po_id = po.id
-            JOIN products p ON pl.barcode = p.barcode
             WHERE po.status IN ('DRAFT', 'SENT')
               AND pl.barcode IN ({ph})
             GROUP BY pl.barcode
@@ -177,12 +203,11 @@ def get_on_order_total(barcode) -> int:
             "SELECT COALESCE(SUM("
             "  CASE WHEN po.po_type IN ('RO','IO')"
             "       THEN (pl.ordered_qty - pl.received_qty)"
-            "       ELSE (pl.ordered_qty - pl.received_qty) * COALESCE(p.pack_qty, 1)"
+            "       ELSE (pl.ordered_qty - pl.received_qty) * COALESCE(pl.pack_qty, 1)"
             "  END"
             "), 0) "
             "FROM po_lines pl "
             "JOIN purchase_orders po ON po.id = pl.po_id "
-            "JOIN products p ON p.barcode = pl.barcode "
             "WHERE pl.barcode=? AND po.status IN ('DRAFT','SENT','PARTIAL') "
             "AND (pl.ordered_qty - pl.received_qty) > 0",
             (barcode,)
@@ -203,12 +228,11 @@ def get_on_order_detail(barcode) -> list:
             "CAST("
             "  CASE WHEN po.po_type IN ('RO','IO')"
             "       THEN (pl.ordered_qty - pl.received_qty)"
-            "       ELSE (pl.ordered_qty - pl.received_qty) * COALESCE(p.pack_qty, 1)"
+            "       ELSE (pl.ordered_qty - pl.received_qty) * COALESCE(pl.pack_qty, 1)"
             "  END"
             " AS INTEGER) AS qty_units "
             "FROM po_lines pl "
             "JOIN purchase_orders po ON po.id = pl.po_id "
-            "JOIN products p ON p.barcode = pl.barcode "
             "LEFT JOIN suppliers s ON s.id = po.supplier_id "
             "WHERE pl.barcode=? AND po.status IN ('DRAFT','SENT','PARTIAL') "
             "AND (pl.ordered_qty - pl.received_qty) > 0 "

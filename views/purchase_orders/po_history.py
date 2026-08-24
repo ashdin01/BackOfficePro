@@ -12,7 +12,6 @@ from views.purchase_orders.po_history_data import compute_po_history_data
 import config.styles as styles
 from config.constants import PO_CHARGE_TYPES
 import controllers.purchase_order_controller as po_ctrl
-import controllers.product_controller as product_ctrl
 import controllers.supplier_controller as supplier_ctrl
 
 
@@ -503,8 +502,7 @@ class POHistory(QWidget):
         for line in lines:
             received = int(line['received_qty'] or 0)
             if received > 0:
-                product  = product_ctrl.get_product_by_barcode(line['barcode'])
-                pack_qty = int(product['pack_qty']) if product and product['pack_qty'] else 1
+                pack_qty = int(line['pack_qty']) if line['pack_qty'] else 1
                 units    = received * pack_qty
                 summary_lines.append(f"  • {line['description']}: -{units} units")
 
