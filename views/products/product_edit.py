@@ -379,6 +379,17 @@ class ProductEdit(KeyboardMixin, QWidget):
         btn_history.setFixedHeight(30)
         btn_history.clicked.connect(self._view_history)
         act_row.addWidget(btn_history)
+
+        btn_print_label = QPushButton("🖨 Print Label")
+        btn_print_label.setFixedHeight(30)
+        btn_print_label.clicked.connect(lambda: self._print_label(large=False))
+        act_row.addWidget(btn_print_label)
+
+        btn_print_large_label = QPushButton("🖨 Print Large Label")
+        btn_print_large_label.setFixedHeight(30)
+        btn_print_large_label.clicked.connect(lambda: self._print_label(large=True))
+        act_row.addWidget(btn_print_large_label)
+
         act_row.addStretch()
         if not self._read_only:
             save_btn = QPushButton("Save  [Ctrl+S]")
@@ -1253,6 +1264,87 @@ class ProductEdit(KeyboardMixin, QWidget):
         btn_row.addWidget(close_btn)
         lay.addLayout(btn_row)
         QShortcut(QKeySequence("Escape"), dlg, dlg.accept)
+        dlg.exec()
+
+    def _print_label(self, large=False):
+        from utils.label_print import get_configured_printer_name
+
+        if get_configured_printer_name():
+            # A printer is configured — print one label straight to it, no
+            # dialog. Pressing the button again prints another; that's the
+            # whole workflow for printing several labels in a row.
+            from utils.label_print import print_label_direct
+            ok, msg = print_label_direct(
+                barcode=self.barcode,
+                description=self._description,
+                price_inc_gst=self._sell_price,
+                plu=self._plu or None,
+                large=large,
+            )
+            if not ok:
+                show_error(self, "Could not print the label.", RuntimeError(msg))
+            return
+
+        self._print_label_via_pdf(large=large)
+
+    def _print_label_via_pdf(self, large=False):
+        """No printer configured (Settings > Label Printing) — fall back to
+        generating a PDF and opening it for the user to print manually."""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QHBoxLayout
+        from PyQt6.QtGui import QShortcut, QKeySequence
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Print Large Shelf Label" if large else "Print Shelf Label")
+        dlg.setMinimumWidth(280)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        form = QFormLayout()
+        copies_spin = QSpinBox()
+        copies_spin.setMinimum(1)
+        copies_spin.setMaximum(200)
+        copies_spin.setValue(1)
+        form.addRow("Copies", copies_spin)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Cancel  [Esc]")
+        cancel_btn.setFixedHeight(30)
+        print_btn = QPushButton("Print  [Ctrl+S]")
+        print_btn.setFixedHeight(30)
+        print_btn.setStyleSheet(
+            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
+            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
+        )
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(print_btn)
+        layout.addLayout(btn_row)
+
+        def confirm():
+            from utils.label_pdf import generate_label_pdf
+            from utils.open_file import open_with_default_app
+            try:
+                path = generate_label_pdf(
+                    barcode=self.barcode,
+                    description=self._description,
+                    price_inc_gst=self._sell_price,
+                    plu=self._plu or None,
+                    copies=copies_spin.value(),
+                    large=large,
+                )
+                open_with_default_app(path)
+            except Exception as e:
+                show_error(self, "Could not generate the label.", e)
+                return
+            dlg.accept()
+
+        print_btn.clicked.connect(confirm)
+        cancel_btn.clicked.connect(dlg.reject)
+        QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
+        QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
         dlg.exec()
 
     def _view_history(self):
