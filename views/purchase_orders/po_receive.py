@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QObject, QEvent
 from PyQt6.QtGui import QColor
 import math
-from utils.calculations import round_half_up, amount_inc_from_ex, gst_from_inclusive
+from utils.calculations import round_half_up, amount_inc_from_ex, gst_from_inclusive, gst_on_ex
 import controllers.product_controller as product_ctrl
 import controllers.purchase_order_controller as po_ctrl
 from config.constants import (
@@ -688,8 +688,12 @@ class POReceive(BaseView):
             qty        = qty_input.value()
             line_total = qty * cost
 
+        # Round the ex-GST amount first, then derive GST from the rounded
+        # value — matches PO History's calculation (po_history_data.py) so
+        # the two screens never disagree by a cent on the same receipt.
         line_total_ex  = round_half_up(line_total)
-        line_total_inc = round_half_up(amount_inc_from_ex(line_total, tax_rate))
+        line_total_gst = round_half_up(gst_on_ex(line_total_ex, tax_rate))
+        line_total_inc = round_half_up(line_total_ex + line_total_gst)
         self._line_totals[row] = (line_total_ex, line_total_inc)
 
         lt_item.setText(f"${line_total_ex:.2f}")

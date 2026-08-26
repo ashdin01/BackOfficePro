@@ -119,6 +119,37 @@ class TestLoad:
         assert w.supplier_invoice_input.text() == "INV-EXIST"
 
 
+class TestGstRounding:
+    """Regression coverage for the line-GST rounding bug: the ex-GST line
+    amount must be rounded FIRST, with GST derived from that rounded value —
+    not derived by rounding the inclusive amount and subtracting. Otherwise
+    this screen's total can disagree by a cent with PO History's total for
+    the same receipt (see po_history_data.py's identical calculation)."""
+
+    def test_line_gst_rounds_from_rounded_ex_amount(self, qtbot, db_conn, supplier_id, product_barcode):
+        # 10 units @ $0.1014 ex-GST -> raw line total $1.014, rounds to $1.01 ex.
+        # GST on $1.01 @ 10% = $0.101 -> rounds to $0.10.
+        # The old (buggy) method derived GST from round($1.014 * 1.1) - $1.01
+        # = round($1.1154) - $1.01 = $1.12 - $1.01 = $0.11 -- one cent too high.
+        po_id = po_ctrl.create_po(supplier_id, delivery_date="2026-07-01")
+        po_ctrl.update_po_status(po_id, "SENT")
+        po_ctrl.add_po_line(po_id, product_barcode, "Test Product", 10, unit_cost=0.1014)
+
+        from views.purchase_orders.po_receive import POReceive
+        w = POReceive(po_id)
+        qtbot.addWidget(w)
+
+        qty_input = w.table.cellWidget(0, 5)
+        cost_input = w.table.cellWidget(0, 7)
+        cost_input.setValue(0.1014)  # cost_input defaults to product.cost_price, not po_line.unit_cost
+        qty_input.setValue(10)
+
+        ex_val, inc_val = w._line_totals[0]
+        assert ex_val == 1.01
+        assert round(inc_val - ex_val, 2) == 0.10
+        assert "GST: <b>$0.10</b>" in w.total_label.text()
+
+
 # ── _receive_all ──────────────────────────────────────────────────────────────
 
 class TestReceiveAll:

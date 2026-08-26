@@ -64,3 +64,37 @@ class TestUpcomingTasks:
         tasks = tasks_ctrl.get_upcoming_tasks()
         due_dates = [t['due_date'] for t in tasks]
         assert due_dates == sorted(due_dates)
+
+    def test_rsa_expiry_always_leads_regardless_of_due_date(self, test_db, supplier_id):
+        overdue_po = (date.today() - timedelta(days=30)).isoformat()
+        distant_rsa = (date.today() + timedelta(days=20)).isoformat()
+        po_ctrl.create_po(supplier_id, delivery_date=overdue_po)
+        user_ctrl.create("jdoe", "John Doe", "STAFF", "1234",
+                          rsa_cert_number="RSA-1", rsa_expiry_date=distant_rsa)
+
+        tasks = tasks_ctrl.get_upcoming_tasks()
+        assert tasks[0]['kind'] == 'rsa_expiry'
+
+    def test_rsa_expiry_drops_off_when_renewed_beyond_window(self, test_db):
+        expired = (date.today() - timedelta(days=2)).isoformat()
+        user_ctrl.create("jdoe", "John Doe", "STAFF", "1234",
+                          rsa_cert_number="RSA-1", rsa_expiry_date=expired)
+        user_id = next(u['id'] for u in user_ctrl.get_all() if u['username'] == 'jdoe')
+
+        renewed = (date.today() + timedelta(days=365)).isoformat()
+        user_ctrl.update(user_id, "jdoe", "John Doe", "STAFF",
+                          rsa_cert_number="RSA-2", rsa_expiry_date=renewed)
+
+        tasks = tasks_ctrl.get_upcoming_tasks()
+        assert not any(t['kind'] == 'rsa_expiry' for t in tasks)
+
+    def test_rsa_expiry_drops_off_when_user_deactivated(self, test_db):
+        expired = (date.today() - timedelta(days=2)).isoformat()
+        user_ctrl.create("jdoe", "John Doe", "STAFF", "1234",
+                          rsa_cert_number="RSA-1", rsa_expiry_date=expired)
+        user_id = next(u['id'] for u in user_ctrl.get_all() if u['username'] == 'jdoe')
+
+        user_ctrl.set_active(user_id, False)
+
+        tasks = tasks_ctrl.get_upcoming_tasks()
+        assert not any(t['kind'] == 'rsa_expiry' for t in tasks)

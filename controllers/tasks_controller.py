@@ -66,5 +66,7 @@ def get_upcoming_tasks() -> list[dict]:
             "severity": _severity(due_date, today),
         })
 
-    tasks.sort(key=lambda t: t["due_date"])
+    # RSA renewals always lead the list — a lapsed RSA cert is a compliance
+    # risk, so it must outrank PO/order reminders regardless of due date.
+    tasks.sort(key=lambda t: (t["kind"] != "rsa_expiry", t["due_date"]))
     return tasks
