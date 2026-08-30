@@ -113,6 +113,26 @@ class TestReasonCode:
 
         assert stock_adjust_view.adj_type.text() == "OD"
 
+    def test_enter_key_on_table_confirms_selection(self, qtbot):
+        """Regression: Enter used to only work if QAbstractItemView left the
+        key event unhandled for the dialog's keyPressEvent to catch — but
+        QAbstractItemView consumes Return/Enter itself to emit
+        itemActivated, so it never reached the dialog. Confirming must not
+        depend on that propagation."""
+        from PyQt6.QtCore import Qt
+        from views.stock_adjust.stock_adjust_view import _ReasonLookupDialog, REASON_CODES
+
+        dlg = _ReasonLookupDialog()
+        qtbot.addWidget(dlg)
+        dlg.show()
+        QApplication.processEvents()
+
+        dlg.table.setFocus()
+        qtbot.keyClick(dlg.table, Qt.Key.Key_Return)
+
+        assert dlg.result() == QDialog.DialogCode.Accepted
+        assert dlg.selected_code == REASON_CODES[0][0]
+
 
 # ── _apply guard clauses (no thread should start) ──────────────────────────────
 

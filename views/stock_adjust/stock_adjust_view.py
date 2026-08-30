@@ -195,7 +195,13 @@ class _ReasonLookupDialog(QDialog):
             self.table.setItem(r, 0, c)
             self.table.setItem(r, 1, QTableWidgetItem(desc))
         self.table.selectRow(0)
-        self.table.doubleClicked.connect(self._confirm)
+        # itemActivated fires on Return/Enter (and click/double-click, which
+        # is the part that's actually platform-dependent per Qt docs) — this
+        # is the same pattern the search-results table uses below, and it's
+        # the reliable way to catch Enter. QAbstractItemView handles
+        # Return/Enter internally to emit this signal, so a raw keyPressEvent
+        # override on the dialog never sees the key: it doesn't propagate up.
+        self.table.itemActivated.connect(self._confirm)
         layout.addWidget(self.table)
         self.table.setFocus()
 
