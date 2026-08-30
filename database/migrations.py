@@ -2695,6 +2695,52 @@ def migrate_v67(conn):
     conn.commit()
 
 
+def migrate_v68(conn):
+    """Add held_sales/held_sale_lines for the POS suspend/resume-sale feature.
+
+    RetailPOSPro terminals share no local datastore, so held_sales is the
+    cross-terminal source of truth for sales parked mid-transaction — a
+    hold must be visible/resumable from any terminal, not just the one
+    that created it.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS held_sales (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference      TEXT    NOT NULL UNIQUE,
+            terminal_id    TEXT    NOT NULL,
+            operator       TEXT    NOT NULL DEFAULT '',
+            status         TEXT    NOT NULL DEFAULT 'OPEN'
+                               CHECK (status IN ('OPEN','RESUMED','VOIDED')),
+            note           TEXT    NOT NULL DEFAULT '',
+            subtotal       REAL    NOT NULL DEFAULT 0,
+            gst_amount     REAL    NOT NULL DEFAULT 0,
+            total          REAL    NOT NULL DEFAULT 0,
+            item_count     INTEGER NOT NULL DEFAULT 0,
+            created_at     TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+            resumed_at     TEXT,
+            resumed_by_terminal TEXT,
+            voided_at      TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_held_sales_status ON held_sales(status)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS held_sale_lines (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            held_sale_id   INTEGER NOT NULL REFERENCES held_sales(id) ON DELETE CASCADE,
+            barcode        TEXT    NOT NULL,
+            description    TEXT    NOT NULL,
+            qty            REAL    NOT NULL,
+            unit_price     REAL    NOT NULL,
+            tax_rate       REAL    NOT NULL DEFAULT 10.0,
+            price_reason   TEXT    NOT NULL DEFAULT ''
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_held_sale_lines_parent ON held_sale_lines(held_sale_id)")
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('hold_prefix', 'HLD')")
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('hold_next_number', '1')")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2762,4 +2808,5 @@ _MIGRATIONS: dict[int, tuple] = {
     65: (migrate_v65, "supplier_id on stocktake_sessions for by-supplier stocktake scoping"),
     66: (migrate_v66, "po_charges.charge_type (freight/fuel levy/rounding/other) + negative amount allowed for rounding"),
     67: (migrate_v67, "order_prep_include flag on products for the mobile Order Prep app"),
+    68: (migrate_v68, "held_sales, held_sale_lines tables for POS hold/resume"),
 }

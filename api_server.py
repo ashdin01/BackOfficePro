@@ -27,6 +27,7 @@ import controllers.supplier_controller as supplier_ctrl
 import controllers.bundle_controller as bundle_ctrl
 import controllers.sales_report_controller as sales_ctrl
 import controllers.purchase_order_controller as po_ctrl
+import controllers.held_sale_controller as held_sale_ctrl
 
 app = Flask(__name__)
 
@@ -190,7 +191,7 @@ def _rate_limit_reads():
     """/pos/sale has its own tighter limiter; apply the general one to everything else."""
     if request.path in _AUTH_EXEMPT:
         return
-    if request.endpoint == 'record_pos_sale':
+    if request.endpoint in ('record_pos_sale', 'create_held_sale'):
         return
     if not _read_rate_ok(request.remote_addr or ""):
         logging.warning("API read rate limit exceeded [client=%s req=%s]",
@@ -612,6 +613,104 @@ def receive_purchase_order(po_id):
         'status':         final_status,
         'lines_received': len(line_receipts),
     }), 200
+
+
+# ── Held sales (POS suspend/resume) ────────────────────────────────────────────
+
+@app.route("/api/v1/held-sales", methods=["POST"])
+def create_held_sale():
+    """
+    Suspend a mid-transaction POS sale so any terminal can later resume it.
+
+    Body:
+    {
+      "terminal_id": "POS-001", "operator": "ashley", "note": "",
+      "subtotal": 7.27, "gst_amount": 0.73, "total": 7.99,
+      "items": [{"barcode": "...", "description": "...", "qty": 1,
+                 "unit_price": 7.99, "tax_rate": 10.0, "price_reason": ""}]
+    }
+    """
+    if not _sale_rate_ok(request.remote_addr or ""):
+        logging.warning("API /held-sales rate limit exceeded [client=%s req=%s]",
+                        request.remote_addr, getattr(g, 'request_id', '?'))
+        return _err("RATE_LIMIT", "Rate limit exceeded — slow down and retry", 429)
+
+    data        = request.get_json(force=True) or {}
+    terminal_id = str(data.get("terminal_id", "")).strip()
+    operator    = str(data.get("operator", "")).strip()[:64]
+    items       = data.get("items", [])
+    if not terminal_id or not items:
+        return _err("MISSING_FIELD", "terminal_id and items are required", 400)
+
+    try:
+        result = held_sale_ctrl.create_hold(
+            terminal_id, operator, items,
+            subtotal=float(data.get("subtotal", 0)),
+            gst_amount=float(data.get("gst_amount", 0)),
+            total=float(data.get("total", 0)),
+            note=str(data.get("note", ""))[:200],
+        )
+    except Exception:
+        logging.exception("Held sale create failed [req=%s]", getattr(g, 'request_id', '?'))
+        return _err("HOLD_ERROR", "Could not hold sale", 500)
+    return jsonify(result), 201
+
+
+@app.route("/api/v1/held-sales", methods=["GET"])
+def list_held_sales():
+    """Open holds only — for the Resume Sale lookup list. Any terminal may see any hold."""
+    rows = held_sale_ctrl.get_open_holds()
+    return jsonify([{
+        'reference':   r['reference'],
+        'terminal_id': r['terminal_id'],
+        'operator':    r['operator'],
+        'note':        r['note'],
+        'total':       r['total'],
+        'item_count':  r['item_count'],
+        'created_at':  r['created_at'],
+    } for r in rows])
+
+
+@app.route("/api/v1/held-sales/<reference>", methods=["GET"])
+def get_held_sale(reference):
+    """Full basket for a hold — used to preview before resuming, or to reprint a ticket."""
+    held = held_sale_ctrl.get_hold(reference)
+    if not held:
+        return _err("NOT_FOUND", f"Hold '{reference}' not found", 404)
+    return jsonify(held)
+
+
+@app.route("/api/v1/held-sales/<reference>/resume", methods=["POST"])
+def resume_held_sale(reference):
+    """
+    Body: {"terminal_id": "POS-002"}
+
+    Atomically claims the hold (OPEN -> RESUMED) so two terminals can't both
+    resume it. 409 if already resumed/voided, 404 if reference doesn't exist.
+    """
+    data        = request.get_json(silent=True) or {}
+    terminal_id = str(data.get("terminal_id", "")).strip()
+    if not terminal_id:
+        return _err("MISSING_FIELD", "terminal_id is required", 400)
+    try:
+        held = held_sale_ctrl.resume_hold(reference, terminal_id)
+    except LookupError:
+        return _err("NOT_FOUND", f"Hold '{reference}' not found", 404)
+    except ValueError as e:
+        return _err("INVALID_STATUS", str(e), 409)
+    return jsonify(held), 200
+
+
+@app.route("/api/v1/held-sales/<reference>/void", methods=["POST"])
+def void_held_sale(reference):
+    """Cashier cancels a held sale outright (customer never came back)."""
+    try:
+        held_sale_ctrl.void_hold(reference)
+    except LookupError:
+        return _err("NOT_FOUND", f"Hold '{reference}' not found", 404)
+    except ValueError as e:
+        return _err("INVALID_STATUS", str(e), 409)
+    return jsonify({"reference": reference, "status": "VOIDED"}), 200
 
 
 # ── Order Prep (market order preparation) ─────────────────────────────────────

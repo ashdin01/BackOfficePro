@@ -426,6 +426,8 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('currency',            'AUD',            'Currency code'),
     ('po_prefix',           'PO',             'Purchase order number prefix'),
     ('po_next_number',      '1',              'Next PO sequence number'),
+    ('hold_prefix',         'HLD',            'POS held-sale reference prefix'),
+    ('hold_next_number',    '1',              'Next POS held-sale sequence number'),
     ('po_pdf_path',         '',               'Folder path for exported PO PDFs'),
     ('ar_next_invoice_number', '1',           'Next AR invoice sequence number'),
     ('ar_next_credit_number',  '1',           'Next AR credit note sequence number'),
@@ -505,6 +507,40 @@ CREATE TABLE IF NOT EXISTS pos_sales (
     operator    TEXT    NOT NULL DEFAULT '',
     received_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- POS suspend/resume ("hold sale"): RetailPOSPro terminals share no local
+-- datastore, so BackOfficePro is the cross-terminal source of truth for
+-- sales that have been parked mid-transaction and not yet completed.
+CREATE TABLE IF NOT EXISTS held_sales (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference      TEXT    NOT NULL UNIQUE,
+    terminal_id    TEXT    NOT NULL,
+    operator       TEXT    NOT NULL DEFAULT '',
+    status         TEXT    NOT NULL DEFAULT 'OPEN'
+                       CHECK (status IN ('OPEN','RESUMED','VOIDED')),
+    note           TEXT    NOT NULL DEFAULT '',
+    subtotal       REAL    NOT NULL DEFAULT 0,
+    gst_amount     REAL    NOT NULL DEFAULT 0,
+    total          REAL    NOT NULL DEFAULT 0,
+    item_count     INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    resumed_at     TEXT,
+    resumed_by_terminal TEXT,
+    voided_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_held_sales_status ON held_sales(status);
+
+CREATE TABLE IF NOT EXISTS held_sale_lines (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    held_sale_id   INTEGER NOT NULL REFERENCES held_sales(id) ON DELETE CASCADE,
+    barcode        TEXT    NOT NULL,
+    description    TEXT    NOT NULL,
+    qty            REAL    NOT NULL,
+    unit_price     REAL    NOT NULL,
+    tax_rate       REAL    NOT NULL DEFAULT 10.0,
+    price_reason   TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_held_sale_lines_parent ON held_sale_lines(held_sale_id);
 
 -- Tracks every attempted daily ATRIA sales import (including zero-sale days,
 -- e.g. store closed), so the startup catch-up sync knows which of the last
