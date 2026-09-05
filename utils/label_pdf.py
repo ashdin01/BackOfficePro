@@ -16,15 +16,23 @@ bigger one for feature/promo placement. Defaults: standard 3" x 1"
 (76 x 25.4mm), large 3" x 2" (76 x 51mm).
 """
 import os
+import sys
 import tempfile
 import uuid
 
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.graphics.barcode import code128
 
 import models.settings as settings_model
+
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DEFAULT_WIDTH_MM  = 76.0   # 3"
 DEFAULT_HEIGHT_MM = 25.4   # 1"
@@ -32,8 +40,12 @@ DEFAULT_HEIGHT_MM = 25.4   # 1"
 DEFAULT_LARGE_WIDTH_MM  = 76.0   # 3"
 DEFAULT_LARGE_HEIGHT_MM = 51.0   # 2"
 
-_FONT = "Helvetica"
-_FONT_BOLD = "Helvetica-Bold"
+_FONT = "Sora"
+_FONT_BOLD = "Sora-Bold"
+
+_fonts_dir = os.path.join(_BASE_DIR, 'assets', 'fonts', 'Sora')
+pdfmetrics.registerFont(TTFont(_FONT, os.path.join(_fonts_dir, 'Sora-Regular.ttf')))
+pdfmetrics.registerFont(TTFont(_FONT_BOLD, os.path.join(_fonts_dir, 'Sora-Bold.ttf')))
 
 
 def get_label_size_mm(large=False) -> tuple[float, float]:
@@ -96,7 +108,11 @@ def _draw_label(c, page_w, page_h, barcode, description, price_inc_gst, plu):
     desc_size = 8 if small_label else 11
     line_gap  = desc_size * 0.3
     c.setFont(_FONT_BOLD, desc_size)
-    lines = _wrap_text(description or "", _FONT_BOLD, desc_size, desc_col_w, max_lines=2)
+    # Default is 2 lines; allow 4 (one more above, one more below) when the
+    # top band has room for them at this font size — no shrinking to fit.
+    four_line_h = 4 * desc_size + 3 * line_gap
+    desc_max_lines = 4 if top_band_h >= four_line_h else 2
+    lines = _wrap_text(description or "", _FONT_BOLD, desc_size, desc_col_w, max_lines=desc_max_lines)
     block_h = len(lines) * desc_size + max(0, len(lines) - 1) * line_gap
     first_baseline = band_split_y + (top_band_h + block_h) / 2 - desc_size * 0.85
     for i, line in enumerate(lines):
@@ -111,13 +127,19 @@ def _draw_label(c, page_w, page_h, barcode, description, price_inc_gst, plu):
 
     # ── Bottom third: PLU (left) + barcode (right, large & scannable) ─────
     if plu:
-        plu_col_w = (page_w - 2 * margin) * 0.28
+        plu_text = f"PLU {plu}"
+        plu_size = 9 if small_label else 12
+        # Give the PLU column only as much width as its text actually needs
+        # (capped at the old 28% share, for unusually long PLU codes) so the
+        # barcode — which benefits far more from extra width than a short
+        # PLU string does — gets whatever room is left over.
+        plu_col_w_cap = (page_w - 2 * margin) * 0.28
+        plu_col_w = min(plu_col_w_cap, stringWidth(plu_text, _FONT, plu_size))
         barcode_x = margin + plu_col_w + 2 * mm
         barcode_w = page_w - margin - barcode_x
 
-        plu_size = 9 if small_label else 12
         c.setFont(_FONT, plu_size)
-        c.drawString(margin, (bottom_band_h - plu_size * 0.7) / 2, f"PLU {plu}")
+        c.drawString(margin, (bottom_band_h - plu_size * 0.7) / 2, plu_text)
     else:
         # No PLU on this product — give the barcode the full width instead
         # of leaving a blank column, since a bigger symbol scans easier.
@@ -200,15 +222,15 @@ def _draw_fitted_barcode(c, data, x, y, target_width, target_height, small_label
     min_bar_width  = 0.33 * mm
     base_bar_width = 0.5 * mm
     probe = code128.Code128(data, barHeight=bar_h, barWidth=base_bar_width,
-                             humanReadable=True, fontSize=text_size)
-    if probe.width > target_width:
-        scale = target_width / probe.width
-        bar_width = max(min_bar_width, base_bar_width * scale)
-    else:
-        bar_width = base_bar_width
+                             humanReadable=True, fontName=_FONT, fontSize=text_size)
+    # Scale to fill target_width rather than just shrinking when too wide —
+    # a narrower-than-column barcode stretches to use the full column
+    # instead of sitting centered with dead space either side.
+    scale = target_width / probe.width
+    bar_width = max(min_bar_width, base_bar_width * scale)
 
     barcode_obj = code128.Code128(data, barHeight=bar_h, barWidth=bar_width,
-                                   humanReadable=True, fontSize=text_size)
+                                   humanReadable=True, fontName=_FONT, fontSize=text_size)
     offset_x = x + max(0, (target_width - barcode_obj.width) / 2)
     # Bars sit above the reserved text band, i.e. at the top of target_height.
     barcode_obj.drawOn(c, offset_x, y + text_h + text_gap)

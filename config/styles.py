@@ -42,14 +42,16 @@ CLR_BG_DEEP       = "#0d1a24"  # very-dark row bg (grand-total rows in reports)
 
 # ── Widget stylesheet constants ─────────────────────────────────────────────
 
-STYLE_LABEL_MUTED       = f"color: {CLR_MUTED}; font-size: 11px;"
-STYLE_LABEL_MUTED_SMALL = f"color: {CLR_MUTED}; font-size: 10px;"
-STYLE_LABEL_EXTRA_DIM   = f"color: {CLR_EXTRA_DIM}; font-size: 11px;"
-STYLE_LABEL_DIM_BG_NONE = f"color: {CLR_MUTED}; font-size: 11px; background: transparent;"
-STYLE_LABEL_PRIMARY     = f"color: {CLR_TEXT};"
-STYLE_LABEL_SUCCESS     = f"color: {CLR_SUCCESS};"
-STYLE_LABEL_DANGER      = f"color: {CLR_DANGER};"
-STYLE_LABEL_WARNING     = f"color: {CLR_WARNING};"
+FONT_LABEL = "Sora"
+
+STYLE_LABEL_MUTED       = f"color: {CLR_MUTED}; font-size: 11px; font-family: '{FONT_LABEL}';"
+STYLE_LABEL_MUTED_SMALL = f"color: {CLR_MUTED}; font-size: 10px; font-family: '{FONT_LABEL}';"
+STYLE_LABEL_EXTRA_DIM   = f"color: {CLR_EXTRA_DIM}; font-size: 11px; font-family: '{FONT_LABEL}';"
+STYLE_LABEL_DIM_BG_NONE = f"color: {CLR_MUTED}; font-size: 11px; background: transparent; font-family: '{FONT_LABEL}';"
+STYLE_LABEL_PRIMARY     = f"color: {CLR_TEXT}; font-family: '{FONT_LABEL}';"
+STYLE_LABEL_SUCCESS     = f"color: {CLR_SUCCESS}; font-family: '{FONT_LABEL}';"
+STYLE_LABEL_DANGER      = f"color: {CLR_DANGER}; font-family: '{FONT_LABEL}';"
+STYLE_LABEL_WARNING     = f"color: {CLR_WARNING}; font-family: '{FONT_LABEL}';"
 STYLE_SEPARATOR         = f"color: {CLR_BORDER};"
 STYLE_TRANSPARENT       = "background: transparent;"
 STYLE_TRANSPARENT_NOBORDER = "background: transparent; border: none;"

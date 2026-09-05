@@ -438,6 +438,23 @@ def _configure_app_palette(app):
     logging.info("App palette set to dark")
 
 
+def _configure_app_fonts():
+    """Register bundled font files with Qt's font database.
+
+    Loaded from files rather than relying on the font being installed on the
+    machine — the app runs on a Linux dev box and a Windows work PC (see
+    config/styles.py notes on per-machine divergence), neither of which can
+    be assumed to have Sora installed system-wide.
+    """
+    from PyQt6.QtGui import QFontDatabase
+
+    fonts_dir = os.path.join(BASE_DIR, 'assets', 'fonts', 'Sora')
+    for filename in ('Sora-Regular.ttf', 'Sora-Bold.ttf'):
+        path = os.path.join(fonts_dir, filename)
+        if QFontDatabase.addApplicationFont(path) == -1:
+            logging.warning("Failed to load bundled font: %s", path)
+
+
 def _configure_app_style(app):
     """Force a consistent cross-platform Qt style.
 
@@ -473,6 +490,7 @@ def main():
     logging.info("main() called")
     from PyQt6.QtWidgets import QApplication
     app = QApplication(sys.argv)
+    _configure_app_fonts()
     _configure_app_style(app)
     _configure_app_icon(app)
 
