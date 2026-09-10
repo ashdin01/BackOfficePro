@@ -11,6 +11,7 @@ from datetime import date, datetime
 import models.supplier as supplier_model
 import models.purchase_order as po_model
 import models.user as user_model
+import models.product_batches as product_batches_model
 
 
 def _parse_date(value):
@@ -63,6 +64,19 @@ def get_upcoming_tasks() -> list[dict]:
             "subtitle": f"RSA certificate expires {due_date.strftime('%d %b %Y')}",
             "due_date": due_date,
             "ref_id": user["id"],
+            "severity": _severity(due_date, today),
+        })
+
+    for batch in product_batches_model.get_expiring_batches():
+        due_date = _parse_date(batch["use_by_date"])
+        tasks.append({
+            "kind": "batch_expiry",
+            "icon": "⏳",
+            "title": batch["description"],
+            "subtitle": f"Use by {due_date.strftime('%d %b %Y')} — "
+                        f"{batch['qty_received']:g} received {batch['received_date']}",
+            "due_date": due_date,
+            "ref_id": batch["id"],
             "severity": _severity(due_date, today),
         })
 

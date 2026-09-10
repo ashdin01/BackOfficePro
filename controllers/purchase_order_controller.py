@@ -77,8 +77,8 @@ def receive_po_atomic(po_id, po_number, line_receipts, final_status,
                             charges=charges)
 
 
-def get_all_pos(status=None, archived=False) -> list[dict]:
-    return po_model.get_all(status=status, archived=archived)
+def get_all_pos(status=None, archived=False, supplier_search=None) -> list[dict]:
+    return po_model.get_all(status=status, archived=archived, supplier_search=supplier_search)
 
 
 def get_upcoming_deliveries(days=None) -> list[dict]:

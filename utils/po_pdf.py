@@ -155,7 +155,6 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     po_details = [
         f'<b>Status:</b> {po["status"]}',
         f'<b>Date:</b> {datetime.today().strftime("%d/%m/%Y")}',
-        f'<b>Delivery:</b> {po["delivery_date"] or "TBC"}',
     ]
     if po["payment_terms"]:
         po_details.append(f'<b>Terms:</b> {po["payment_terms"]}')

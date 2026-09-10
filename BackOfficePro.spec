@@ -29,6 +29,23 @@ a = Analysis(
         'reportlab.lib.enums',
         'reportlab.platypus',
         'reportlab.pdfgen',
+        # Barcode widgets (used by utils/label_pdf.py for product labels).
+        # reportlab.graphics.barcode.widgets builds its submodule imports as
+        # a string and exec()'s it (see _BCW in that file), so PyInstaller's
+        # static analysis can't see them — every barcode symbology it can
+        # produce must be hidden-imported explicitly or the exe crashes with
+        # ModuleNotFoundError the first time a label is printed.
+        'reportlab.graphics',
+        'reportlab.graphics.shapes',
+        'reportlab.graphics.barcode',
+        'reportlab.graphics.barcode.widgets',
+        'reportlab.graphics.barcode.common',
+        'reportlab.graphics.barcode.code128',
+        'reportlab.graphics.barcode.code93',
+        'reportlab.graphics.barcode.code39',
+        'reportlab.graphics.barcode.usps',
+        'reportlab.graphics.barcode.usps4s',
+        'reportlab.graphics.barcode.ecc200datamatrix',
         # Microsoft auth (email backup)
         'msal',
         'msal.application',

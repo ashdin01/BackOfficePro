@@ -2741,6 +2741,32 @@ def migrate_v68(conn):
     conn.commit()
 
 
+def migrate_v69(conn):
+    """Add product_batches table for per-batch use-by/best-before tracking.
+
+    Deliberately alerting-only: records what came in and when it's due, but
+    does not track FEFO depletion against stock_on_hand's single aggregate
+    quantity — a batch is dismissed manually (resolved=1) once handled.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS product_batches (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            barcode         TEXT    NOT NULL,
+            po_line_id      INTEGER,
+            received_date   DATE    NOT NULL,
+            use_by_date     DATE    NOT NULL,
+            qty_received    REAL    NOT NULL,
+            resolved        INTEGER NOT NULL DEFAULT 0 CHECK (resolved IN (0,1)),
+            created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (barcode)    REFERENCES products(barcode)  ON DELETE CASCADE,
+            FOREIGN KEY (po_line_id) REFERENCES po_lines(id)       ON DELETE SET NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_batches_use_by  ON product_batches(use_by_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_batches_barcode ON product_batches(barcode)")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2809,4 +2835,5 @@ _MIGRATIONS: dict[int, tuple] = {
     66: (migrate_v66, "po_charges.charge_type (freight/fuel levy/rounding/other) + negative amount allowed for rounding"),
     67: (migrate_v67, "order_prep_include flag on products for the mobile Order Prep app"),
     68: (migrate_v68, "held_sales, held_sale_lines tables for POS hold/resume"),
+    69: (migrate_v69, "product_batches table for per-batch use-by/best-before tracking"),
 }

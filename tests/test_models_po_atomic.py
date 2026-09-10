@@ -244,6 +244,34 @@ class TestReceiveAtomic:
 
         assert po_model.get_by_id(po_id)["status"] == "RECEIVED"
 
+    def test_receive_atomic_with_use_by_date_creates_batch(
+        self, test_db, po_id, product_barcode
+    ):
+        import models.product_batches as batches_model
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        receipt = self._make_receipt(line["id"], product_barcode, qty_units=60)
+        receipt["use_by_date"] = "2026-12-25"
+
+        po_ctrl.receive_po_atomic(po_id, po["po_number"], [receipt], "RECEIVED")
+
+        [batch] = batches_model.get_expiring_batches(days=9999)
+        assert batch["barcode"] == product_barcode
+        assert batch["use_by_date"] == "2026-12-25"
+        assert batch["qty_received"] == 60
+
+    def test_receive_atomic_without_use_by_date_creates_no_batch(
+        self, test_db, po_id, product_barcode
+    ):
+        import models.product_batches as batches_model
+        po = po_model.get_by_id(po_id)
+        line = self._setup_line(po_id, product_barcode)
+        receipt = self._make_receipt(line["id"], product_barcode, qty_units=60)
+
+        po_ctrl.receive_po_atomic(po_id, po["po_number"], [receipt], "RECEIVED")
+
+        assert batches_model.get_expiring_batches(days=9999) == []
+
 
 # ── TestValidateCharges ───────────────────────────────────────────────────────
 

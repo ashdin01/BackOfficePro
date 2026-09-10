@@ -1,10 +1,10 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit,
+    QSpinBox, QDoubleSpinBox, QCheckBox, QLineEdit, QDateEdit,
     QDialog, QFrame
 )
-from PyQt6.QtCore import Qt, QObject, QEvent
+from PyQt6.QtCore import Qt, QObject, QEvent, QDate
 from PyQt6.QtGui import QColor
 import math
 from utils.calculations import round_half_up, amount_inc_from_ex, gst_from_inclusive, gst_on_ex
@@ -310,18 +310,19 @@ class POReceive(BaseView):
         self.table.setStyleSheet(
             f"QTableWidget {{ alternate-background-color: {styles.CLR_BG_PANEL}; background: {styles.CLR_BG}; }}"
         )
-        # 10 columns — weight column (col 6) is hidden for non-weighed items
-        self.table.setColumnCount(12)
+        # 13 columns — weight column (col 6) is hidden for non-weighed items
+        self.table.setColumnCount(13)
         self.table.setHorizontalHeaderLabels([
             "Barcode", "Description", "Pack Size",
             "Ordered (Units)", "Already Received",
             "Receiving Now",
             "Weight (kg)",       # col 6 — weighed items only
-            "Cost ($/kg or unit) ex. GST", "Cost inc. Tax", "Promo?", "Line Total ex. GST", "Line Total inc. Tax"
+            "Cost ($/kg or unit) ex. GST", "Cost inc. Tax", "Promo?", "Line Total ex. GST", "Line Total inc. Tax",
+            "Use By",
         ])
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for ci in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+        for ci in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
             hdr.setSectionResizeMode(ci, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(0, 120)
         self.table.setColumnWidth(2,  80)
@@ -334,6 +335,7 @@ class POReceive(BaseView):
         self.table.setColumnWidth(9,  70)   # Promo
         self.table.setColumnWidth(10, 150)  # Line Total ex. GST
         self.table.setColumnWidth(11, 120)  # Line Total inc. Tax
+        self.table.setColumnWidth(12, 160)  # Use By
         layout.addWidget(self.table)
 
         self.total_label = QLabel()
@@ -498,7 +500,8 @@ class POReceive(BaseView):
 
         # Tuple stored per row:
         # (line, pack_qty, qty_input, cost_input, promo_checkbox, lt_item,
-        #  remaining_units, is_variable_weight, weight_input)
+        #  remaining_units, is_variable_weight, weight_input, tax_rate,
+        #  lt_inc_item, use_by_checkbox, use_by_date_edit)
         self._inputs = []
         # row -> (line_total_ex, line_total_inc) as canonical floats, kept in
         # sync by _refresh_line — avoids re-parsing formatted "$1,234.00"
@@ -600,6 +603,24 @@ class POReceive(BaseView):
             self.table.setCellWidget(r, 9, cb_container)
             promo_cb.stateChanged.connect(lambda _, row=r: self._refresh_promo_colour(row))
 
+            # ── Col 12: Use-By date — optional, per batch ────────────
+            use_by_cb = QCheckBox("Track")
+            use_by_cb.setToolTip(
+                "Record this receipt as a batch with a use-by/best-before date\n"
+                "for the Home screen's expiry warnings."
+            )
+            use_by_date_edit = QDateEdit()
+            use_by_date_edit.setCalendarPopup(True)
+            use_by_date_edit.setDate(QDate.currentDate())
+            use_by_date_edit.setEnabled(False)
+            use_by_cb.toggled.connect(use_by_date_edit.setEnabled)
+            use_by_container = QWidget()
+            use_by_lay = QHBoxLayout(use_by_container)
+            use_by_lay.addWidget(use_by_cb)
+            use_by_lay.addWidget(use_by_date_edit)
+            use_by_lay.setContentsMargins(4, 0, 4, 0)
+            self.table.setCellWidget(r, 12, use_by_container)
+
             # ── Col 10: Line Total ex. GST — read only ─────────────────
             lt_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(r, 10, lt_item)
@@ -647,7 +668,8 @@ class POReceive(BaseView):
 
             self._inputs.append((
                 line, pack_qty, qty_input, cost_input, promo_cb,
-                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item,
+                use_by_cb, use_by_date_edit
             ))
             self._refresh_line(r)
 
@@ -677,7 +699,8 @@ class POReceive(BaseView):
         if row >= len(self._inputs):
             return
         line, pack_qty, qty_input, cost_input, promo_cb, lt_item, \
-            remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = self._inputs[row]
+            remaining_units, is_vw, weight_input, tax_rate, lt_inc_item, \
+            use_by_cb, use_by_date_edit = self._inputs[row]
 
         cost = cost_input.value()
 
@@ -712,7 +735,8 @@ class POReceive(BaseView):
         """Give the Receiving Now spinner a warning border when the entered
         qty exceeds what's still remaining on the order (over-receiving)."""
         line, pack_qty, qty_input, cost_input, promo_cb, lt_item, \
-            remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = self._inputs[row]
+            remaining_units, is_vw, weight_input, tax_rate, lt_inc_item, \
+            use_by_cb, use_by_date_edit = self._inputs[row]
 
         if qty_input.value() > remaining_units:
             over = qty_input.value() - remaining_units
@@ -772,7 +796,8 @@ class POReceive(BaseView):
         """Fill all Receiving Now spinners with full remaining quantities."""
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
-                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item, \
+                use_by_cb, use_by_date_edit = entry
             qty_input.setValue(remaining_units)
 
     def _confirm(self):
@@ -826,7 +851,8 @@ class POReceive(BaseView):
         over_received_lines = []
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
-                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item, \
+                use_by_cb, use_by_date_edit = entry
             qty = qty_input.value()
             if qty > remaining_units:
                 over_received_lines.append((line['description'], qty, remaining_units, qty - remaining_units))
@@ -853,7 +879,8 @@ class POReceive(BaseView):
         partial_carton_lines = []
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
-                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item, \
+                use_by_cb, use_by_date_edit = entry
             qty = qty_input.value()
             if qty > 0 and pack_qty > 1 and qty % pack_qty != 0:
                 cartons = max(1, math.ceil(qty / pack_qty))
@@ -896,7 +923,8 @@ class POReceive(BaseView):
 
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
-                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item = entry
+                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item, \
+                use_by_cb, use_by_date_edit = entry
 
             qty      = qty_input.value()
             cost     = cost_input.value()
@@ -918,6 +946,8 @@ class POReceive(BaseView):
                     'unit_cost':           cost if cost > 0 else None,
                     'is_promo':            is_promo,
                     'qty_units':           qty,
+                    'use_by_date':         (use_by_date_edit.date().toPyDate().isoformat()
+                                             if use_by_cb.isChecked() else None),
                 })
 
         status = PO_STATUS_RECEIVED if all_received else PO_STATUS_PARTIAL

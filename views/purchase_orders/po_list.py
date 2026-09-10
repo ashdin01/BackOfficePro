@@ -9,6 +9,7 @@ from config.constants import PO_STATUSES
 import config.styles as styles
 import controllers.purchase_order_controller as po_ctrl
 from views.base_view import BaseView
+from views.widgets.search_bar import SearchBar
 
 
 class POList(BaseView):
@@ -98,7 +99,11 @@ class POList(BaseView):
         self.archive_filter.addItem("Cancelled",    "CANCELLED")
         self.archive_filter.currentIndexChanged.connect(self._load_archive)
         arch_filter_row.addWidget(self.archive_filter)
-        arch_filter_row.addStretch()
+
+        self.archive_search = SearchBar("Search by supplier…", interval=300)
+        self.archive_search.search_changed.connect(self._load_archive)
+        arch_filter_row.addWidget(self.archive_search, 1)
+
         archive_layout.addLayout(arch_filter_row)
 
         self.archive_table = self._make_table()
@@ -228,10 +233,11 @@ class POList(BaseView):
 
     def _load_archive(self):
         status = self.archive_filter.currentData()
+        supplier_search = self.archive_search.text().strip()
         if status:
-            rows = po_ctrl.get_all_pos(status=status)
+            rows = po_ctrl.get_all_pos(status=status, supplier_search=supplier_search)
         else:
-            rows = po_ctrl.get_all_pos(archived=True)
+            rows = po_ctrl.get_all_pos(archived=True, supplier_search=supplier_search)
         self._populate_table(self.archive_table, rows)
 
         status_colours = {

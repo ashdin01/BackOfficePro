@@ -108,6 +108,38 @@ class TestListPOs:
         archived = get_all_pos(archived=True)
         assert any(p['id'] == po_id for p in archived)
 
+    def test_supplier_search_filters_archived_by_name(self, test_db, db_conn, supplier_id):
+        other_id = db_conn.execute(
+            "INSERT INTO suppliers (code, name) VALUES ('FORDS', 'Fords Dairy')"
+        ).lastrowid
+        db_conn.commit()
+        po_id = _make_po(supplier_id)
+        other_po_id = _make_po(other_id)
+        cancel_po(po_id)
+        cancel_po(other_po_id)
+
+        results = get_all_pos(archived=True, supplier_search='fords')
+
+        ids = {p['id'] for p in results}
+        assert other_po_id in ids
+        assert po_id not in ids
+
+    def test_supplier_search_combines_with_status(self, test_db, db_conn, supplier_id):
+        other_id = db_conn.execute(
+            "INSERT INTO suppliers (code, name) VALUES ('FORDS', 'Fords Dairy')"
+        ).lastrowid
+        db_conn.commit()
+        po_id = _make_po(supplier_id)
+        other_po_id = _make_po(other_id)
+        update_po_status(po_id, 'SENT')
+        update_po_status(other_po_id, 'SENT')
+
+        results = get_all_pos(status='SENT', supplier_search='fords')
+
+        ids = {p['id'] for p in results}
+        assert other_po_id in ids
+        assert po_id not in ids
+
     def test_get_po_by_id_returns_none_for_missing(self, test_db, supplier_id):
         assert get_po_by_id(999999) is None
 

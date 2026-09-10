@@ -6,9 +6,14 @@ import models.sales_daily as sales_daily_model
 import models.plu_barcode_map as plu_map_model
 import models.product_queries as product_queries_model
 import models.supplier as supplier_model
+import models.stock_movements as stock_movements_model
 
 SAFETY_DAYS  = 1
 SALES_WINDOW = 28
+
+# Write-offs with this reason count as consumption for demand forecasting —
+# staff meals/feeding still represents real product movement out the door.
+CI_WRITEOFF_TYPE = 'CI - Consumed Instore (Staff feeding/meals)'
 
 
 def get_reorder_recommendations(supplier_id) -> list[dict]:
@@ -114,7 +119,7 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
     against the cover requirement.
 
     Algorithm per product:
-        avg_daily         = total units sold (last SALES_WINDOW days) / SALES_WINDOW
+        avg_daily         = (units sold + CI write-offs, last SALES_WINDOW days) / SALES_WINDOW
         cover_days        = days_between(next_delivery, following_delivery) + SAFETY_DAYS
         projected_stock   = effective_stock - avg_daily * days_ahead  (sold down before arrival)
         needed_units      = max(0, avg_daily * cover_days - projected_stock)
@@ -153,10 +158,16 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
             if qty is not None:
                 plu_sales[plu] = plu_sales.get(plu, 0.0) + float(qty)
 
+    ci_writeoffs = stock_movements_model.get_writeoff_qty_for_barcodes_range(
+        barcodes, window_start, today, CI_WRITEOFF_TYPE
+    )
+
     recs = []
     for p in products:
         plu             = barcode_to_plu.get(p['barcode'])
-        total_sales     = plu_sales.get(plu, 0.0) if plu else 0.0
+        plu_qty         = plu_sales.get(plu, 0.0) if plu else 0.0
+        ci_qty          = ci_writeoffs.get(p['barcode'], 0.0)
+        total_sales     = plu_qty + ci_qty
         avg_daily       = total_sales / SALES_WINDOW
         on_hand         = float(p['on_hand'])
         on_order        = milk_on_order.get(p['barcode'], 0.0)
@@ -182,7 +193,7 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
             'days_to_delivery': days_ahead,
             'next_delivery':    next_delivery,
             'following_delivery': following_delivery,
-            'has_sales_data':   plu is not None and total_sales > 0,
+            'has_sales_data':   total_sales > 0,
         })
     return recs
 

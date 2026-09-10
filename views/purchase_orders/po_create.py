@@ -1,10 +1,10 @@
 from PyQt6.QtWidgets import (
-    QWidget, QFormLayout, QDateEdit,
+    QWidget, QFormLayout,
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox,
     QTextEdit, QLabel, QLineEdit, QDialog, QTableWidget,
     QTableWidgetItem, QHeaderView, QFrame
 )
-from PyQt6.QtCore import QDate, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from utils.error_dialog import show_error
 from utils.text_search import matches_all_words
@@ -272,18 +272,12 @@ class POCreate(QWidget):
         supplier_container = QWidget()
         supplier_container.setLayout(supplier_row)
 
-        self.delivery_date = QDateEdit()
-        self.delivery_date.setCalendarPopup(True)
-        self.delivery_date.setDate(QDate.currentDate().addDays(7))
-        self.delivery_date.setDisplayFormat("dd/MM/yyyy")
-
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(70)
         self.notes.setPlaceholderText("Optional notes...")
 
         form.addRow(sep)
         form.addRow("Supplier *", supplier_container)
-        form.addRow("Expected Date", self.delivery_date)
         form.addRow("Notes", self.notes)
         layout.addLayout(form)
 
@@ -411,7 +405,6 @@ class POCreate(QWidget):
         try:
             po_id = po_ctrl.create_po(
                 supplier_id=self._supplier_id,
-                delivery_date=self.delivery_date.date().toString("yyyy-MM-dd"),
                 notes=self.notes.toPlainText(),
                 po_type=po_type,
             )

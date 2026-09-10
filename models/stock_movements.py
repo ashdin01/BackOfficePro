@@ -22,6 +22,28 @@ def get_by_barcode(barcode, move_type=None):
         return conn.execute(sql, params).fetchall()
 
 
+def get_writeoff_qty_for_barcodes_range(barcodes, date_from, date_to, movement_type):
+    """
+    Bulk sum of write-off quantities (as positive units) for barcodes with the
+    given movement_type, created between date_from and date_to (inclusive).
+    Returns {barcode: float} — barcodes with no matching movements are omitted.
+    """
+    if not barcodes:
+        return {}
+    with db_conn() as conn:
+        ph = ','.join('?' * len(barcodes))
+        rows = conn.execute(f"""
+            SELECT barcode, COALESCE(SUM(-quantity), 0) AS total
+            FROM stock_movements
+            WHERE barcode IN ({ph})
+              AND movement_type = ?
+              AND quantity < 0
+              AND DATE(created_at) BETWEEN ? AND ?
+            GROUP BY barcode
+        """, barcodes + [movement_type, str(date_from), str(date_to)]).fetchall()
+        return {r['barcode']: float(r['total']) for r in rows}
+
+
 def get_recent_adjustments(limit=100):
     """
     Return the most recent non-sale/receipt stock movements across all products.

@@ -193,6 +193,22 @@ CREATE TABLE IF NOT EXISTS po_lines (
 CREATE INDEX IF NOT EXISTS idx_po_lines_po_id   ON po_lines(po_id);
 CREATE INDEX IF NOT EXISTS idx_po_lines_barcode ON po_lines(barcode);
 
+CREATE TABLE IF NOT EXISTS product_batches (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    barcode         TEXT    NOT NULL,
+    po_line_id      INTEGER,
+    received_date   DATE    NOT NULL,
+    use_by_date     DATE    NOT NULL,
+    qty_received    REAL    NOT NULL,
+    resolved        INTEGER NOT NULL DEFAULT 0 CHECK (resolved IN (0,1)),
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (barcode)    REFERENCES products(barcode)  ON DELETE CASCADE,
+    FOREIGN KEY (po_line_id) REFERENCES po_lines(id)       ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_batches_use_by  ON product_batches(use_by_date);
+CREATE INDEX IF NOT EXISTS idx_batches_barcode ON product_batches(barcode);
+
 CREATE TABLE IF NOT EXISTS barcode_aliases (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     alias_barcode  TEXT    NOT NULL UNIQUE,

@@ -1,10 +1,11 @@
 """Tests for controllers/tasks_controller.py — the home-screen 'Upcoming
-Tasks' aggregator that merges recurring order reminders, PO deliveries, and
-RSA cert expiries into one sorted list."""
+Tasks' aggregator that merges recurring order reminders, PO deliveries,
+RSA cert expiries, and use-by batch alerts into one sorted list."""
 from datetime import date, timedelta
 import controllers.tasks_controller as tasks_ctrl
 import controllers.purchase_order_controller as po_ctrl
 import controllers.user_controller as user_ctrl
+import models.product_batches as batches_model
 
 
 class TestUpcomingTasks:
@@ -52,6 +53,24 @@ class TestUpcomingTasks:
 
         tasks = tasks_ctrl.get_upcoming_tasks()
         assert tasks[0]['severity'] == 'overdue'
+
+    def test_batch_expiry_included(self, test_db, product_barcode):
+        soon = (date.today() + timedelta(days=2)).isoformat()
+        batch_id = batches_model.add_batch(product_barcode, soon, 12)
+
+        tasks = tasks_ctrl.get_upcoming_tasks()
+        batch_tasks = [t for t in tasks if t['kind'] == 'batch_expiry']
+        assert len(batch_tasks) == 1
+        assert batch_tasks[0]['ref_id'] == batch_id
+        assert batch_tasks[0]['severity'] == 'soon'
+
+    def test_batch_expiry_drops_off_once_resolved(self, test_db, product_barcode):
+        soon = (date.today() + timedelta(days=2)).isoformat()
+        batch_id = batches_model.add_batch(product_barcode, soon, 12)
+        batches_model.mark_resolved(batch_id)
+
+        tasks = tasks_ctrl.get_upcoming_tasks()
+        assert not any(t['kind'] == 'batch_expiry' for t in tasks)
 
     def test_sorted_by_due_date_ascending_across_kinds(self, test_db, supplier_id):
         far_po = (date.today() + timedelta(days=20)).isoformat()

@@ -11,6 +11,8 @@ from controllers.po_reorder_controller import (
     auto_populate_po_lines,
     reload_reorder_recommendations,
     lookup_product_for_po,
+    get_milk_order_recommendations,
+    CI_WRITEOFF_TYPE,
 )
 from controllers.purchase_order_controller import (
     create_po,
@@ -717,3 +719,72 @@ class TestMilkForecastPath:
         ).fetchall()
         assert len(lines) == 1
         assert 'no sales history' not in (lines[0]['notes'] or '').lower()
+
+    def test_milk_recs_include_ci_writeoffs_in_avg_daily(
+        self, test_db, db_conn, supplier_id
+    ):
+        """CI (Consumed Instore) write-offs count as consumption, same as POS sales."""
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        db_conn.execute("""
+            INSERT INTO stock_movements (barcode, movement_type, quantity)
+            VALUES (?, ?, -28)
+        """, (bc, CI_WRITEOFF_TYPE))
+        db_conn.commit()
+
+        recs = get_milk_order_recommendations(supplier_id)
+
+        assert len(recs) == 1
+        assert recs[0]['avg_daily'] == 1.0
+        assert recs[0]['has_sales_data'] is True
+
+    def test_milk_recs_ignore_writeoffs_with_other_reason_codes(
+        self, test_db, db_conn, supplier_id
+    ):
+        """Only CI write-offs feed the forecast — e.g. OD (out of date) stays excluded."""
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        db_conn.execute("""
+            INSERT INTO stock_movements (barcode, movement_type, quantity)
+            VALUES (?, 'OD - Out of Date', -28)
+        """, (bc,))
+        db_conn.commit()
+
+        recs = get_milk_order_recommendations(supplier_id)
+
+        assert len(recs) == 1
+        assert recs[0]['avg_daily'] == 0.0
+        assert recs[0]['has_sales_data'] is False
+
+    def test_milk_recs_combine_pos_sales_and_ci_writeoffs(
+        self, test_db, db_conn, supplier_id
+    ):
+        import datetime
+        db_conn.execute(
+            "UPDATE suppliers SET delivery_days='MON,TUE,WED,THU,FRI,SAT,SUN' WHERE id=?",
+            (supplier_id,)
+        )
+        bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        db_conn.execute(
+            "INSERT INTO plu_barcode_map (plu, barcode) VALUES (12345, ?)", (bc,)
+        )
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES (?, '12345', 'Full Cream Milk 2L', 14, 42.00)
+        """, (datetime.date.today().isoformat(),))
+        db_conn.execute("""
+            INSERT INTO stock_movements (barcode, movement_type, quantity)
+            VALUES (?, ?, -14)
+        """, (bc, CI_WRITEOFF_TYPE))
+        db_conn.commit()
+
+        recs = get_milk_order_recommendations(supplier_id)
+
+        assert len(recs) == 1
+        assert recs[0]['avg_daily'] == 1.0

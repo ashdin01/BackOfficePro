@@ -97,6 +97,46 @@ class TestLoad:
         assert po_list_view.archive_table.rowCount() == 1
         assert po_list_view.archive_table.item(0, 3).text() == 'CANCELLED'
 
+    def test_archive_search_filters_by_supplier_name(
+        self, po_list_view, db_conn, supplier_id
+    ):
+        other_id = db_conn.execute(
+            "INSERT INTO suppliers (code, name) VALUES ('FORDS', 'Fords Dairy')"
+        ).lastrowid
+        db_conn.commit()
+        _make_po(supplier_id, status='RECEIVED')
+        _make_po(other_id, status='RECEIVED')
+
+        po_list_view.archive_search.setText('fords')
+        po_list_view._load_archive()
+
+        assert po_list_view.archive_table.rowCount() == 1
+        assert po_list_view.archive_table.item(0, 2).text() == 'Fords Dairy'
+
+    def test_archive_search_combines_with_status_filter(
+        self, po_list_view, db_conn, supplier_id
+    ):
+        other_id = db_conn.execute(
+            "INSERT INTO suppliers (code, name) VALUES ('FORDS', 'Fords Dairy')"
+        ).lastrowid
+        db_conn.commit()
+        _make_po(supplier_id, status='RECEIVED')
+        _make_po(other_id, status='CANCELLED')
+
+        idx = po_list_view.archive_filter.findData('CANCELLED')
+        po_list_view.archive_filter.setCurrentIndex(idx)
+        po_list_view.archive_search.setText('fords')
+        po_list_view._load_archive()
+
+        assert po_list_view.archive_table.rowCount() == 1
+        assert po_list_view.archive_table.item(0, 2).text() == 'Fords Dairy'
+
+    def test_archive_search_no_match_returns_empty(self, po_list_view, supplier_id):
+        _make_po(supplier_id, status='RECEIVED')
+        po_list_view.archive_search.setText('nonexistent supplier xyz')
+        po_list_view._load_archive()
+        assert po_list_view.archive_table.rowCount() == 0
+
 
 # ── Selection helpers ─────────────────────────────────────────────────────────
 

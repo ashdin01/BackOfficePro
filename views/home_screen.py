@@ -340,6 +340,7 @@ class HomeScreen(QWidget):
         "order_due":   ("New PO →",  "_new_po_for"),
         "po_delivery": ("View PO →", "_view_po"),
         "rsa_expiry":  ("Renew →",   "_renew_rsa"),
+        "batch_expiry": ("Handled ✓", "_mark_batch_handled"),
     }
 
     def _refresh_upcoming_tasks(self):
@@ -424,6 +425,11 @@ class HomeScreen(QWidget):
         from views.settings.settings_users import UsersScreen
         self._users_win = UsersScreen()
         self._users_win.show()
+
+    def _mark_batch_handled(self, batch_id):
+        import models.product_batches as batches_model
+        batches_model.mark_resolved(batch_id)
+        self._refresh_upcoming_tasks()
 
     def _refresh(self):
         try:

@@ -51,40 +51,36 @@ def _next_po_number(conn):
     return f"{prefix['value']}-{number:05d}"
 
 
-def get_all(status=None, archived=False):
+def get_all(status=None, archived=False, supplier_search=None):
     """
-    archived=False → active POs (DRAFT, SENT, PARTIAL)
-    archived=True  → archived POs (RECEIVED, CANCELLED, REVERSED)
-    status=x       → filter by specific status
+    archived=False   → active POs (DRAFT, SENT, PARTIAL)
+    archived=True    → archived POs (RECEIVED, CANCELLED, REVERSED, CLOSED)
+    status=x         → filter by specific status (takes precedence over archived)
+    supplier_search  → case-insensitive substring match against supplier name
     """
     with db_conn() as conn:
         if status:
-            query = """
-                SELECT po.*, s.name as supplier_name
-                FROM purchase_orders po
-                JOIN suppliers s ON po.supplier_id = s.id
-                WHERE po.status = ?
-                ORDER BY po.created_at DESC
-            """
-            return conn.execute(query, (status,)).fetchall()
+            where  = ["po.status = ?"]
+            params = [status]
         elif archived:
-            query = """
-                SELECT po.*, s.name as supplier_name
-                FROM purchase_orders po
-                JOIN suppliers s ON po.supplier_id = s.id
-                WHERE po.status IN ('RECEIVED', 'CANCELLED', 'REVERSED', 'CLOSED')
-                ORDER BY po.created_at DESC
-            """
-            return conn.execute(query).fetchall()
+            where  = ["po.status IN ('RECEIVED', 'CANCELLED', 'REVERSED', 'CLOSED')"]
+            params = []
         else:
-            query = """
-                SELECT po.*, s.name as supplier_name
-                FROM purchase_orders po
-                JOIN suppliers s ON po.supplier_id = s.id
-                WHERE po.status IN ('DRAFT', 'SENT', 'PARTIAL')
-                ORDER BY po.created_at DESC
-            """
-            return conn.execute(query).fetchall()
+            where  = ["po.status IN ('DRAFT', 'SENT', 'PARTIAL')"]
+            params = []
+
+        if supplier_search:
+            where.append("s.name LIKE ?")
+            params.append(f"%{supplier_search}%")
+
+        query = f"""
+            SELECT po.*, s.name as supplier_name
+            FROM purchase_orders po
+            JOIN suppliers s ON po.supplier_id = s.id
+            WHERE {' AND '.join(where)}
+            ORDER BY po.created_at DESC
+        """
+        return conn.execute(query, params).fetchall()
 
 
 def get_upcoming_deliveries(days=None):
@@ -398,6 +394,13 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
                     (barcode, movement_type, quantity, reference, notes, created_by, source)
                 VALUES (?, ?, ?, ?, '', ?, ?)
             """, (r['barcode'], MOVE_RECEIPT, r['qty_units'], po_number, who, src))
+
+            if r.get('use_by_date'):
+                conn.execute("""
+                    INSERT INTO product_batches
+                        (barcode, po_line_id, received_date, use_by_date, qty_received)
+                    VALUES (?, ?, date('now'), ?, ?)
+                """, (r['barcode'], r['line_id'], r['use_by_date'], r['qty_units']))
 
             if r['unit_cost'] and r['unit_cost'] > 0 and not r['is_promo']:
                 if old_cost is not None and float(old_cost) != float(r['unit_cost']):

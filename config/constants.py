@@ -92,3 +92,9 @@ GP_BAD_THRESHOLD  = 15.0   # below this  → bad  (red); between → warning (or
 # How far ahead the home-screen "Upcoming Tasks" panel looks — shared by RSA
 # cert expiry (1 month notice) and approaching PO deliveries, so both stay in sync.
 UPCOMING_TASKS_WINDOW_DAYS = 30
+
+# Separate, much shorter window for use-by/best-before batch alerts — fresh
+# lines (produce, dairy, deli) turn over in days, not weeks, so a 30-day
+# heads-up would flag half the fresh department constantly and bury the
+# genuinely urgent ones.
+BATCH_EXPIRY_WARNING_DAYS = 5
