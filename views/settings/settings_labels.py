@@ -1,4 +1,5 @@
-"""Label Printing settings — shelf-edge label page sizes.
+"""Label Printing settings — shelf-edge label page sizes, plus the Edikio
+card printer.
 
 Once a printer is selected below, Product Detail's "Print Label" / "Print
 Large Label" buttons print straight to it — no dialog, no viewer — via
@@ -9,6 +10,12 @@ a PDF and opening it with the system default viewer for manual printing
 Two independent sizes are configurable — "standard" and "large" — matching
 the two print buttons on Product Detail, since a shop commonly wants a
 small everyday label plus a bigger one for feature/promo placement.
+
+The Edikio card printer is a separate physical device with its own printer
+setting (edikio_printer_name) — a shop running both prints shelf labels on
+one and credit-card-size price cards on the other. Its size isn't
+configurable: a credit card is a fixed physical standard (85.6 x 54mm), not
+a label roll that varies by what stock is loaded.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -23,7 +30,8 @@ from utils.error_dialog import show_error
 from utils.label_pdf import (
     DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM,
     DEFAULT_LARGE_WIDTH_MM, DEFAULT_LARGE_HEIGHT_MM,
-    generate_label_pdf,
+    EDIKIO_WIDTH_MM, EDIKIO_HEIGHT_MM,
+    generate_label_pdf, generate_edikio_label_pdf,
 )
 
 
@@ -71,7 +79,7 @@ class LabelPrintingScreen(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         outer.addWidget(title)
 
-        printer_group = QGroupBox("Printer")
+        printer_group = QGroupBox("Shelf Label Printer")
         printer_group.setStyleSheet("QGroupBox { font-weight: bold; }")
         printer_form = QFormLayout(printer_group)
         printer_form.setContentsMargins(16, 16, 16, 16)
@@ -84,9 +92,9 @@ class LabelPrintingScreen(QWidget):
         printer_row.addWidget(self.printer_combo)
         btn_refresh = QPushButton("Refresh")
         btn_refresh.setFixedHeight(26)
-        btn_refresh.clicked.connect(self._refresh_printers)
+        btn_refresh.clicked.connect(lambda: self._refresh_printer_combo(self.printer_combo))
         printer_row.addWidget(btn_refresh)
-        printer_form.addRow("Label Printer", printer_row)
+        printer_form.addRow("Printer", printer_row)
 
         printer_note = QLabel(
             "Selected: Product Detail's print buttons print straight to this printer, "
@@ -117,6 +125,43 @@ class LabelPrintingScreen(QWidget):
         btn_large_test.clicked.connect(lambda: self._print_test_label(large=True))
         outer.addWidget(large_group)
 
+        edikio_group = QGroupBox('Edikio Card Printer  (Product Detail → "Print Edikio Card")')
+        edikio_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        edikio_form = QFormLayout(edikio_group)
+        edikio_form.setContentsMargins(16, 16, 16, 16)
+        edikio_form.setSpacing(10)
+        edikio_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        edikio_printer_row = QHBoxLayout()
+        self.edikio_printer_combo = QComboBox()
+        self.edikio_printer_combo.setMinimumWidth(260)
+        edikio_printer_row.addWidget(self.edikio_printer_combo)
+        btn_edikio_refresh = QPushButton("Refresh")
+        btn_edikio_refresh.setFixedHeight(26)
+        btn_edikio_refresh.clicked.connect(
+            lambda: self._refresh_printer_combo(self.edikio_printer_combo))
+        edikio_printer_row.addWidget(btn_edikio_refresh)
+        edikio_form.addRow("Printer", edikio_printer_row)
+
+        edikio_form.addRow(
+            "Card Size", QLabel(f"{EDIKIO_WIDTH_MM:g} × {EDIKIO_HEIGHT_MM:g} mm  (fixed)"))
+
+        edikio_note = QLabel(
+            "A separate physical printer from the shelf label one above. Standard credit-card "
+            "size (ISO/IEC 7810 ID-1) — not configurable, since it's a fixed card stock rather "
+            "than a label roll."
+        )
+        edikio_note.setStyleSheet("color: grey; font-size: 8pt;")
+        edikio_note.setWordWrap(True)
+        edikio_form.addRow("", edikio_note)
+
+        btn_edikio_test = QPushButton("Print Test Card")
+        btn_edikio_test.setFixedHeight(28)
+        btn_edikio_test.clicked.connect(self._print_test_edikio_card)
+        edikio_form.addRow("", btn_edikio_test)
+
+        outer.addWidget(edikio_group)
+
         outer.addStretch()
 
         btn_row = QHBoxLayout()
@@ -145,16 +190,16 @@ class LabelPrintingScreen(QWidget):
 
     _NONE_PRINTER = "-- None (open a PDF to print manually) --"
 
-    def _refresh_printers(self):
+    def _refresh_printer_combo(self, combo):
         from utils.label_print import get_printer_names
-        current = self.printer_combo.currentText()
-        self.printer_combo.blockSignals(True)
-        self.printer_combo.clear()
-        self.printer_combo.addItem(self._NONE_PRINTER)
-        self.printer_combo.addItems(get_printer_names())
-        idx = self.printer_combo.findText(current)
-        self.printer_combo.setCurrentIndex(idx if idx >= 0 else 0)
-        self.printer_combo.blockSignals(False)
+        current = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(self._NONE_PRINTER)
+        combo.addItems(get_printer_names())
+        idx = combo.findText(current)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+        combo.blockSignals(False)
 
     def _load(self):
         settings = settings_ctrl.get_all_settings()
@@ -165,15 +210,26 @@ class LabelPrintingScreen(QWidget):
         self.large_height_spin.setValue(
             float(settings.get('label_large_height_mm') or DEFAULT_LARGE_HEIGHT_MM))
 
-        self._refresh_printers()
+        self._refresh_printer_combo(self.printer_combo)
         saved_printer = settings.get('label_printer_name') or ''
         if saved_printer:
             idx = self.printer_combo.findText(saved_printer)
             if idx >= 0:
                 self.printer_combo.setCurrentIndex(idx)
 
+        self._refresh_printer_combo(self.edikio_printer_combo)
+        saved_edikio_printer = settings.get('edikio_printer_name') or ''
+        if saved_edikio_printer:
+            idx = self.edikio_printer_combo.findText(saved_edikio_printer)
+            if idx >= 0:
+                self.edikio_printer_combo.setCurrentIndex(idx)
+
     def _selected_printer_name(self) -> str:
         text = self.printer_combo.currentText()
+        return '' if text == self._NONE_PRINTER else text
+
+    def _selected_edikio_printer_name(self) -> str:
+        text = self.edikio_printer_combo.currentText()
         return '' if text == self._NONE_PRINTER else text
 
     def _save(self):
@@ -182,6 +238,7 @@ class LabelPrintingScreen(QWidget):
         settings_ctrl.set_setting('label_large_width_mm', str(self.large_width_spin.value()))
         settings_ctrl.set_setting('label_large_height_mm', str(self.large_height_spin.value()))
         settings_ctrl.set_setting('label_printer_name', self._selected_printer_name())
+        settings_ctrl.set_setting('edikio_printer_name', self._selected_edikio_printer_name())
         QMessageBox.information(self, "Saved", "Label Printing settings saved successfully.")
         self.close()
 
@@ -211,3 +268,26 @@ class LabelPrintingScreen(QWidget):
             open_with_default_app(path)
         except Exception as e:
             show_error(self, "Could not generate the test label.", e)
+
+    def _print_test_edikio_card(self):
+        settings_ctrl.set_setting('edikio_printer_name', self._selected_edikio_printer_name())
+
+        test_kwargs = dict(
+            barcode="9300000000001",
+            description="Sample Product Description",
+            price_inc_gst=9.99,
+            unit="EA",
+        )
+        if self._selected_edikio_printer_name():
+            from utils.label_print import print_edikio_label_direct
+            ok, msg = print_edikio_label_direct(**test_kwargs)
+            if not ok:
+                show_error(self, "Could not print the test card.", RuntimeError(msg))
+            return
+
+        try:
+            from utils.open_file import open_with_default_app
+            path = generate_edikio_label_pdf(**test_kwargs, copies=1)
+            open_with_default_app(path)
+        except Exception as e:
+            show_error(self, "Could not generate the test card.", e)

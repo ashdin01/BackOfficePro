@@ -110,15 +110,28 @@ def adjust(barcode, quantity, movement_type, reference='', notes='', created_by=
         conn.commit()
 
 
-def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items: list) -> bool:
+def get_sale_header(reference: str):
+    """Return the pos_sales ledger row for a receipt reference, or None."""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM pos_sales WHERE reference = ?", (reference,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items: list,
+                            payment_method: str = '', subtotal: float | None = None,
+                            gst_amount: float | None = None, total: float | None = None) -> bool:
     """
     Record a POS sale atomically.
 
-    items: list of {barcode (alias-resolved), qty, line_total, description}
+    items: list of {barcode (alias-resolved), qty, line_total, description,
+    unit_price, tax_rate}
 
     For each item, resolves selling-unit membership, reduces SOH, writes a
-    SALE movement, looks up the PLU, and upserts into sales_daily.
-    All writes share one connection and commit together.
+    SALE movement (with unit_price/line_total/tax_rate so the sale can later
+    be viewed as a full receipt), looks up the PLU, and upserts into
+    sales_daily. All writes share one connection and commit together.
 
     Returns True if the sale was newly recorded, False if this reference was
     already processed (idempotent — caller should respond 200, not 4xx/5xx).
@@ -137,10 +150,11 @@ def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items:
         # If the POS retries after a network timeout, this INSERT fails and
         # we return False without touching SOH or movements a second time.
         try:
-            conn.execute(
-                "INSERT INTO pos_sales (reference, sale_date, operator) VALUES (?, ?, ?)",
-                (reference, sale_date, operator),
-            )
+            conn.execute("""
+                INSERT INTO pos_sales
+                    (reference, sale_date, operator, payment_method, subtotal, gst_amount, total)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (reference, sale_date, operator, payment_method, subtotal, gst_amount, total))
         except sqlite3.IntegrityError:
             conn.rollback()
             return False
@@ -150,6 +164,8 @@ def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items:
             qty         = float(item['qty'])
             line_total  = float(item['line_total'])
             description = item.get('description', '')
+            unit_price  = item.get('unit_price')
+            tax_rate    = item.get('tax_rate')
 
             if not barcode or qty <= 0:
                 continue
@@ -176,9 +192,11 @@ def record_pos_sale_atomic(reference: str, sale_date: str, operator: str, items:
 
             conn.execute("""
                 INSERT INTO stock_movements
-                    (barcode, movement_type, quantity, reference, notes, created_by, source)
-                VALUES (?, 'SALE', ?, ?, ?, ?, ?)
-            """, (stock_barcode, -stock_qty, reference, description, operator, src))
+                    (barcode, movement_type, quantity, reference, notes, created_by, source,
+                     unit_price, line_total, tax_rate)
+                VALUES (?, 'SALE', ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (stock_barcode, -stock_qty, reference, description, operator, src,
+                  unit_price, line_total, tax_rate))
 
             clamp_negative_soh(conn, stock_barcode, reference=reference, created_by=operator)
 

@@ -4,7 +4,8 @@ import pytest
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from utils.label_pdf import (
-    generate_label_pdf, get_label_size_mm, _wrap_text,
+    generate_label_pdf, get_label_size_mm, _wrap_text, _fit_wrapped_lines,
+    generate_edikio_label_pdf, EDIKIO_WIDTH_MM, EDIKIO_HEIGHT_MM,
     DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM,
     DEFAULT_LARGE_WIDTH_MM, DEFAULT_LARGE_HEIGHT_MM,
 )
@@ -134,3 +135,127 @@ class TestGenerateLabelPdf:
         # each call actually rendered at its own configured height, not the same one twice.
         assert b'0 215.4331 72 ]'  in open(standard_path, 'rb').read()
         assert b'0 215.4331 144.5669 ]' in open(large_path, 'rb').read()
+
+
+class TestFitWrappedLines:
+    """The Edikio description's auto-fit: largest font size at which the
+    wrapped (<= max_lines) block still fits max_height. Width is never a
+    failure mode — _wrap_text always fits by wrapping/truncating."""
+
+    def test_short_text_uses_max_size(self):
+        lines, size = _fit_wrapped_lines("Milk", "Helvetica-Bold", max_width=500,
+                                          max_height=500, max_lines=3, max_size=24, min_size=10)
+        assert lines == ["Milk"]
+        assert size == 24
+
+    def test_shrinks_to_fit_short_max_height(self):
+        lines, size = _fit_wrapped_lines(
+            "A Very Long Product Description That Wraps To Several Lines Of Text",
+            "Helvetica-Bold", max_width=300, max_height=40, max_lines=3,
+            max_size=24, min_size=10,
+        )
+        assert size < 24
+        assert len(lines) <= 3
+
+    def test_never_shrinks_below_min_size(self):
+        lines, size = _fit_wrapped_lines(
+            "An Extremely Long Product Description That Absolutely Will Not Fit No Matter What",
+            "Helvetica-Bold", max_width=100, max_height=5, max_lines=3,
+            max_size=24, min_size=10,
+        )
+        assert size == 10
+        assert len(lines) <= 3
+
+    def test_respects_max_lines(self):
+        lines, size = _fit_wrapped_lines(
+            "A Very Long Product Description That Wraps To Several Lines Of Text Regardless",
+            "Helvetica-Bold", max_width=60, max_height=1000, max_lines=3,
+            max_size=24, min_size=10,
+        )
+        assert len(lines) <= 3
+
+
+class TestGenerateEdikioLabelPdf:
+    """Card printer output: description (centred, up to 3 lines), sell
+    price, and unit — no barcode/PLU. Fixed at credit-card dimensions (not
+    configurable in Settings, unlike standard/large)."""
+
+    def test_creates_file_at_given_path(self, test_db, tmp_path):
+        path = str(tmp_path / "card.pdf")
+        result = generate_edikio_label_pdf(
+            "9335388000092", "Nu Spring Water 600ml", 3.50, unit="EA", path=path
+        )
+        assert result == path
+        assert os.path.exists(path)
+        assert os.path.getsize(path) > 0
+
+    def test_defaults_to_temp_file_when_no_path_given(self, test_db):
+        path = generate_edikio_label_pdf("9335388000092", "Nu Spring Water 600ml", 3.50)
+        try:
+            assert os.path.exists(path)
+        finally:
+            os.remove(path)
+
+    def test_multiple_copies_produce_multi_page_pdf(self, test_db, tmp_path):
+        path = str(tmp_path / "card.pdf")
+        generate_edikio_label_pdf(
+            "9335388000092", "Nu Spring Water 600ml", 3.50, copies=3, path=path)
+        content = open(path, 'rb').read()
+        assert content.count(b'/Type /Page\n') == 3
+
+    def test_works_with_no_unit(self, test_db, tmp_path):
+        path = str(tmp_path / "card.pdf")
+        generate_edikio_label_pdf(
+            "9335388000092", "Nu Spring Water 600ml", 3.50, unit=None, path=path)
+        assert os.path.exists(path)
+
+    def test_size_is_fixed_credit_card_and_ignores_settings(self, test_db, tmp_path):
+        """Unlike standard/large, Edikio size must NOT be affected by the
+        label_width_mm/label_height_mm settings — it's a fixed physical card,
+        not a configurable label roll."""
+        settings_model.set_setting('label_width_mm', '999')
+        settings_model.set_setting('label_height_mm', '999')
+        assert (EDIKIO_WIDTH_MM, EDIKIO_HEIGHT_MM) == (85.6, 54.0)
+        path = str(tmp_path / "card.pdf")
+        generate_edikio_label_pdf(
+            "9335388000092", "Nu Spring Water 600ml", 3.50, path=path)
+        assert os.path.exists(path)
+
+    def test_long_description_still_renders_within_three_lines(self, test_db, tmp_path):
+        path = str(tmp_path / "card.pdf")
+        generate_edikio_label_pdf(
+            "9335388000092",
+            "A Very Long Product Description That Would Need Far More Than Three Lines "
+            "Of Text To Show In Full On A Small Credit Card Sized Price Tag",
+            12.99, unit="EA", path=path,
+        )
+        assert os.path.exists(path)
+
+    def test_does_not_call_barcode_drawing(self, test_db, tmp_path, monkeypatch):
+        """Regression: Edikio cards must never render a barcode/PLU, unlike
+        the shelf-label layout."""
+        import utils.label_pdf as label_pdf_mod
+        called = []
+        monkeypatch.setattr(
+            label_pdf_mod, "_draw_fitted_barcode",
+            lambda *a, **k: called.append(True),
+        )
+        path = str(tmp_path / "card.pdf")
+        generate_edikio_label_pdf(
+            "9335388000092", "Nu Spring Water 600ml", 3.50, unit="EA", path=path)
+        assert called == []
+
+    def test_draw_edikio_card_called_with_description_price_unit_not_barcode(
+        self, test_db, tmp_path, monkeypatch
+    ):
+        import utils.label_pdf as label_pdf_mod
+        calls = []
+        monkeypatch.setattr(
+            label_pdf_mod, "_draw_edikio_card",
+            lambda c, page_w, page_h, description, price_inc_gst, unit:
+                calls.append((description, price_inc_gst, unit)),
+        )
+        path = str(tmp_path / "card.pdf")
+        generate_edikio_label_pdf(
+            "9335388000092", "Nu Spring Water 600ml", 3.50, unit="KG", path=path)
+        assert calls == [("Nu Spring Water 600ml", 3.50, "KG")]

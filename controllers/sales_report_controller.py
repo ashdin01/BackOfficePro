@@ -101,10 +101,13 @@ def get_sales_by_group(d_from: str, d_to: str, group=None) -> list:
     return sales_daily_model.get_by_group(d_from, d_to, group)
 
 
-def record_pos_sale(reference: str, sale_date: str, operator: str, items: list) -> bool:
+def record_pos_sale(reference: str, sale_date: str, operator: str, items: list,
+                     payment_method: str = '', subtotal: float | None = None,
+                     gst_amount: float | None = None, total: float | None = None) -> bool:
     """
     Record a completed POS sale.
-    items: list of {barcode, qty, line_total, description} — barcodes are resolved here.
+    items: list of {barcode, qty, line_total, description, unit_price, tax_rate}
+    — barcodes are resolved here.
     Returns True if newly recorded, False if this reference was already processed.
     Raises on invalid input or DB error.
     """
@@ -122,6 +125,12 @@ def record_pos_sale(reference: str, sale_date: str, operator: str, items: list) 
             'qty':         qty,
             'line_total':  float(item.get('line_total', 0)),
             'description': str(item.get('description', '')).strip(),
+            'unit_price':  item.get('unit_price'),
+            'tax_rate':    item.get('tax_rate'),
         })
 
-    return soh_model.record_pos_sale_atomic(reference, sale_date, operator, resolved_items)
+    return soh_model.record_pos_sale_atomic(
+        reference, sale_date, operator, resolved_items,
+        payment_method=payment_method, subtotal=subtotal,
+        gst_amount=gst_amount, total=total,
+    )

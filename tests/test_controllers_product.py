@@ -249,6 +249,54 @@ class TestProductControllerWrappers:
         result = product_ctrl.get_recent_adjustments()
         assert isinstance(result, list)
 
+    def test_get_transaction_unknown_reference_returns_none(self, test_db):
+        assert product_ctrl.get_transaction('NO-SUCH-REF') is None
+
+    def test_get_transaction_returns_header_and_all_items(
+        self, test_db, product_barcode, dept_id, supplier_id
+    ):
+        import controllers.sales_report_controller as sr_ctrl
+        second_bc = '9300000077771'
+        product_ctrl.add_product(
+            second_bc, 'Second Item', dept_id,
+            supplier_id=supplier_id, sell_price=3.0, cost_price=1.0, tax_rate=10.0,
+        )
+        sr_ctrl.record_pos_sale(
+            'RCPT-TXN-001', '2026-05-01', 'ash',
+            [
+                {'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+                 'description': 'Half Cantaloupe', 'unit_price': 2.50, 'tax_rate': 0.0},
+                {'barcode': second_bc, 'qty': 2, 'line_total': 6.00,
+                 'description': 'Second Item', 'unit_price': 3.00, 'tax_rate': 10.0},
+            ],
+            payment_method='CASH', subtotal=8.50, gst_amount=0.55, total=9.05,
+        )
+        txn = product_ctrl.get_transaction('RCPT-TXN-001')
+        assert txn is not None
+        assert txn['operator'] == 'ash'
+        assert txn['payment_method'] == 'CASH'
+        assert txn['total'] == pytest.approx(9.05)
+        assert len(txn['items']) == 2
+        descriptions = {item['notes'] for item in txn['items']}
+        assert descriptions == {'Half Cantaloupe', 'Second Item'}
+
+    def test_generate_receipt_pdf_unknown_reference_raises(self, test_db):
+        with pytest.raises(ValueError):
+            product_ctrl.generate_receipt_pdf('NO-SUCH-REF')
+
+    def test_generate_receipt_pdf_writes_file(self, test_db, product_barcode, tmp_path):
+        import controllers.sales_report_controller as sr_ctrl
+        sr_ctrl.record_pos_sale(
+            'RCPT-PDF-001', '2026-05-01', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe', 'unit_price': 2.50}],
+            payment_method='CASH', subtotal=2.50, gst_amount=0.0, total=2.50,
+        )
+        out = str(tmp_path / "receipt.pdf")
+        path = product_ctrl.generate_receipt_pdf('RCPT-PDF-001', output_path=out)
+        assert path == out
+        assert os.path.exists(path)
+
     def test_calculate_gross_profit(self, test_db):
         result = product_ctrl.calculate_gross_profit(10.0, 5.0, 0.0)
         assert result == pytest.approx(50.0)

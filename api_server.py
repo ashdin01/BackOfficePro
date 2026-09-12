@@ -411,11 +411,21 @@ def record_pos_sale():
                         request.remote_addr, getattr(g, 'request_id', '?'))
         return _err("RATE_LIMIT", "Rate limit exceeded — slow down and retry", 429)
 
-    data      = request.get_json(force=True) or {}
-    reference = str(data.get("reference", "")).strip()
-    sale_date = str(data.get("sale_date",  "")).strip()
-    operator  = str(data.get("operator",   "POS")).strip()[:64]
-    items     = data.get("items", [])
+    def _opt_float(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    data           = request.get_json(force=True) or {}
+    reference      = str(data.get("reference", "")).strip()
+    sale_date      = str(data.get("sale_date",  "")).strip()
+    operator       = str(data.get("operator",   "POS")).strip()[:64]
+    items          = data.get("items", [])
+    payment_method = str(data.get("payment_method", "")).strip()[:32]
+    subtotal       = _opt_float(data.get("subtotal"))
+    gst_amount     = _opt_float(data.get("gst_amount"))
+    total          = _opt_float(data.get("total"))
 
     if not reference or not sale_date or not items:
         return _err("MISSING_FIELD", "reference, sale_date, and items are required", 400)
@@ -426,7 +436,9 @@ def record_pos_sale():
         return _err("INVALID_DATE", "sale_date must be YYYY-MM-DD", 400)
 
     try:
-        is_new = sales_ctrl.record_pos_sale(reference, sale_date, operator, items)
+        is_new = sales_ctrl.record_pos_sale(reference, sale_date, operator, items,
+                                             payment_method=payment_method, subtotal=subtotal,
+                                             gst_amount=gst_amount, total=total)
         return jsonify({"ok": True, "reference": reference, "duplicate": not is_new}), 200
     except sqlite3.OperationalError as e:
         if "locked" in str(e).lower():

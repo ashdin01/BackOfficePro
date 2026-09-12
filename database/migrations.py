@@ -2767,6 +2767,34 @@ def migrate_v69(conn):
     conn.commit()
 
 
+def migrate_v70(conn):
+    """Add receipt-level and line-level pricing so a POS sale can be viewed as
+    a full transaction later, not just individual per-product movements.
+
+    RetailPOSPro already POSTs payment_method/subtotal/gst_amount/total and
+    per-line unit_price/line_total/tax_rate to /api/v1/pos/sale, but
+    record_pos_sale_atomic() was only ever persisting reference/sale_date/
+    operator and quantity — the rest was received and discarded. This adds
+    columns to keep it so "Movement History" can show a full receipt.
+    """
+    _add_column(conn, "ALTER TABLE pos_sales ADD COLUMN payment_method TEXT")
+    _add_column(conn, "ALTER TABLE pos_sales ADD COLUMN subtotal REAL")
+    _add_column(conn, "ALTER TABLE pos_sales ADD COLUMN gst_amount REAL")
+    _add_column(conn, "ALTER TABLE pos_sales ADD COLUMN total REAL")
+    _add_column(conn, "ALTER TABLE stock_movements ADD COLUMN unit_price REAL")
+    _add_column(conn, "ALTER TABLE stock_movements ADD COLUMN line_total REAL")
+    _add_column(conn, "ALTER TABLE stock_movements ADD COLUMN tax_rate REAL")
+    conn.commit()
+
+
+def migrate_v71(conn):
+    """Add carton_sku to products — a per-product carton/case identifier,
+    edited directly on Product Detail (distinct from the per-supplier SKU
+    tracked in Manage Suppliers)."""
+    _add_column(conn, "ALTER TABLE products ADD COLUMN carton_sku TEXT DEFAULT ''")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2836,4 +2864,6 @@ _MIGRATIONS: dict[int, tuple] = {
     67: (migrate_v67, "order_prep_include flag on products for the mobile Order Prep app"),
     68: (migrate_v68, "held_sales, held_sale_lines tables for POS hold/resume"),
     69: (migrate_v69, "product_batches table for per-batch use-by/best-before tracking"),
+    70: (migrate_v70, "pos_sales totals + stock_movements unit_price/line_total/tax_rate for full-transaction view"),
+    71: (migrate_v71, "carton_sku column on products"),
 }

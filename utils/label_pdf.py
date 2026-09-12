@@ -14,6 +14,19 @@ Two independently-configurable label sizes are supported — "standard" and
 Printing), since a shop commonly uses a small everyday shelf label plus a
 bigger one for feature/promo placement. Defaults: standard 3" x 1"
 (76 x 25.4mm), large 3" x 2" (76 x 51mm).
+
+A third, fixed size is also supported for Evolis Edikio card printers:
+standard credit-card size (ISO/IEC 7810 ID-1, 85.6 x 54mm — same as a PVC
+gift/loyalty card). Unlike standard/large this isn't configurable in
+Settings — a credit card is a fixed physical size, not a label roll that
+varies by what stock is loaded — so generate_edikio_label_pdf() always uses
+EDIKIO_WIDTH_MM/EDIKIO_HEIGHT_MM.
+
+Edikio's content and layout are deliberately different from the shelf
+label's _draw_label() — no barcode or PLU (Edikio cards are a price/feature
+card, not something scanned at the register), just description (centred,
+up to 3 lines), sell price inc GST, and unit — so it has its own
+_draw_edikio_card().
 """
 import os
 import sys
@@ -39,6 +52,9 @@ DEFAULT_HEIGHT_MM = 25.4   # 1"
 
 DEFAULT_LARGE_WIDTH_MM  = 76.0   # 3"
 DEFAULT_LARGE_HEIGHT_MM = 51.0   # 2"
+
+EDIKIO_WIDTH_MM  = 85.6   # ISO/IEC 7810 ID-1 (standard credit card)
+EDIKIO_HEIGHT_MM = 54.0
 
 _FONT = "Sora"
 _FONT_BOLD = "Sora-Bold"
@@ -80,6 +96,32 @@ def generate_label_pdf(barcode, description, price_inc_gst, plu=None,
     c = pdfcanvas.Canvas(path, pagesize=(page_w, page_h))
     for _ in range(max(1, int(copies))):
         _draw_label(c, page_w, page_h, barcode, description, price_inc_gst, plu)
+        c.showPage()
+    c.save()
+    return path
+
+
+def generate_edikio_label_pdf(barcode, description, price_inc_gst, unit='EA',
+                               copies=1, path=None) -> str:
+    """
+    Build an Edikio price card PDF: description (centred, up to 3 lines),
+    sell price inc GST, and unit — no barcode or PLU (see _draw_edikio_card).
+    Sized to a standard credit card (EDIKIO_WIDTH_MM x EDIKIO_HEIGHT_MM),
+    not configurable — see module docstring. `barcode` isn't printed; it's
+    only used to name the temp file when path isn't given, so the file is
+    traceable back to the product that generated it.
+    """
+    page_w, page_h = EDIKIO_WIDTH_MM * mm, EDIKIO_HEIGHT_MM * mm
+
+    if path is None:
+        safe_barcode = barcode or "label"
+        path = os.path.join(
+            tempfile.gettempdir(), f"edikio_{safe_barcode}_{uuid.uuid4().hex[:8]}.pdf"
+        )
+
+    c = pdfcanvas.Canvas(path, pagesize=(page_w, page_h))
+    for _ in range(max(1, int(copies))):
+        _draw_edikio_card(c, page_w, page_h, description, price_inc_gst, unit)
         c.showPage()
     c.save()
     return path
@@ -153,6 +195,72 @@ def _draw_label(c, page_w, page_h, barcode, description, price_inc_gst, plu):
                                   bottom_band_h - margin * 0.5, small_label=small_label)
         finally:
             c.restoreState()
+
+
+def _draw_edikio_card(c, page_w, page_h, description, price_inc_gst, unit):
+    """
+    Two zones, no barcode/PLU:
+      - Main area: description, centred both ways, up to 3 lines, as large
+        as fits (see _fit_wrapped_lines) — there's no barcode/PLU column
+        competing for space any more, so it gets the full card width.
+      - Bottom-right: sell price inc GST at its usual prominent size,
+        immediately followed by the unit at half that size, sharing the
+        same baseline (e.g. "$6.75 KG").
+    """
+    margin = 3 * mm
+    price_band_h = page_h * 0.3
+    desc_band_h  = page_h - price_band_h
+    desc_max_w   = page_w - 2 * margin
+
+    lines, desc_size = _fit_wrapped_lines(
+        description or "", _FONT_BOLD, desc_max_w, desc_band_h * 0.9,
+        max_lines=3, max_size=24, min_size=10,
+    )
+    line_gap = desc_size * 0.3
+    block_h = len(lines) * desc_size + max(0, len(lines) - 1) * line_gap
+    first_baseline = price_band_h + (desc_band_h + block_h) / 2 - desc_size * 0.85
+    c.setFont(_FONT_BOLD, desc_size)
+    for i, line in enumerate(lines):
+        line_w = stringWidth(line, _FONT_BOLD, desc_size)
+        c.drawString((page_w - line_w) / 2, first_baseline - i * (desc_size + line_gap), line)
+
+    price_text = f"${price_inc_gst:.2f}"
+    price_size = _fit_font_size(price_text, _FONT_BOLD, (page_w - 2 * margin) * 0.75,
+                                 price_band_h * 0.85, max_size=price_band_h, min_size=12)
+    unit_text = f" {unit}" if unit else ""
+    unit_size = price_size / 2
+
+    price_w = stringWidth(price_text, _FONT_BOLD, price_size)
+    unit_w  = stringWidth(unit_text, _FONT, unit_size) if unit_text else 0
+    price_x = page_w - margin - price_w - unit_w
+    unit_x  = price_x + price_w
+    price_y = (price_band_h - price_size * 0.72) / 2
+
+    c.setFont(_FONT_BOLD, price_size)
+    c.drawString(price_x, price_y, price_text)
+    if unit_text:
+        c.setFont(_FONT, unit_size)
+        c.drawString(unit_x, price_y, unit_text)
+
+
+def _fit_wrapped_lines(text, font, max_width, max_height, max_lines=3,
+                        max_size=24, min_size=10) -> tuple[list[str], float]:
+    """Largest font size (points) at which `text`, greedily word-wrapped
+    into at most max_lines via _wrap_text, fits within max_height — i.e.
+    the multi-line analogue of _fit_font_size. Width is never a failure
+    mode: _wrap_text always fits within max_width by wrapping/truncating,
+    only the resulting block's height is checked here. Falls back to
+    min_size (still wrapped/truncated to max_lines) if even that overflows.
+    """
+    size = max_size
+    while size > min_size:
+        lines = _wrap_text(text, font, size, max_width, max_lines=max_lines)
+        line_gap = size * 0.3
+        block_h = len(lines) * size + max(0, len(lines) - 1) * line_gap
+        if block_h <= max_height:
+            return lines, size
+        size -= 1
+    return _wrap_text(text, font, min_size, max_width, max_lines=max_lines), min_size
 
 
 def _wrap_text(text, font, size, max_width, max_lines=2) -> list[str]:

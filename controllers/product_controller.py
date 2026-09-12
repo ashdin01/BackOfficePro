@@ -62,7 +62,7 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
                  group_id, department_id, supplier_id, unit, sell_price, cost_price,
                  tax_rate, reorder_point, reorder_max, variable_weight, expected,
                  active, auto_reorder, product_suppliers, online_available=0,
-                 online_notes='', order_prep_include=0) -> None:
+                 online_notes='', order_prep_include=0, carton_sku='') -> None:
     """
     Save product fields and supplier associations.
     Raises ValueError on validation failure.
@@ -101,6 +101,7 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
         online_available=online_available,
         online_notes=online_notes,
         order_prep_include=order_prep_include,
+        carton_sku=carton_sku,
     )
     ps_model.save_for_barcode(barcode, product_suppliers)
 
@@ -157,6 +158,45 @@ def get_movement_history(barcode, move_type=None) -> list[dict]:
     Optionally filter by a specific movement_type string.
     """
     return movements_model.get_by_barcode(barcode, move_type)
+
+
+def get_transaction(reference: str) -> dict | None:
+    """
+    Return the full POS transaction for a receipt reference: the pos_sales
+    header (sale_date, operator, payment_method, subtotal, gst_amount, total —
+    the totals fields are None for sales recorded before migrate_v70) plus
+    every line item across all products sold under that reference.
+    Returns None if the reference is unknown (e.g. a pre-pos_sales-ledger
+    import, or a non-SALE reference such as a PO receipt).
+    """
+    header = soh_model.get_sale_header(reference)
+    if header is None:
+        return None
+    header['items'] = movements_model.get_by_reference(reference)
+    return header
+
+
+def generate_receipt_pdf(reference: str, output_path=None) -> str:
+    """
+    Render a printable reprint of a POS receipt (see get_transaction) to a
+    PDF and return the path written. Raises ValueError if the reference has
+    no pos_sales record (unknown reference, or a pre-migration/backfilled
+    sale that was never posted through the POS-sale API).
+    """
+    import models.settings as settings_model
+    from utils.receipt_pdf import render_receipt_pdf
+
+    txn = get_transaction(reference)
+    if txn is None:
+        raise ValueError(f"No transaction record found for reference {reference!r}")
+
+    store_info = {
+        'store_name':    settings_model.get_setting('store_name',    'My Store'),
+        'store_address': settings_model.get_setting('store_address', ''),
+        'store_phone':   settings_model.get_setting('store_phone',   ''),
+        'store_abn':     settings_model.get_setting('store_abn',     ''),
+    }
+    return render_receipt_pdf(reference, txn, store_info, output_path)
 
 
 def get_all_plu_products() -> list[dict]:

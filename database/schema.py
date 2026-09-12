@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS products (
     online_available INTEGER NOT NULL DEFAULT 0 CHECK (online_available IN (0,1)),
     online_notes    TEXT,
     order_prep_include INTEGER NOT NULL DEFAULT 0 CHECK (order_prep_include IN (0,1)),
+    carton_sku      TEXT    DEFAULT '',
     FOREIGN KEY (department_id) REFERENCES departments(id)    ON DELETE RESTRICT,
     FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)      ON DELETE SET NULL,
     FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL
@@ -140,6 +141,9 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     old_cost        REAL,
     new_cost        REAL,
     value_delta     REAL,
+    unit_price      REAL,
+    line_total      REAL,
+    tax_rate        REAL,
     FOREIGN KEY (barcode) REFERENCES products(barcode) ON DELETE RESTRICT
 );
 
@@ -518,10 +522,14 @@ CREATE TABLE IF NOT EXISTS po_charges (
 CREATE INDEX IF NOT EXISTS idx_po_charges_po ON po_charges(po_id);
 
 CREATE TABLE IF NOT EXISTS pos_sales (
-    reference   TEXT    PRIMARY KEY,
-    sale_date   TEXT    NOT NULL,
-    operator    TEXT    NOT NULL DEFAULT '',
-    received_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+    reference       TEXT    PRIMARY KEY,
+    sale_date       TEXT    NOT NULL,
+    operator        TEXT    NOT NULL DEFAULT '',
+    received_at     TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    payment_method  TEXT,
+    subtotal        REAL,
+    gst_amount      REAL,
+    total           REAL
 );
 
 -- POS suspend/resume ("hold sale"): RetailPOSPro terminals share no local

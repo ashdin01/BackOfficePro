@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from utils.keyboard_mixin import KeyboardMixin
 from utils.error_dialog import show_error
+from utils.money_field import money_field
 from views.widgets.text_popup import (
     text_popup, text_popup_optional, price_popup, number_popup, choice_popup,
 )
@@ -64,16 +65,17 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._check_selling_unit()
         p = self.product
         self._description   = p['description']
+        self._carton_sku    = p['carton_sku'] or '' if 'carton_sku' in p.keys() else ''
         self._brand         = p['brand'] or ''
         self._plu           = p['plu'] or '' if 'plu' in p.keys() else ''
         self._supplier_sku  = p['supplier_sku'] or ''
         self._pack_qty      = int(p['pack_qty']) if 'pack_qty' in p.keys() and p['pack_qty'] else 1
-        self._pack_unit     = p['pack_unit'] if 'pack_unit' in p.keys() and p['pack_unit'] else 'EA'
+        self._pack_unit     = p['pack_unit'] if 'pack_unit' in p.keys() and p['pack_unit'] else 'ea'
         self._group_id      = p['group_id'] if 'group_id' in p.keys() else None
         self._dept_id       = p['department_id']
         self._supplier_id   = p['supplier_id']
         self._product_suppliers = self._load_product_suppliers()
-        self._unit          = p['unit'] or 'EA'
+        self._unit          = p['unit'] or 'ea'
         self._sell_price    = p['sell_price']
         self._cost_price    = p['cost_price']
         self._tax_rate      = p['tax_rate']
@@ -160,6 +162,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_barcode = ro_row("Barcode", self.product['barcode'], self._edit_barcode)
         left_col.addLayout(r)
 
+        r, self.lbl_carton_sku = ro_row("Carton SKU", self._carton_sku or "—", self._edit_carton_sku)
+        left_col.addLayout(r)
+
         r, self.lbl_desc = ro_row("Description", self._description, self._edit_description)
         left_col.addLayout(r)
 
@@ -169,12 +174,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_plu = ro_row("PLU", self._plu or "—", self._edit_plu)
         left_col.addLayout(r)
 
-        r, self.lbl_supplier = ro_row("Supplier (default)", self._supplier_name(),
+        r, self.lbl_supplier = ro_row("Supplier Details", self._supplier_name(),
                                        self._edit_supplier, force_enabled=True)
-        left_col.addLayout(r)
-
-        r, self.lbl_supplier_sku = ro_row("Supplier SKU", self._supplier_sku_display(),
-                                           self._edit_supplier_sku, force_enabled=True)
         left_col.addLayout(r)
 
         r, self.lbl_dept = ro_row("Department", self._dept_name(), self._edit_dept)
@@ -390,6 +391,11 @@ class ProductEdit(KeyboardMixin, QWidget):
         btn_print_large_label.clicked.connect(lambda: self._print_label(large=True))
         act_row.addWidget(btn_print_large_label)
 
+        btn_print_edikio = QPushButton("🖨 Print Edikio Card")
+        btn_print_edikio.setFixedHeight(30)
+        btn_print_edikio.clicked.connect(self._print_edikio_label)
+        act_row.addWidget(btn_print_edikio)
+
         act_row.addStretch()
         if not self._read_only:
             save_btn = QPushButton("Save  [Ctrl+S]")
@@ -402,19 +408,6 @@ class ProductEdit(KeyboardMixin, QWidget):
         cancel_btn.clicked.connect(self.close)
         act_row.addWidget(cancel_btn)
         layout.addLayout(act_row)
-
-    # ── Supplier SKU display ──────────────────────────────────────────
-
-    def _supplier_sku_display(self):
-        default = next((e for e in self._product_suppliers if e['is_default']), None)
-        if not default:
-            return "—"
-        sku = default.get('supplier_sku') or "—"
-        qty = default.get('pack_qty') or 1
-        unit = default.get('pack_unit') or 'EA'
-        if qty > 1:
-            return f"{sku}  ({qty} × {unit} per carton)"
-        return sku
 
     # ── Edit popup helpers ────────────────────────────────────────────
 
@@ -453,8 +446,11 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._plu = val
             self.lbl_plu.setText(val or "—")
 
-    def _edit_supplier_sku(self):
-        self._edit_supplier()
+    def _edit_carton_sku(self):
+        val = text_popup_optional("Edit Carton SKU", "Carton SKU", self._carton_sku, self)
+        if val is not None:
+            self._carton_sku = val
+            self.lbl_carton_sku.setText(val or "—")
 
     def _group_name(self):
         if not self._group_id:
@@ -558,7 +554,6 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._refresh_sup_table()
         dlg.exec()
         self.lbl_supplier.setText(self._supplier_name())
-        self.lbl_supplier_sku.setText(self._supplier_sku_display())
 
     def _ro_cell(self, text):
         """Plain, non-editable, centred table cell — used for Manage Suppliers
@@ -582,7 +577,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 self._sup_table.setItem(r, 2, self._ro_cell(str(entry.get('pack_qty') or 1)))
 
                 # Col 3 — Pack Unit (plain text)
-                self._sup_table.setItem(r, 3, self._ro_cell(entry.get('pack_unit') or 'EA'))
+                self._sup_table.setItem(r, 3, self._ro_cell(entry.get('pack_unit') or 'ea'))
             else:
                 # Col 1 — Supplier SKU (inline QLineEdit)
                 sku_edit = QLineEdit(entry.get('supplier_sku') or '')
@@ -604,8 +599,12 @@ class ProductEdit(KeyboardMixin, QWidget):
 
                 # Col 3 — Pack Unit (inline QComboBox)
                 unit_cb = QComboBox()
-                unit_cb.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
-                unit_cb.setCurrentText(entry.get('pack_unit') or 'EA')
+                unit_options = ['ea', 'kg', 'l', 'pk', 'ctn', 'g', 'ml']
+                unit_cb.addItems(unit_options)
+                # Match case-insensitively: existing rows may still have an
+                # upper-case value stored from before the list was lower-cased.
+                pack_unit_val = (entry.get('pack_unit') or 'ea').lower()
+                unit_cb.setCurrentText(pack_unit_val if pack_unit_val in unit_options else 'ea')
                 unit_cb.currentTextChanged.connect(
                     lambda text, i=r: self._product_suppliers[i].__setitem__('pack_unit', text)
                 )
@@ -684,7 +683,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         qty_spin.setValue(1)
         qty_spin.setFixedWidth(80)
         unit_cb = QComboBox()
-        unit_cb.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
+        unit_cb.addItems(['ea', 'kg', 'l', 'pk', 'ctn', 'g', 'ml'])
         unit_cb.setFixedWidth(80)
         pack_layout.addWidget(qty_spin)
         pack_layout.addWidget(unit_cb)
@@ -743,8 +742,12 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._refresh_sup_table()
 
     def _edit_unit(self):
-        units = ['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML']
-        val = choice_popup("Edit Unit", "Unit", units, self._unit, self)
+        units = ['ea', 'kg', 'l', 'pk', 'ctn', 'g', 'ml']
+        # Match case-insensitively: existing products may still have an
+        # upper-case value stored from before the choice list was
+        # lower-cased, and the popup should still pre-select it correctly.
+        current = self._unit.lower() if self._unit.lower() in units else self._unit
+        val = choice_popup("Edit Unit", "Unit", units, current, self)
         if val is not None:
             self._unit = val
             self.lbl_unit.setText(val)
@@ -1347,6 +1350,83 @@ class ProductEdit(KeyboardMixin, QWidget):
         QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
         dlg.exec()
 
+    def _print_edikio_label(self):
+        from utils.label_print import get_configured_edikio_printer_name
+
+        if get_configured_edikio_printer_name():
+            from utils.label_print import print_edikio_label_direct
+            ok, msg = print_edikio_label_direct(
+                barcode=self.barcode,
+                description=self._description,
+                price_inc_gst=self._sell_price,
+                unit=self._unit,
+            )
+            if not ok:
+                show_error(self, "Could not print the Edikio card.", RuntimeError(msg))
+            return
+
+        self._print_edikio_label_via_pdf()
+
+    def _print_edikio_label_via_pdf(self):
+        """No Edikio printer configured (Settings > Label Printing) — fall
+        back to generating a PDF and opening it for the user to print
+        manually."""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QHBoxLayout
+        from PyQt6.QtGui import QShortcut, QKeySequence
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Print Edikio Card")
+        dlg.setMinimumWidth(280)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        form = QFormLayout()
+        copies_spin = QSpinBox()
+        copies_spin.setMinimum(1)
+        copies_spin.setMaximum(200)
+        copies_spin.setValue(1)
+        form.addRow("Copies", copies_spin)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Cancel  [Esc]")
+        cancel_btn.setFixedHeight(30)
+        print_btn = QPushButton("Print  [Ctrl+S]")
+        print_btn.setFixedHeight(30)
+        print_btn.setStyleSheet(
+            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
+            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
+            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
+        )
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(print_btn)
+        layout.addLayout(btn_row)
+
+        def confirm():
+            from utils.label_pdf import generate_edikio_label_pdf
+            from utils.open_file import open_with_default_app
+            try:
+                path = generate_edikio_label_pdf(
+                    barcode=self.barcode,
+                    description=self._description,
+                    price_inc_gst=self._sell_price,
+                    unit=self._unit,
+                    copies=copies_spin.value(),
+                )
+                open_with_default_app(path)
+            except Exception as e:
+                show_error(self, "Could not generate the Edikio card.", e)
+                return
+            dlg.accept()
+
+        print_btn.clicked.connect(confirm)
+        cancel_btn.clicked.connect(dlg.reject)
+        QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
+        QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
+        dlg.exec()
+
     def _view_history(self):
         from PyQt6.QtWidgets import (
             QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
@@ -1367,6 +1447,9 @@ class ProductEdit(KeyboardMixin, QWidget):
                           "REVALUE"])
         filter_row.addWidget(type_cb)
         filter_row.addStretch()
+        hint_lbl = QLabel("Double-click a SALE row to view the full receipt")
+        hint_lbl.setStyleSheet(f"color: {styles.CLR_MUTED};")
+        filter_row.addWidget(hint_lbl)
         status_lbl = QLabel()
         filter_row.addWidget(status_lbl)
         layout.addLayout(filter_row)
@@ -1387,6 +1470,17 @@ class ProductEdit(KeyboardMixin, QWidget):
         tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         tbl.setSortingEnabled(False)
         layout.addWidget(tbl)
+
+        def on_row_double_clicked(r, _col):
+            type_item = tbl.item(r, 1)
+            ref_item = tbl.item(r, 4)
+            if type_item is None or ref_item is None:
+                return
+            if type_item.text() != "SALE" or not ref_item.text():
+                return
+            self._view_transaction_popup(dlg, ref_item.text())
+
+        tbl.cellDoubleClicked.connect(on_row_double_clicked)
 
         def load(move_type=None):
             rows = product_controller.get_movement_history(self.barcode, move_type)
@@ -1451,6 +1545,106 @@ class ProductEdit(KeyboardMixin, QWidget):
         QShortcut(QKeySequence("Escape"), dlg, dlg.accept)
         dlg.exec()
 
+    def _view_transaction_popup(self, parent, reference: str):
+        """Show the full POS receipt (all line items across all products,
+        plus receipt number and totals) for a SALE row's reference."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTableWidget,
+            QTableWidgetItem, QHeaderView, QLabel, QPushButton
+        )
+        from PyQt6.QtGui import QShortcut, QKeySequence
+
+        txn = product_controller.get_transaction(reference)
+        if txn is None:
+            QMessageBox.information(
+                parent, "Receipt Not Found",
+                f"No transaction record found for reference {reference}."
+            )
+            return
+
+        dlg = QDialog(parent)
+        dlg.setWindowTitle(f"Receipt — {reference}")
+        dlg.setMinimumSize(640, 480)
+        layout = QVBoxLayout(dlg)
+
+        header = QFormLayout()
+        header.addRow("Receipt #", QLabel(reference))
+        header.addRow("Date/Time", QLabel(str(txn.get('received_at') or txn.get('sale_date') or '')))
+        header.addRow("Operator", QLabel(txn.get('operator') or ''))
+        if txn.get('payment_method'):
+            header.addRow("Payment", QLabel(txn['payment_method']))
+        layout.addLayout(header)
+
+        tbl = QTableWidget()
+        tbl.setColumnCount(5)
+        tbl.setHorizontalHeaderLabels(["Barcode", "Description", "Qty", "Unit Price", "Line Total"])
+        hdr = tbl.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for ci in (2, 3, 4):
+            hdr.setSectionResizeMode(ci, QHeaderView.ResizeMode.Interactive)
+        tbl.setColumnWidth(0, 130)
+        tbl.setColumnWidth(2, 60)
+        tbl.setColumnWidth(3, 90)
+        tbl.setColumnWidth(4, 90)
+        tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        items = txn.get('items') or []
+        tbl.setRowCount(len(items))
+        for r, item in enumerate(items):
+            qty = item['quantity']
+            desc = item['notes'] or item['description'] or ''
+            unit_price = item['unit_price']
+            line_total = item['line_total']
+            tbl.setItem(r, 0, QTableWidgetItem(item['barcode']))
+            tbl.setItem(r, 1, QTableWidgetItem(desc))
+            qty_val = -qty if qty is not None else None
+            qty_text = "" if qty_val is None else (
+                f"{qty_val:g}" if qty_val != int(qty_val) else f"{qty_val:.0f}"
+            )
+            qty_item = QTableWidgetItem(qty_text)
+            qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            tbl.setItem(r, 2, qty_item)
+            price_item = QTableWidgetItem(f"${unit_price:.2f}" if unit_price is not None else "—")
+            price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tbl.setItem(r, 3, price_item)
+            total_item = QTableWidgetItem(f"${line_total:.2f}" if line_total is not None else "—")
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tbl.setItem(r, 4, total_item)
+        layout.addWidget(tbl)
+
+        totals = QFormLayout()
+        if txn.get('subtotal') is not None:
+            totals.addRow("Subtotal", QLabel(f"${txn['subtotal']:.2f}"))
+        if txn.get('gst_amount') is not None:
+            totals.addRow("GST", QLabel(f"${txn['gst_amount']:.2f}"))
+        if txn.get('total') is not None:
+            totals.addRow("Total", QLabel(f"${txn['total']:.2f}"))
+        layout.addLayout(totals)
+
+        def print_receipt():
+            from utils.open_file import open_with_default_app
+            try:
+                path = product_controller.generate_receipt_pdf(reference)
+                open_with_default_app(path)
+            except Exception as e:
+                show_error(dlg, "Could not generate the receipt PDF.", e)
+
+        btn_row = QHBoxLayout()
+        print_btn = QPushButton("Print Receipt  [Ctrl+P]")
+        print_btn.clicked.connect(print_receipt)
+        btn_row.addWidget(print_btn)
+        btn_row.addStretch()
+        close_btn = QPushButton("Close  [Esc]")
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        QShortcut(QKeySequence("Ctrl+P"), dlg, print_receipt)
+        QShortcut(QKeySequence("Escape"), dlg, dlg.accept)
+        dlg.exec()
+
     def _save(self):
         if self._read_only:
             return
@@ -1459,7 +1653,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         # Sync products table from default supplier's per-supplier values
         supplier_sku = default_sup.get('supplier_sku', '') if default_sup else ''
         pack_qty     = default_sup.get('pack_qty', 1)     if default_sup else 1
-        pack_unit    = default_sup.get('pack_unit', 'EA') if default_sup else 'EA'
+        pack_unit    = default_sup.get('pack_unit', 'ea') if default_sup else 'ea'
         try:
             product_controller.save_product(
                 barcode=self.barcode,
@@ -1486,6 +1680,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 online_notes=self._txt_notes.toPlainText().strip(),
                 order_prep_include=int(self._order_prep_include),
                 product_suppliers=self._product_suppliers,
+                carton_sku=self._carton_sku,
             )
             if self.on_save:
                 self.on_save()
