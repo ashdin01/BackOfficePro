@@ -1270,13 +1270,13 @@ class ProductEdit(KeyboardMixin, QWidget):
         dlg.exec()
 
     def _print_label(self, large=False):
-        from utils.label_print import get_configured_printer_name
+        from utils.label_print import get_configured_printer_name, print_label_direct
 
-        if get_configured_printer_name():
+        printer_name = get_configured_printer_name()
+        if printer_name:
             # A printer is configured — print one label straight to it, no
             # dialog. Pressing the button again prints another; that's the
             # whole workflow for printing several labels in a row.
-            from utils.label_print import print_label_direct
             ok, msg = print_label_direct(
                 barcode=self.barcode,
                 description=self._description,
@@ -1284,9 +1284,16 @@ class ProductEdit(KeyboardMixin, QWidget):
                 plu=self._plu or None,
                 large=large,
             )
-            if not ok:
+            if ok:
+                return
+            if "is not available" not in msg:
+                # A real failure (render error, driver fault) rather than
+                # "printer not found" — worth surfacing, not silently
+                # falling back to a PDF.
                 show_error(self, "Could not print the label.", RuntimeError(msg))
-            return
+                return
+            # else: configured printer isn't currently found (unplugged,
+            # renamed, etc.) — fall through to the PDF, same as unconfigured.
 
         self._print_label_via_pdf(large=large)
 
@@ -1351,19 +1358,28 @@ class ProductEdit(KeyboardMixin, QWidget):
         dlg.exec()
 
     def _print_edikio_label(self):
-        from utils.label_print import get_configured_edikio_printer_name
+        from utils.label_print import get_configured_edikio_printer_name, print_edikio_label_direct
 
-        if get_configured_edikio_printer_name():
-            from utils.label_print import print_edikio_label_direct
+        printer_name = get_configured_edikio_printer_name()
+        if printer_name:
+            # A printer is configured — print one card straight to it, no
+            # dialog, matching _print_label's behaviour for shelf labels.
             ok, msg = print_edikio_label_direct(
                 barcode=self.barcode,
                 description=self._description,
                 price_inc_gst=self._sell_price,
                 unit=self._unit,
             )
-            if not ok:
+            if ok:
+                return
+            if "is not available" not in msg:
+                # A real failure (render error, driver fault) rather than
+                # "printer not found" — worth surfacing, not silently
+                # falling back to a PDF.
                 show_error(self, "Could not print the Edikio card.", RuntimeError(msg))
-            return
+                return
+            # else: configured printer isn't currently found (unplugged,
+            # renamed, etc.) — fall through to the PDF, same as unconfigured.
 
         self._print_edikio_label_via_pdf()
 

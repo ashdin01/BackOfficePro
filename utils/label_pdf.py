@@ -28,6 +28,7 @@ card, not something scanned at the register), just description (centred,
 up to 3 lines), sell price inc GST, and unit — so it has its own
 _draw_edikio_card().
 """
+import logging
 import os
 import sys
 import tempfile
@@ -60,8 +61,19 @@ _FONT = "Sora"
 _FONT_BOLD = "Sora-Bold"
 
 _fonts_dir = os.path.join(_BASE_DIR, 'assets', 'fonts', 'Sora')
-pdfmetrics.registerFont(TTFont(_FONT, os.path.join(_fonts_dir, 'Sora-Regular.ttf')))
-pdfmetrics.registerFont(TTFont(_FONT_BOLD, os.path.join(_fonts_dir, 'Sora-Bold.ttf')))
+try:
+    pdfmetrics.registerFont(TTFont(_FONT, os.path.join(_fonts_dir, 'Sora-Regular.ttf')))
+    pdfmetrics.registerFont(TTFont(_FONT_BOLD, os.path.join(_fonts_dir, 'Sora-Bold.ttf')))
+except Exception:
+    # Missing/unreadable font files must not take down every printed label
+    # and Edikio card with a hard crash at import time — fall back to a
+    # built-in font and keep printing working, just with different type.
+    logging.warning(
+        "Sora font files not found at %s — falling back to Helvetica for "
+        "printed labels and Edikio cards.", _fonts_dir
+    )
+    _FONT = "Helvetica"
+    _FONT_BOLD = "Helvetica-Bold"
 
 
 def get_label_size_mm(large=False) -> tuple[float, float]:

@@ -17,6 +17,7 @@ the same list of draw commands: first to sum up the height they need (to
 size the page), then to actually draw them onto the canvas. Passes share
 one command list so the measured height can never drift from what's drawn.
 """
+import logging
 import os
 import sys
 import tempfile
@@ -41,8 +42,18 @@ _FONT = "Sora"
 _FONT_BOLD = "Sora-Bold"
 
 _fonts_dir = os.path.join(_BASE_DIR, 'assets', 'fonts', 'Sora')
-pdfmetrics.registerFont(TTFont(_FONT, os.path.join(_fonts_dir, 'Sora-Regular.ttf')))
-pdfmetrics.registerFont(TTFont(_FONT_BOLD, os.path.join(_fonts_dir, 'Sora-Bold.ttf')))
+try:
+    pdfmetrics.registerFont(TTFont(_FONT, os.path.join(_fonts_dir, 'Sora-Regular.ttf')))
+    pdfmetrics.registerFont(TTFont(_FONT_BOLD, os.path.join(_fonts_dir, 'Sora-Bold.ttf')))
+except Exception:
+    # Missing/unreadable font files must not take down receipt reprinting
+    # with a hard crash at import time — fall back to a built-in font.
+    logging.warning(
+        "Sora font files not found at %s — falling back to Helvetica for "
+        "reprinted receipts.", _fonts_dir
+    )
+    _FONT = "Helvetica"
+    _FONT_BOLD = "Helvetica-Bold"
 
 
 def render_receipt_pdf(reference: str, txn: dict, store_info: dict, output_path: str) -> str:

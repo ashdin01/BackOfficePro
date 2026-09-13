@@ -447,6 +447,73 @@ class TestViewTransactionPopup:
         dlg.close()
 
 
+# ── Shelf-edge label printing ───────────────────────────────────────────────────
+
+class TestPrintLabel:
+    def test_no_printer_configured_falls_back_to_pdf_dialog(
+        self, product_edit_view, qtbot, monkeypatch
+    ):
+        from PyQt6.QtWidgets import QDialog
+        captured = {}
+
+        def fake_exec(self):
+            captured['dlg'] = self
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr(QDialog, "exec", fake_exec)
+        product_edit_view._print_label()
+        assert captured['dlg'].windowTitle() == "Print Shelf Label"
+
+    def test_printer_configured_prints_direct_without_dialog(
+        self, product_edit_view, qtbot, monkeypatch
+    ):
+        import models.settings as settings_model
+        settings_model.set_setting('label_printer_name', 'Zebra GK420D')
+        with patch('utils.label_print.print_label_direct',
+                    return_value=(True, "Printed")) as mock_print:
+            product_edit_view._print_label()
+        mock_print.assert_called_once()
+
+    def test_direct_print_failure_shows_error(self, product_edit_view, qtbot, monkeypatch):
+        """A real failure from the print call (not a "printer not found"
+        message) is surfaced as an error rather than silently falling back
+        to a PDF."""
+        import models.settings as settings_model
+        settings_model.set_setting('label_printer_name', 'Zebra GK420D')
+        with patch('utils.label_print.print_label_direct',
+                    return_value=(False, "Could not render the label.")), \
+             patch('views.products.product_edit.show_error') as mock_show_error:
+            product_edit_view._print_label()
+        mock_show_error.assert_called_once()
+
+    def test_configured_but_not_found_falls_back_to_pdf(
+        self, product_edit_view, qtbot, monkeypatch
+    ):
+        """Printer name is configured but the direct print reports it isn't
+        currently available (unplugged/renamed) — falls back to the PDF
+        dialog instead of showing an error, same as if nothing were
+        configured at all."""
+        import models.settings as settings_model
+        from PyQt6.QtWidgets import QDialog
+        settings_model.set_setting('label_printer_name', 'Zebra GK420D')
+        captured = {}
+
+        def fake_exec(self):
+            captured['dlg'] = self
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr(QDialog, "exec", fake_exec)
+        with patch('utils.label_print.print_label_direct',
+                    return_value=(False, "Printer 'Zebra GK420D' is not available — "
+                                  "check it's connected, or choose a different one "
+                                  "in Settings > Label Printing.")) as mock_print, \
+             patch('views.products.product_edit.show_error') as mock_show_error:
+            product_edit_view._print_label()
+        mock_print.assert_called_once()
+        mock_show_error.assert_not_called()
+        assert captured['dlg'].windowTitle() == "Print Shelf Label"
+
+
 # ── Edikio card printing ──────────────────────────────────────────────────────
 
 class TestPrintEdikioLabel:
@@ -486,6 +553,9 @@ class TestPrintEdikioLabel:
         assert 'plu' not in kwargs
 
     def test_direct_print_failure_shows_error(self, product_edit_view, qtbot, monkeypatch):
+        """A real failure from the print call (not a "printer not found"
+        message) is surfaced as an error rather than silently falling back
+        to a PDF."""
         import models.settings as settings_model
         settings_model.set_setting('edikio_printer_name', 'Edikio Access')
         with patch('utils.label_print.print_edikio_label_direct',
@@ -493,6 +563,33 @@ class TestPrintEdikioLabel:
              patch('views.products.product_edit.show_error') as mock_show_error:
             product_edit_view._print_edikio_label()
         mock_show_error.assert_called_once()
+
+    def test_configured_but_not_found_falls_back_to_pdf(
+        self, product_edit_view, qtbot, monkeypatch
+    ):
+        """Printer name is configured but the direct print reports it isn't
+        currently available (unplugged/renamed) — falls back to the PDF
+        dialog instead of showing an error, same as if nothing were
+        configured at all."""
+        import models.settings as settings_model
+        from PyQt6.QtWidgets import QDialog
+        settings_model.set_setting('edikio_printer_name', 'Edikio Access')
+        captured = {}
+
+        def fake_exec(self):
+            captured['dlg'] = self
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr(QDialog, "exec", fake_exec)
+        with patch('utils.label_print.print_edikio_label_direct',
+                    return_value=(False, "Printer 'Edikio Access' is not available — "
+                                  "check it's connected, or choose a different one "
+                                  "in Settings > Label Printing.")) as mock_print, \
+             patch('views.products.product_edit.show_error') as mock_show_error:
+            product_edit_view._print_edikio_label()
+        mock_print.assert_called_once()
+        mock_show_error.assert_not_called()
+        assert captured['dlg'].windowTitle() == "Print Edikio Card"
 
     def test_pdf_fallback_generates_and_opens_file(
         self, product_edit_view, qtbot, monkeypatch

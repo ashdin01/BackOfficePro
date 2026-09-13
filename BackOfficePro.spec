@@ -127,6 +127,13 @@ exe = EXE(
 )
 
 # --onedir: instant launch, no temp-extraction on every run
+#
+# contents_directory='.' pins the pre-6.0 flat layout (bundled datas sit
+# directly beside the exe). Without this, PyInstaller 6.0+ defaults to
+# putting them under _internal/ instead, which breaks every BASE_DIR =
+# dirname(sys.executable) path in this codebase (main.py, config/settings.py,
+# utils/label_pdf.py, utils/receipt_pdf.py) without raising — assets/icon.ico
+# and the bundled fonts just silently fail to resolve.
 coll = COLLECT(
     exe,
     a.binaries,
@@ -135,4 +142,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     name='BackOfficePro',
+    contents_directory='.',
 )
