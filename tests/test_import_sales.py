@@ -279,6 +279,110 @@ class TestImportRowsClamp:
         assert soh["quantity"] == pytest.approx(-5.0)
 
 
+def test_import_rows_reimport_with_higher_quantity_tops_up_stock(
+    test_db, db_conn, dept_id, supplier_id
+):
+    """A partial-day snapshot followed by the corrected/final report for the
+    same day should deduct only the incremental units, not the full total
+    again and not nothing."""
+    db_conn.execute("""
+        INSERT INTO products (barcode, description, department_id, supplier_id,
+            sell_price, cost_price, tax_rate, active, unit)
+        VALUES ('9300000011111', 'Test Bread', ?, ?, 3.50, 2.00, 10.0, 1, 'EA')
+    """, (dept_id, supplier_id))
+    db_conn.execute(
+        "INSERT INTO plu_barcode_map (plu, barcode) VALUES (?, ?)",
+        (22222, '9300000011111')
+    )
+    db_conn.commit()
+
+    row_data = {
+        'sale_date': '2026-05-08', 'plu': '22222', 'plu_name': 'TEST BREAD',
+        'sub_group': '', 'weight_kg': 0.0, 'quantity': 5.0,
+        'nominal_price': 3.50, 'discount': 0.0, 'rounding': 0.0,
+        'sales_dollars': 17.50, 'sales_pct': 0.0,
+    }
+    _, movements1, _ = import_sales._import_rows([row_data], source='partial')
+    assert movements1 == 1
+
+    row_data = dict(row_data, quantity=7.0, sales_dollars=24.50)
+    _, movements2, _ = import_sales._import_rows([row_data], source='final')
+    assert movements2 == 1
+
+    moves = db_conn.execute(
+        "SELECT movement_type, quantity FROM stock_movements"
+        " WHERE barcode='9300000011111' ORDER BY id"
+    ).fetchall()
+    assert [(m["movement_type"], m["quantity"]) for m in moves] == [
+        ("SALE", -5.0), ("SALE", -2.0),
+    ]
+
+    soh = soh_model.get_by_barcode('9300000011111')
+    assert soh["quantity"] == pytest.approx(-7.0)
+
+
+def test_import_rows_reimport_same_quantity_creates_no_extra_movement(
+    test_db, db_conn, dept_id, supplier_id
+):
+    db_conn.execute("""
+        INSERT INTO products (barcode, description, department_id, supplier_id,
+            sell_price, cost_price, tax_rate, active, unit)
+        VALUES ('9300000022222', 'Test Eggs', ?, ?, 3.50, 2.00, 10.0, 1, 'EA')
+    """, (dept_id, supplier_id))
+    db_conn.execute(
+        "INSERT INTO plu_barcode_map (plu, barcode) VALUES (?, ?)",
+        (33333, '9300000022222')
+    )
+    db_conn.commit()
+
+    row_data = {
+        'sale_date': '2026-05-08', 'plu': '33333', 'plu_name': 'TEST EGGS',
+        'sub_group': '', 'weight_kg': 0.0, 'quantity': 4.0,
+        'nominal_price': 3.50, 'discount': 0.0, 'rounding': 0.0,
+        'sales_dollars': 14.0, 'sales_pct': 0.0,
+    }
+    import_sales._import_rows([row_data], source='first')
+    _, movements2, _ = import_sales._import_rows([dict(row_data)], source='reimport')
+    assert movements2 == 0
+
+    moves = db_conn.execute(
+        "SELECT COUNT(*) AS n FROM stock_movements WHERE barcode='9300000022222'"
+    ).fetchone()
+    assert moves["n"] == 1
+
+
+def test_import_rows_reimport_with_lower_quantity_credits_stock_back(
+    test_db, db_conn, dept_id, supplier_id
+):
+    """A downward correction (e.g. a voided sale) should return stock rather
+    than being ignored."""
+    db_conn.execute("""
+        INSERT INTO products (barcode, description, department_id, supplier_id,
+            sell_price, cost_price, tax_rate, active, unit)
+        VALUES ('9300000033333', 'Test Juice', ?, ?, 3.50, 2.00, 10.0, 1, 'EA')
+    """, (dept_id, supplier_id))
+    db_conn.execute(
+        "INSERT INTO plu_barcode_map (plu, barcode) VALUES (?, ?)",
+        (44444, '9300000033333')
+    )
+    db_conn.commit()
+
+    row_data = {
+        'sale_date': '2026-05-08', 'plu': '44444', 'plu_name': 'TEST JUICE',
+        'sub_group': '', 'weight_kg': 0.0, 'quantity': 6.0,
+        'nominal_price': 3.50, 'discount': 0.0, 'rounding': 0.0,
+        'sales_dollars': 21.0, 'sales_pct': 0.0,
+    }
+    import_sales._import_rows([row_data], source='first')
+
+    row_data = dict(row_data, quantity=4.0, sales_dollars=14.0)
+    _, movements2, _ = import_sales._import_rows([row_data], source='correction')
+    assert movements2 == 1
+
+    soh = soh_model.get_by_barcode('9300000033333')
+    assert soh["quantity"] == pytest.approx(-4.0)
+
+
 def test_import_rows_creates_stock_movement_when_plu_mapped(test_db, db_conn, dept_id, supplier_id):
     db_conn.execute("""
         INSERT INTO products (barcode, description, department_id, supplier_id,

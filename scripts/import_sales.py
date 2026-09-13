@@ -4,7 +4,11 @@ Imports CSV exports from the POS reporting system.
 After import, creates negative stock movements for all matched products.
 
 Duplicate handling: keyed on (sale_date, plu). Re-importing the same file
-overwrites existing rows rather than creating duplicates.
+overwrites existing sales_daily rows rather than creating duplicates. Stock
+movements are based on the incremental quantity change since the last
+import for that (sale_date, plu) — so importing a partial-day snapshot and
+later re-importing the corrected/final report for the same day tops stock
+up by just the difference, instead of double-counting or being skipped.
 """
 import csv
 import sys
@@ -160,8 +164,19 @@ def _resolve_barcode(conn, plu):
     return barcode, 1
 
 
-def _create_sale_movement(conn, barcode, quantity, sale_date, plu, plu_name, source):
-    reference = f"SALE-{sale_date}-PLU{plu}"
+def _create_sale_movement(conn, barcode, delta_quantity, sale_date, plu, plu_name, source, new_total_quantity):
+    """
+    Applies a stock change for delta_quantity — the incremental amount sold
+    since the last import of this (sale_date, plu), not the report's full
+    quantity. The reference is versioned on the new cumulative quantity, so
+    re-importing an unchanged report computes delta_quantity=0 upstream and
+    never reaches here, while a later import that raises the total (e.g. a
+    partial-day snapshot followed by the corrected end-of-day figure) tops
+    stock up by just the difference instead of being skipped outright. A
+    lower total (e.g. a voided sale) produces a negative delta_quantity,
+    which correctly credits stock back.
+    """
+    reference = f"SALE-{sale_date}-PLU{plu}-Q{new_total_quantity:g}"
     existing = conn.execute(
         "SELECT id FROM stock_movements WHERE barcode=? AND reference=?",
         (barcode, reference)
@@ -173,8 +188,8 @@ def _create_sale_movement(conn, barcode, quantity, sale_date, plu, plu_name, sou
         INSERT INTO stock_movements
             (barcode, movement_type, quantity, reference, notes, created_by)
         VALUES (?, 'SALE', ?, ?, ?, ?)
-    """, (barcode, -quantity, reference,
-          f"Sale: {plu_name} ({quantity} units)", source))
+    """, (barcode, -delta_quantity, reference,
+          f"Sale: {plu_name} ({delta_quantity:+g} units, running total {new_total_quantity:g})", source))
 
     conn.execute("""
         INSERT INTO stock_on_hand (barcode, quantity)
@@ -182,7 +197,7 @@ def _create_sale_movement(conn, barcode, quantity, sale_date, plu, plu_name, sou
         ON CONFLICT(barcode) DO UPDATE SET
             quantity     = quantity + excluded.quantity,
             last_updated = CURRENT_TIMESTAMP
-    """, (barcode, -quantity))
+    """, (barcode, -delta_quantity))
 
     clamp_negative_soh(conn, barcode, reference=reference, created_by=source)
 
@@ -209,6 +224,12 @@ def _import_rows(rows, source):
         upserted = movements_created = unmatched = 0
 
         for r in rows:
+            prev_row = conn.execute(
+                "SELECT quantity FROM sales_daily WHERE sale_date=? AND plu=?",
+                (r['sale_date'], r['plu'])
+            ).fetchone()
+            prev_quantity = prev_row['quantity'] if prev_row else 0.0
+
             conn.execute("""
                 INSERT INTO sales_daily
                     (sale_date, plu, plu_name, sub_group, weight_kg, quantity,
@@ -230,13 +251,14 @@ def _import_rows(rows, source):
                   r['discount'], r['rounding'], r['sales_dollars'], r['sales_pct']))
             upserted += 1
 
-            if r['quantity'] > 0:
+            delta_quantity = r['quantity'] - prev_quantity
+            if delta_quantity:
                 barcode, unit_qty = _resolve_barcode(conn, r['plu'])
                 if barcode:
-                    stock_qty = r['quantity'] * unit_qty
-                    if _create_sale_movement(conn, barcode, stock_qty,
+                    stock_delta = delta_quantity * unit_qty
+                    if _create_sale_movement(conn, barcode, stock_delta,
                                              r['sale_date'], r['plu'],
-                                             r['plu_name'], source):
+                                             r['plu_name'], source, r['quantity']):
                         movements_created += 1
                 else:
                     unmatched += 1
