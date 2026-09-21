@@ -53,6 +53,11 @@ a = Analysis(
         # OS keystore for secure credential storage
         'keyring',
         'keyring.backends',
+        # Sales import — the manual "Import Sales" button and the automatic
+        # ATRIA sync must both import this from the frozen archive (never
+        # load the loose copy in scripts/ off disk), so bundle it explicitly.
+        'scripts.import_sales',
+        'scripts.fetch_atria_sales',
         # Reports hub — all report screens are loaded via importlib.import_module,
         # so PyInstaller cannot detect them through static analysis.
         'controllers.report_controller',

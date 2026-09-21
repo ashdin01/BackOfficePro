@@ -212,8 +212,11 @@ def _import_rows(rows, source):
 
     sales_daily has UNIQUE(sale_date, plu). ON CONFLICT DO UPDATE means
     re-importing the same date silently overwrites existing values rather
-    than inserting duplicates. Stock movements are keyed on the same
-    reference string, so they are also created only once per PLU per date.
+    than inserting duplicates. Stock movements are sized to the change against
+    the row's previous quantity (delta), so a repeat import of an unchanged
+    day creates none. That check reads sales_daily, not stock_movements, so it
+    holds regardless of which reference format earlier movements were written
+    in.
     """
     if not rows:
         print("  WARNING: No data rows found")

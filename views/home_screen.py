@@ -7,9 +7,9 @@ from PyQt6.QtGui import QFont
 import config.styles as styles
 import controllers.dashboard_controller as dash_ctrl
 import controllers.tasks_controller as tasks_ctrl
+import scripts.import_sales as import_sales
 import os
 import sys
-import importlib.util
 import logging
 from datetime import date, timedelta
 
@@ -46,21 +46,15 @@ def _run_import(parent, paths):
     """
     Shared import logic — used by both HomeScreen and SalesReportView.
     Returns (success: bool, message: str).
+
+    Uses the same ``scripts.import_sales`` module as the automatic ATRIA sync
+    (scripts/fetch_atria_sales.py). Don't load import_sales.py from disk here:
+    in a frozen build a plain import is served from the compiled archive, so a
+    disk load can run different (newer or older) logic than the overnight sync,
+    and the two then disagree about what has already been deducted.
     """
-    if getattr(sys, "frozen", False):
-        script = os.path.join(sys._MEIPASS, "scripts", "import_sales.py")
-    else:
-        script = os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "scripts", "import_sales.py"))
-
-    if not os.path.exists(script):
-        return False, f"import_sales.py not found at:\n{script}"
-
     try:
-        spec   = importlib.util.spec_from_file_location("import_sales", script)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = import_sales
         module.ensure_tables()
         errors = []
         total_unmatched = 0

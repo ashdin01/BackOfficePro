@@ -127,15 +127,7 @@ class TestRunImportUnmatchedMessage:
         fake_module.ensure_tables = MagicMock()
         fake_module.import_csv = MagicMock(return_value=(5, 5, 0))
 
-        def fake_exec_module(module):
-            pass
-
-        monkeypatch.setattr(_mod.os.path, "exists", lambda p: True)
-        monkeypatch.setattr(
-            _mod.importlib.util, "spec_from_file_location",
-            lambda name, path: MagicMock(loader=MagicMock(exec_module=lambda m: None))
-        )
-        monkeypatch.setattr(_mod.importlib.util, "module_from_spec", lambda spec: fake_module)
+        monkeypatch.setattr(_mod, "import_sales", fake_module)
 
         success, message = _run_import(None, [str(tmp_path / "f.csv")])
 
@@ -150,12 +142,7 @@ class TestRunImportUnmatchedMessage:
         fake_module.ensure_tables = MagicMock()
         fake_module.import_csv = MagicMock(return_value=(5, 3, 2))
 
-        monkeypatch.setattr(_mod.os.path, "exists", lambda p: True)
-        monkeypatch.setattr(
-            _mod.importlib.util, "spec_from_file_location",
-            lambda name, path: MagicMock(loader=MagicMock(exec_module=lambda m: None))
-        )
-        monkeypatch.setattr(_mod.importlib.util, "module_from_spec", lambda spec: fake_module)
+        monkeypatch.setattr(_mod, "import_sales", fake_module)
 
         success, message = _run_import(None, [str(tmp_path / "f.csv")])
 
@@ -171,12 +158,7 @@ class TestRunImportUnmatchedMessage:
         fake_module.ensure_tables = MagicMock()
         fake_module.import_csv = MagicMock(side_effect=[(5, 3, 1), (4, 4, 3)])
 
-        monkeypatch.setattr(_mod.os.path, "exists", lambda p: True)
-        monkeypatch.setattr(
-            _mod.importlib.util, "spec_from_file_location",
-            lambda name, path: MagicMock(loader=MagicMock(exec_module=lambda m: None))
-        )
-        monkeypatch.setattr(_mod.importlib.util, "module_from_spec", lambda spec: fake_module)
+        monkeypatch.setattr(_mod, "import_sales", fake_module)
 
         success, message = _run_import(
             None, [str(tmp_path / "a.csv"), str(tmp_path / "b.csv")]

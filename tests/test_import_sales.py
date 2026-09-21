@@ -410,3 +410,68 @@ def test_import_rows_creates_stock_movement_when_plu_mapped(test_db, db_conn, de
     assert mv is not None
     assert mv['movement_type'] == 'SALE'
     assert mv['quantity'] == -4.0
+
+
+# ── Manual import vs. automatic ATRIA sync (regression: 2026-09-20 double-count) ──
+#
+# The manual "Import Sales" button (views/home_screen.py::_run_import) and the
+# overnight sync (scripts/fetch_atria_sales.py) must run the same import logic.
+# When they didn't, a Sunday-evening manual import followed by the 5am sync of
+# the same day deducted that day's sales twice.
+
+class TestManualImportThenAutoSync:
+    def test_both_paths_use_the_same_import_module(self):
+        import views.home_screen as home_screen
+        import scripts.fetch_atria_sales as fetch_atria_sales
+
+        assert home_screen.import_sales is fetch_atria_sales.import_sales
+
+    def test_same_day_imported_twice_deducts_once(
+        self, test_db, db_conn, product_barcode, tmp_path
+    ):
+        import views.home_screen as home_screen
+        import scripts.fetch_atria_sales as fetch_atria_sales
+
+        db_conn.execute(
+            "INSERT INTO plu_barcode_map (plu, barcode) VALUES (1027, ?)", (product_barcode,)
+        )
+        db_conn.commit()
+        csv_path = _write_csv(
+            tmp_path, [_make_csv_row(plu='1027', quantity='1', sale_date='20/09/2026')]
+        )
+
+        ok, _msg = home_screen._run_import(None, [csv_path])       # manual, Sunday evening
+        assert ok
+        fetch_atria_sales.import_sales.import_csv(csv_path)        # overnight sync, same day
+
+        moves = db_conn.execute(
+            "SELECT quantity FROM stock_movements WHERE barcode=? AND movement_type='SALE'",
+            (product_barcode,)
+        ).fetchall()
+        assert [m["quantity"] for m in moves] == [-1.0]
+        assert soh_model.get_by_barcode(product_barcode)["quantity"] == pytest.approx(-1.0)
+
+    def test_partial_manual_import_then_full_day_sync_tops_up_the_difference(
+        self, test_db, db_conn, product_barcode, tmp_path
+    ):
+        import views.home_screen as home_screen
+        import scripts.fetch_atria_sales as fetch_atria_sales
+
+        db_conn.execute(
+            "INSERT INTO plu_barcode_map (plu, barcode) VALUES (6881, ?)", (product_barcode,)
+        )
+        db_conn.commit()
+        partial = _write_csv(
+            tmp_path, [_make_csv_row(plu='6881', quantity='8', sale_date='20/09/2026')],
+            filename='partial.csv',
+        )
+        full = _write_csv(
+            tmp_path, [_make_csv_row(plu='6881', quantity='9', sale_date='20/09/2026')],
+            filename='full.csv',
+        )
+
+        ok, _msg = home_screen._run_import(None, [partial])
+        assert ok
+        fetch_atria_sales.import_sales.import_csv(full)
+
+        assert soh_model.get_by_barcode(product_barcode)["quantity"] == pytest.approx(-9.0)

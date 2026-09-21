@@ -259,3 +259,30 @@ class TestBackfillMovements:
 
     def test_backfill_no_orphans_does_nothing(self, test_db, product_barcode):
         sd_model.backfill_movements('777', product_barcode)  # no sales_daily rows
+
+
+class TestBackfillIgnoresVersionedReferences:
+    """scripts/import_sales.py writes SALE-<date>-PLU<n>-Q<total> references.
+    A day already deducted under that format must not look orphaned."""
+
+    def test_backfill_skips_day_already_deducted_under_versioned_reference(
+        self, test_db, product_barcode, db_conn
+    ):
+        db_conn.execute("""
+            INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, sales_dollars)
+            VALUES ('2026-09-20', '1027', 'Cracker', 1, 6.49)
+        """)
+        db_conn.execute("""
+            INSERT INTO stock_movements
+                (barcode, movement_type, quantity, reference, notes, created_by)
+            VALUES (?, 'SALE', -1, 'SALE-2026-09-20-PLU1027-Q1', 'delta import', 'CSV Import')
+        """, (product_barcode,))
+        db_conn.commit()
+
+        sd_model.backfill_movements('1027', product_barcode)
+
+        rows = db_conn.execute(
+            "SELECT * FROM stock_movements WHERE barcode=? AND movement_type='SALE'",
+            (product_barcode,)
+        ).fetchall()
+        assert len(rows) == 1  # not doubled

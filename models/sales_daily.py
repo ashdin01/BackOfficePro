@@ -285,7 +285,14 @@ def get_sales_for_barcodes_range(barcodes, date_from, date_to):
 # ── Backfill helper ───────────────────────────────────────────────────────────
 
 def backfill_movements(plu, barcode: str):
-    """Create stock movements for sales_daily rows imported before PLU was mapped."""
+    """Create stock movements for sales_daily rows imported before PLU was mapped.
+
+    A day already has its stock deducted if any SALE movement exists for it
+    under either reference format: the plain ``SALE-<date>-PLU<n>`` written
+    before v2.17.1, or the versioned ``SALE-<date>-PLU<n>-Q<total>`` written by
+    scripts/import_sales.py since. Matching only the plain form makes every
+    delta-imported day look orphaned and deducts it a second time.
+    """
     try:
         plu_str = str(plu).strip()
         with db_conn() as conn:
@@ -296,7 +303,8 @@ def backfill_movements(plu, barcode: str):
                 AND NOT EXISTS (
                     SELECT 1 FROM stock_movements sm
                     WHERE sm.barcode = ?
-                    AND sm.reference = 'SALE-' || sd.sale_date || '-PLU' || sd.plu
+                    AND (sm.reference = 'SALE-' || sd.sale_date || '-PLU' || sd.plu
+                         OR sm.reference LIKE 'SALE-' || sd.sale_date || '-PLU' || sd.plu || '-Q%')
                 )
                 ORDER BY sd.sale_date
             """, (plu_str, barcode)).fetchall()
