@@ -800,7 +800,8 @@ class POReceive(BaseView):
                 use_by_cb, use_by_date_edit = entry
             qty_input.setValue(remaining_units)
 
-    def _confirm(self):
+    def _validate_invoice_number(self) -> bool:
+        """Require a supplier invoice number; highlight the field red if missing."""
         supplier_inv = self.supplier_invoice_input.text().strip()
         if not supplier_inv:
             self.supplier_invoice_input.setStyleSheet(
@@ -813,7 +814,7 @@ class POReceive(BaseView):
                 self, "Invoice Number Required",
                 "Please enter the supplier invoice number before confirming receipt."
             )
-            return
+            return False
 
         # Reset border if previously highlighted
         self.supplier_invoice_input.setStyleSheet(
@@ -822,32 +823,38 @@ class POReceive(BaseView):
             f" font-size: 13px; }}"
             f"QLineEdit:focus {{ border-color: {styles.CLR_ACCENT_HOVER}; }}"
         )
+        return True
 
-        if self.charges_table is not None:
-            for cr in range(self.charges_table.rowCount()):
-                amt_item = self.charges_table.item(cr, 3)
-                if amt_item is not None and amt_item.data(Qt.ItemDataRole.UserRole) is None:
-                    desc_item = self.charges_table.item(cr, 1)
-                    desc = (desc_item.text() if desc_item else '') or f"row {cr + 1}"
-                    QMessageBox.warning(
-                        self, "Invalid Charge Amount",
-                        f"The amount for charge '{desc}' isn't a valid number "
-                        "(negative amounts are only allowed for a Rounding charge). "
-                        "Please fix it before confirming receipt."
-                    )
-                    self.charges_table.setCurrentCell(cr, 3)
-                    return
+    def _validate_charge_amounts(self) -> bool:
+        """Every charges-table amount must already be a valid float (set via UserRole)."""
+        if self.charges_table is None:
+            return True
+        for cr in range(self.charges_table.rowCount()):
+            amt_item = self.charges_table.item(cr, 3)
+            if amt_item is not None and amt_item.data(Qt.ItemDataRole.UserRole) is None:
+                desc_item = self.charges_table.item(cr, 1)
+                desc = (desc_item.text() if desc_item else '') or f"row {cr + 1}"
+                QMessageBox.warning(
+                    self, "Invalid Charge Amount",
+                    f"The amount for charge '{desc}' isn't a valid number "
+                    "(negative amounts are only allowed for a Rounding charge). "
+                    "Please fix it before confirming receipt."
+                )
+                self.charges_table.setCurrentCell(cr, 3)
+                return False
+        return True
 
-        po = po_ctrl.get_po_by_id(self.po_id)
-        po_number = po['po_number']
-
+    def _check_po_receivable(self, po, po_number) -> bool:
         if po['status'] in ('RECEIVED', 'REVERSED', 'CANCELLED'):
             QMessageBox.warning(
                 self, "Cannot Receive",
                 f"{po_number} has status '{po['status']}' and cannot be received again."
             )
-            return
+            return False
+        return True
 
+    def _confirm_over_received(self) -> bool:
+        """Warn (with an opt-out) if any line receives more than remains on order."""
         over_received_lines = []
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
@@ -857,25 +864,28 @@ class POReceive(BaseView):
             if qty > remaining_units:
                 over_received_lines.append((line['description'], qty, remaining_units, qty - remaining_units))
 
-        if over_received_lines:
-            detail = "\n".join(
-                f"  •  {desc}: receiving {qty} unit(s) — only {remaining} remaining "
-                f"on order ({over} over)"
-                for desc, qty, remaining, over in over_received_lines
-            )
-            reply = QMessageBox.warning(
-                self, "Over-Received Stock",
-                "These line(s) are receiving MORE than what remains on the order:\n\n"
-                f"{detail}\n\n"
-                "Stock on hand will be credited the full quantity entered. "
-                "If this wasn't intentional (e.g. a mis-typed quantity), go back and "
-                "fix it now.\n\nContinue with the over-received quantity?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+        if not over_received_lines:
+            return True
 
+        detail = "\n".join(
+            f"  •  {desc}: receiving {qty} unit(s) — only {remaining} remaining "
+            f"on order ({over} over)"
+            for desc, qty, remaining, over in over_received_lines
+        )
+        reply = QMessageBox.warning(
+            self, "Over-Received Stock",
+            "These line(s) are receiving MORE than what remains on the order:\n\n"
+            f"{detail}\n\n"
+            "Stock on hand will be credited the full quantity entered. "
+            "If this wasn't intentional (e.g. a mis-typed quantity), go back and "
+            "fix it now.\n\nContinue with the over-received quantity?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _confirm_partial_cartons(self) -> bool:
+        """Warn (with an opt-out) if any line's qty isn't a whole number of cartons."""
         partial_carton_lines = []
         for entry in self._inputs:
             line, pack_qty, qty_input, cost_input, promo_cb, \
@@ -886,25 +896,27 @@ class POReceive(BaseView):
                 cartons = max(1, math.ceil(qty / pack_qty))
                 partial_carton_lines.append((line['description'], qty, pack_qty, cartons))
 
-        if partial_carton_lines:
-            detail = "\n".join(
-                f"  •  {desc}: {qty} units (pack of {pk}) — will be recorded "
-                f"as {cartons} carton(s) received"
-                for desc, qty, pk, cartons in partial_carton_lines
-            )
-            reply = QMessageBox.question(
-                self, "Partial Carton Quantity",
-                "These line(s) aren't a whole number of cartons:\n\n"
-                f"{detail}\n\n"
-                "Stock on hand will be credited exactly what you entered, but "
-                "the PO's recorded carton count will round up — if this "
-                "wasn't intentional (e.g. a mis-typed quantity), go back and "
-                "fix it now.\n\nContinue anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+        if not partial_carton_lines:
+            return True
 
+        detail = "\n".join(
+            f"  •  {desc}: {qty} units (pack of {pk}) — will be recorded "
+            f"as {cartons} carton(s) received"
+            for desc, qty, pk, cartons in partial_carton_lines
+        )
+        reply = QMessageBox.question(
+            self, "Partial Carton Quantity",
+            "These line(s) aren't a whole number of cartons:\n\n"
+            f"{detail}\n\n"
+            "Stock on hand will be credited exactly what you entered, but "
+            "the PO's recorded carton count will round up — if this "
+            "wasn't intentional (e.g. a mis-typed quantity), go back and "
+            "fix it now.\n\nContinue anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _confirm_receipt_dialog(self) -> bool:
         promo_count = sum(
             1 for entry in self._inputs
             if entry[4].isChecked() and entry[2].value() > 0
@@ -915,9 +927,10 @@ class POReceive(BaseView):
                    f"⚠  {promo_count} promo line(s) — stock will be received "
                    f"but cost price will NOT be updated for those items.")
         reply = QMessageBox.question(self, "Confirm Receipt", msg)
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+        return reply == QMessageBox.StandardButton.Yes
 
+    def _build_line_receipts(self):
+        """Return (line_receipts, all_received) from the current input widgets."""
         line_receipts = []
         all_received  = True
 
@@ -950,10 +963,14 @@ class POReceive(BaseView):
                                              if use_by_cb.isChecked() else None),
                 })
 
-        status = PO_STATUS_RECEIVED if all_received else PO_STATUS_PARTIAL
+        return line_receipts, all_received
 
-        # Collect additional charges — amounts already validated above, so
-        # every row's UserRole is a real float here.
+    def _build_charges_payload(self):
+        """Charges-table rows as receive_po_atomic expects them.
+
+        Amounts are already validated by _validate_charge_amounts(), so every
+        row's UserRole is a real float here.
+        """
         charges = []
         if self.charges_table is not None:
             for cr in range(self.charges_table.rowCount()):
@@ -973,6 +990,30 @@ class POReceive(BaseView):
                     'tax_rate':      tax_rate,
                     'amount_inc_tax': amt,
                 })
+        return charges
+
+    def _confirm(self):
+        if not self._validate_invoice_number():
+            return
+        if not self._validate_charge_amounts():
+            return
+
+        po = po_ctrl.get_po_by_id(self.po_id)
+        po_number = po['po_number']
+
+        if not self._check_po_receivable(po, po_number):
+            return
+        if not self._confirm_over_received():
+            return
+        if not self._confirm_partial_cartons():
+            return
+        if not self._confirm_receipt_dialog():
+            return
+
+        line_receipts, all_received = self._build_line_receipts()
+        status = PO_STATUS_RECEIVED if all_received else PO_STATUS_PARTIAL
+        charges = self._build_charges_payload()
+        supplier_inv = self.supplier_invoice_input.text().strip()
 
         try:
             po_ctrl.receive_po_atomic(self.po_id, po_number, line_receipts, status,
