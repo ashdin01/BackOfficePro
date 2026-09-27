@@ -250,6 +250,28 @@ class POReceive(BaseView):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
+        self._apply_stylesheet()
+
+        self.header = QLabel()
+        layout.addWidget(self.header)
+
+        self._build_invoice_row(layout)
+
+        note = QLabel(
+            "💡  Enter units received and cost per unit.  "
+            "For weighed items ⚖ also enter total weight — "
+            "Line Total = Weight (kg) × Cost per kg.  "
+            "Stock on hand always adjusts by number of items.  "
+            "☑ Promo = cost price will NOT be updated in the product master."
+        )
+        note.setStyleSheet("color: #FFA500; font-size: 11px; padding: 4px 0;")
+        layout.addWidget(note)
+
+        self._build_receiving_table(layout)
+        self._build_charges_section(layout)
+        self._build_action_buttons(layout)
+
+    def _apply_stylesheet(self):
         self.setStyleSheet(f"""
             QWidget          {{ background: {self.BG}; color: {self.FG}; }}
             QLabel           {{ color: {self.FG}; background: transparent; }}
@@ -274,10 +296,7 @@ class POReceive(BaseView):
             QPushButton:hover {{ background: {self.BORDER}; }}
         """)
 
-        self.header = QLabel()
-        layout.addWidget(self.header)
-
-        # ── Supplier Invoice Number (required) ────────────────────────
+    def _build_invoice_row(self, layout):
         inv_row = QHBoxLayout()
         inv_lbl = QLabel("Supplier Invoice #:")
         inv_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
@@ -295,16 +314,7 @@ class POReceive(BaseView):
         inv_row.addStretch()
         layout.addLayout(inv_row)
 
-        note = QLabel(
-            "💡  Enter units received and cost per unit.  "
-            "For weighed items ⚖ also enter total weight — "
-            "Line Total = Weight (kg) × Cost per kg.  "
-            "Stock on hand always adjusts by number of items.  "
-            "☑ Promo = cost price will NOT be updated in the product master."
-        )
-        note.setStyleSheet("color: #FFA500; font-size: 11px; padding: 4px 0;")
-        layout.addWidget(note)
-
+    def _build_receiving_table(self, layout):
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
         self.table.setStyleSheet(
@@ -343,7 +353,7 @@ class POReceive(BaseView):
         self.total_label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(self.total_label)
 
-        # ── Additional Charges ────────────────────────────────────
+    def _build_charges_section(self, layout):
         charges_header = QHBoxLayout()
         charges_lbl = QLabel("Additional Charges  (freight, fuel levy, rounding, surcharges etc.)")
         charges_lbl.setStyleSheet(f"color: {styles.CLR_MUTED}; font-size: 11px; font-weight: bold;")
@@ -377,6 +387,7 @@ class POReceive(BaseView):
         self.charges_table.itemChanged.connect(self._on_charge_item_changed)
         layout.addWidget(self.charges_table)
 
+    def _build_action_buttons(self, layout):
         btns = QHBoxLayout()
         btn_receive_all = QPushButton("Receive All")
         btn_receive_all.setFixedHeight(35)
@@ -487,14 +498,8 @@ class POReceive(BaseView):
 
     def _load(self):
         po = po_ctrl.get_po_by_id(self.po_id)
-        self.setWindowTitle(f"Receive: {po['po_number']}")
-        self.header.setText(
-            f"<b>{po['po_number']}</b> — {po['supplier_name']} "
-            f"— Status: <b>{po['status']}</b>"
-        )
-        existing_inv = po['supplier_invoice_number'] or ''
-        if existing_inv:
-            self.supplier_invoice_input.setText(existing_inv)
+        self._set_header_and_invoice(po)
+
         self.lines = po_ctrl.get_po_lines(self.po_id)
         self.table.setRowCount(0)
 
@@ -511,176 +516,192 @@ class POReceive(BaseView):
         for line in self.lines:
             if line['is_note']:
                 continue
-            r = self.table.rowCount()
-            self.table.insertRow(r)
-
-            product      = product_ctrl.get_product_by_barcode(line['barcode'])
-            pack_qty     = int(line['pack_qty']) if line['pack_qty'] else 1
-            pack_unit    = (product['pack_unit'] or 'EA') if product else 'EA'
-            current_cost = float(product['cost_price']) if product else 0.0
-            is_vw        = bool(product['variable_weight']) if product else False
-            tax_rate     = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
-
-            ordered_cartons  = int(line['ordered_qty'])
-            ordered_units    = ordered_cartons * pack_qty
-            received_cartons = int(line['received_qty'])
-            received_units   = received_cartons * pack_qty
-            remaining_units  = ordered_units - received_units
-
-            # ── Static cells ─────────────────────────────────────────
-            self.table.setItem(r, 0, self._cell(line['barcode'], Qt.AlignmentFlag.AlignCenter))
-            # Description — append ⚖ indicator for weighed items
-            desc_text = f"⚖ {line['description']}" if is_vw else line['description']
-            self.table.setItem(r, 1, self._cell(desc_text))
-            self.table.setItem(r, 2, self._cell(
-                f"{pack_qty} × {pack_unit}" if pack_qty > 1 else pack_unit,
-                Qt.AlignmentFlag.AlignCenter))
-            self.table.setItem(r, 3, self._cell(str(ordered_units),  Qt.AlignmentFlag.AlignCenter))
-            self.table.setItem(r, 4, self._cell(str(received_units), Qt.AlignmentFlag.AlignCenter))
-
-            # ── Col 5: Receiving Now (always items, always integer) ──
-            # Max is not capped at remaining_units — deliveries sometimes
-            # arrive with more stock than was ordered, and the user should
-            # be able to record what actually turned up. Over-receiving is
-            # flagged with a highlighted border and confirmed at Confirm
-            # Receipt time instead of being blocked here.
-            qty_input = QSpinBox()
-            qty_input.setMinimum(0)
-            qty_input.setMaximum(999999)
-            qty_input.setSingleStep(pack_qty)
-            qty_input.setValue(0)
-            qty_input.setToolTip("Units received now")
-            self.table.setCellWidget(r, 5, qty_input)
-
-            # ── Col 6: Weight (kg) — weighed items only ──────────────
-            weight_input = QDoubleSpinBox()
-            weight_input.setMinimum(0.0)
-            weight_input.setMaximum(999999.0)
-            weight_input.setDecimals(3)
-            weight_input.setSuffix(" kg")
-            weight_input.setValue(0.0)
-            weight_input.setToolTip("Total weight received for this line")
-
-            if is_vw:
-                self.table.setCellWidget(r, 6, weight_input)
-            else:
-                # Hide the weight column cell for non-weighed items
-                placeholder = self._cell("—", Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(r, 6, placeholder)
-
-            # ── Col 7: Cost per unit or per kg ───────────────────────
-            cost_input = QDoubleSpinBox()
-            cost_input.setMinimum(0)
-            cost_input.setMaximum(999999)
-            cost_input.setDecimals(4)
-            cost_input.setValue(current_cost if current_cost > 0 else line['unit_cost'])
-            if is_vw:
-                cost_input.setToolTip(
-                    "Cost per kg — Line Total = Weight × Cost/kg.  "
-                    "Saved back to product master (unless Promo)."
-                )
-            else:
-                cost_input.setToolTip(
-                    "Cost per unit — updates product cost price on confirm (unless Promo is ticked)"
-                )
-            self.table.setCellWidget(r, 7, cost_input)
-
-            # ── Col 8: Promo checkbox ────────────────────────────────
-            promo_cb = QCheckBox()
-            try:
-                promo_cb.setChecked(bool(line['is_promo']))
-            except (IndexError, KeyError):
-                promo_cb.setChecked(False)
-            promo_cb.setToolTip(
-                "Promo price — stock will be received at this cost\n"
-                "but the product master cost price will NOT be updated."
-            )
-            cb_container = QWidget()
-            cb_lay = QHBoxLayout(cb_container)
-            cb_lay.addWidget(promo_cb)
-            cb_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            cb_lay.setContentsMargins(0, 0, 0, 0)
-            self.table.setCellWidget(r, 9, cb_container)
-            promo_cb.stateChanged.connect(lambda _, row=r: self._refresh_promo_colour(row))
-
-            # ── Col 12: Use-By date — optional, per batch ────────────
-            use_by_cb = QCheckBox("Track")
-            use_by_cb.setToolTip(
-                "Record this receipt as a batch with a use-by/best-before date\n"
-                "for the Home screen's expiry warnings."
-            )
-            use_by_date_edit = QDateEdit()
-            use_by_date_edit.setCalendarPopup(True)
-            use_by_date_edit.setDate(QDate.currentDate())
-            use_by_date_edit.setEnabled(False)
-            use_by_cb.toggled.connect(use_by_date_edit.setEnabled)
-            use_by_container = QWidget()
-            use_by_lay = QHBoxLayout(use_by_container)
-            use_by_lay.addWidget(use_by_cb)
-            use_by_lay.addWidget(use_by_date_edit)
-            use_by_lay.setContentsMargins(4, 0, 4, 0)
-            self.table.setCellWidget(r, 12, use_by_container)
-
-            # ── Col 10: Line Total ex. GST — read only ─────────────────
-            lt_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(r, 10, lt_item)
-            # ── Col 11: Line Total inc. Tax — read only ──────────────────
-            lt_inc_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            lt_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
-            self.table.setItem(r, 11, lt_inc_item)
-            # ── Col 10: Cost inc. GST — read only ────────────────────
-            cost_inc = current_cost * (1 + tax_rate / 100)
-            cost_inc_item = self._cell(f"${cost_inc:.4f}", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            cost_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
-            self.table.setItem(r, 8, cost_inc_item)
-
-            # ── Signal connections ────────────────────────────────────
-            qty_input.valueChanged.connect(lambda _, row=r: self._refresh_line(row))
-            cost_input.valueChanged.connect(lambda _, row=r: self._refresh_line(row))
-            if is_vw:
-                weight_input.valueChanged.connect(lambda _, row=r: self._refresh_line(row))
-
-            # ── Enter key navigation ──────────────────────────────────
-            if is_vw:
-                # qty → weight → cost → next row qty
-                qty_filter = _SpinEnterFilter(weight_input, qty_input)
-                qty_input.installEventFilter(qty_filter)
-                weight_filter = _SpinEnterFilter(cost_input, weight_input)
-                weight_input.installEventFilter(weight_filter)
-            else:
-                # qty → cost → next row qty
-                qty_filter = _SpinEnterFilter(cost_input, qty_input)
-                qty_input.installEventFilter(qty_filter)
-
-            cost_input.installEventFilter(
-                _CostEnterFilter(
-                    cost_input=cost_input,
-                    original_cost=current_cost,
-                    barcode=line['barcode'],
-                    description=line['description'],
-                    row_index=r,
-                    inputs_ref=self._inputs,
-                    promo_cb=promo_cb,
-                    parent_widget=self,
-                    is_weight=is_vw,
-                )
-            )
-
-            self._inputs.append((
-                line, pack_qty, qty_input, cost_input, promo_cb,
-                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item,
-                use_by_cb, use_by_date_edit
-            ))
-            self._refresh_line(r)
+            self._add_receiving_row(line)
 
         self._update_total()
+        self._focus_first_qty_input()
 
-        # Auto-focus first Receiving Now spinner
+    def _set_header_and_invoice(self, po):
+        self.setWindowTitle(f"Receive: {po['po_number']}")
+        self.header.setText(
+            f"<b>{po['po_number']}</b> — {po['supplier_name']} "
+            f"— Status: <b>{po['status']}</b>"
+        )
+        existing_inv = po['supplier_invoice_number'] or ''
+        if existing_inv:
+            self.supplier_invoice_input.setText(existing_inv)
+
+    def _focus_first_qty_input(self):
         if self._inputs:
             first_qty = self._inputs[0][2]
             self.table.setCurrentCell(0, 5)
             first_qty.setFocus()
             first_qty.selectAll()
+
+    def _add_receiving_row(self, line):
+        """Build one Receiving table row (widgets + signal wiring) for `line`,
+        append its input-widget tuple to self._inputs, and prime its totals."""
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+
+        product      = product_ctrl.get_product_by_barcode(line['barcode'])
+        pack_qty     = int(line['pack_qty']) if line['pack_qty'] else 1
+        pack_unit    = (product['pack_unit'] or 'EA') if product else 'EA'
+        current_cost = float(product['cost_price']) if product else 0.0
+        is_vw        = bool(product['variable_weight']) if product else False
+        tax_rate     = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
+
+        ordered_cartons  = int(line['ordered_qty'])
+        ordered_units    = ordered_cartons * pack_qty
+        received_cartons = int(line['received_qty'])
+        received_units   = received_cartons * pack_qty
+        remaining_units  = ordered_units - received_units
+
+        # ── Static cells ─────────────────────────────────────────
+        self.table.setItem(r, 0, self._cell(line['barcode'], Qt.AlignmentFlag.AlignCenter))
+        # Description — append ⚖ indicator for weighed items
+        desc_text = f"⚖ {line['description']}" if is_vw else line['description']
+        self.table.setItem(r, 1, self._cell(desc_text))
+        self.table.setItem(r, 2, self._cell(
+            f"{pack_qty} × {pack_unit}" if pack_qty > 1 else pack_unit,
+            Qt.AlignmentFlag.AlignCenter))
+        self.table.setItem(r, 3, self._cell(str(ordered_units),  Qt.AlignmentFlag.AlignCenter))
+        self.table.setItem(r, 4, self._cell(str(received_units), Qt.AlignmentFlag.AlignCenter))
+
+        # ── Col 5: Receiving Now (always items, always integer) ──
+        # Max is not capped at remaining_units — deliveries sometimes
+        # arrive with more stock than was ordered, and the user should
+        # be able to record what actually turned up. Over-receiving is
+        # flagged with a highlighted border and confirmed at Confirm
+        # Receipt time instead of being blocked here.
+        qty_input = QSpinBox()
+        qty_input.setMinimum(0)
+        qty_input.setMaximum(999999)
+        qty_input.setSingleStep(pack_qty)
+        qty_input.setValue(0)
+        qty_input.setToolTip("Units received now")
+        self.table.setCellWidget(r, 5, qty_input)
+
+        # ── Col 6: Weight (kg) — weighed items only ──────────────
+        weight_input = QDoubleSpinBox()
+        weight_input.setMinimum(0.0)
+        weight_input.setMaximum(999999.0)
+        weight_input.setDecimals(3)
+        weight_input.setSuffix(" kg")
+        weight_input.setValue(0.0)
+        weight_input.setToolTip("Total weight received for this line")
+
+        if is_vw:
+            self.table.setCellWidget(r, 6, weight_input)
+        else:
+            # Hide the weight column cell for non-weighed items
+            placeholder = self._cell("—", Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(r, 6, placeholder)
+
+        # ── Col 7: Cost per unit or per kg ───────────────────────
+        cost_input = QDoubleSpinBox()
+        cost_input.setMinimum(0)
+        cost_input.setMaximum(999999)
+        cost_input.setDecimals(4)
+        cost_input.setValue(current_cost if current_cost > 0 else line['unit_cost'])
+        if is_vw:
+            cost_input.setToolTip(
+                "Cost per kg — Line Total = Weight × Cost/kg.  "
+                "Saved back to product master (unless Promo)."
+            )
+        else:
+            cost_input.setToolTip(
+                "Cost per unit — updates product cost price on confirm (unless Promo is ticked)"
+            )
+        self.table.setCellWidget(r, 7, cost_input)
+
+        # ── Col 8: Promo checkbox ────────────────────────────────
+        promo_cb = QCheckBox()
+        try:
+            promo_cb.setChecked(bool(line['is_promo']))
+        except (IndexError, KeyError):
+            promo_cb.setChecked(False)
+        promo_cb.setToolTip(
+            "Promo price — stock will be received at this cost\n"
+            "but the product master cost price will NOT be updated."
+        )
+        cb_container = QWidget()
+        cb_lay = QHBoxLayout(cb_container)
+        cb_lay.addWidget(promo_cb)
+        cb_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cb_lay.setContentsMargins(0, 0, 0, 0)
+        self.table.setCellWidget(r, 9, cb_container)
+        promo_cb.stateChanged.connect(lambda _, row=r: self._refresh_promo_colour(row))
+
+        # ── Col 12: Use-By date — optional, per batch ────────────
+        use_by_cb = QCheckBox("Track")
+        use_by_cb.setToolTip(
+            "Record this receipt as a batch with a use-by/best-before date\n"
+            "for the Home screen's expiry warnings."
+        )
+        use_by_date_edit = QDateEdit()
+        use_by_date_edit.setCalendarPopup(True)
+        use_by_date_edit.setDate(QDate.currentDate())
+        use_by_date_edit.setEnabled(False)
+        use_by_cb.toggled.connect(use_by_date_edit.setEnabled)
+        use_by_container = QWidget()
+        use_by_lay = QHBoxLayout(use_by_container)
+        use_by_lay.addWidget(use_by_cb)
+        use_by_lay.addWidget(use_by_date_edit)
+        use_by_lay.setContentsMargins(4, 0, 4, 0)
+        self.table.setCellWidget(r, 12, use_by_container)
+
+        # ── Col 10: Line Total ex. GST — read only ─────────────────
+        lt_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.table.setItem(r, 10, lt_item)
+        # ── Col 11: Line Total inc. Tax — read only ──────────────────
+        lt_inc_item = self._cell("$0.00", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        lt_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
+        self.table.setItem(r, 11, lt_inc_item)
+        # ── Col 10: Cost inc. GST — read only ────────────────────
+        cost_inc = current_cost * (1 + tax_rate / 100)
+        cost_inc_item = self._cell(f"${cost_inc:.4f}", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        cost_inc_item.setForeground(QColor(styles.CLR_SUCCESS_ALT) if tax_rate > 0 else QColor('#aaaaaa'))
+        self.table.setItem(r, 8, cost_inc_item)
+
+        # ── Signal connections ────────────────────────────────────
+        qty_input.valueChanged.connect(lambda _, row=r: self._refresh_line(row))
+        cost_input.valueChanged.connect(lambda _, row=r: self._refresh_line(row))
+        if is_vw:
+            weight_input.valueChanged.connect(lambda _, row=r: self._refresh_line(row))
+
+        # ── Enter key navigation ──────────────────────────────────
+        if is_vw:
+            # qty → weight → cost → next row qty
+            qty_filter = _SpinEnterFilter(weight_input, qty_input)
+            qty_input.installEventFilter(qty_filter)
+            weight_filter = _SpinEnterFilter(cost_input, weight_input)
+            weight_input.installEventFilter(weight_filter)
+        else:
+            # qty → cost → next row qty
+            qty_filter = _SpinEnterFilter(cost_input, qty_input)
+            qty_input.installEventFilter(qty_filter)
+
+        cost_input.installEventFilter(
+            _CostEnterFilter(
+                cost_input=cost_input,
+                original_cost=current_cost,
+                barcode=line['barcode'],
+                description=line['description'],
+                row_index=r,
+                inputs_ref=self._inputs,
+                promo_cb=promo_cb,
+                parent_widget=self,
+                is_weight=is_vw,
+            )
+        )
+
+        self._inputs.append((
+            line, pack_qty, qty_input, cost_input, promo_cb,
+            lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item,
+            use_by_cb, use_by_date_edit
+        ))
+        self._refresh_line(r)
 
     def _refresh_promo_colour(self, row):
         cb = self._inputs[row][4] if row < len(self._inputs) else None
