@@ -44,6 +44,14 @@ class PODetail(BaseView):
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
+        self._build_header_and_banners(layout)
+        self._build_sales_period_row(layout)
+        self._build_line_table(layout)
+        self._build_totals_row(layout)
+        self._build_action_buttons(layout)
+        self._install_shortcuts()
+
+    def _build_header_and_banners(self, layout):
         self.header = QLabel()
         layout.addWidget(self.header)
 
@@ -57,7 +65,7 @@ class PODetail(BaseView):
         self.supplier_notes_banner.hide()
         layout.addWidget(self.supplier_notes_banner)
 
-        # ── Sales period selector ─────────────────────────────────────────
+    def _build_sales_period_row(self, layout):
         period_row = QHBoxLayout()
         period_row.setSpacing(6)
         period_row.addWidget(QLabel("Sales period:"))
@@ -113,6 +121,7 @@ class PODetail(BaseView):
 
         self._sales_period_label = "Last Week"
 
+    def _build_line_table(self, layout):
         self.table = QTableWidget()
         self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
@@ -134,6 +143,7 @@ class PODetail(BaseView):
         self.table.setToolTip("Double-click any row to open product details")
         layout.addWidget(self.table)
 
+    def _build_totals_row(self, layout):
         totals_row = QHBoxLayout()
         totals_row.addStretch()
         self.subtotal_label = QLabel()
@@ -149,6 +159,7 @@ class PODetail(BaseView):
         totals_row.addWidget(self.total_label)
         layout.addLayout(totals_row)
 
+    def _build_action_buttons(self, layout):
         btns = QHBoxLayout()
 
         btn_add = QPushButton("&Add Line  [A]")
@@ -219,6 +230,7 @@ class PODetail(BaseView):
         btns.addWidget(btn_close)
         layout.addLayout(btns)
 
+    def _install_shortcuts(self):
         QShortcut(QKeySequence("A"), self, self._add_line)
         QShortcut(QKeySequence("N"), self, self._add_note)
         QShortcut(QKeySequence("M"), self, self._mark_sent)
@@ -431,6 +443,24 @@ class PODetail(BaseView):
         if self.on_save:
             self.on_save()
 
+    def _fetch_bulk_row_data(self, lines):
+        """One batch fetch per data source for all lines, instead of N+1 queries per row."""
+        barcodes = [line['barcode'] for line in lines if not line['is_note']]
+        d_from = self._date_from.date().toPyDate()
+        d_to   = self._date_to.date().toPyDate()
+
+        product_map = product_ctrl.get_products_by_barcodes(barcodes)
+        soh_map     = product_ctrl.get_soh_by_barcodes(barcodes)
+        sales_map   = po_controller.get_sales_for_barcodes_range(barcodes, d_from, d_to)
+        # Per-supplier SKU/pack size — a product can be linked to
+        # multiple suppliers with different codes/pack sizes, so this PO
+        # must show what *this* supplier actually uses, not whichever
+        # supplier happens to be the product's default.
+        supplier_overrides = product_ctrl.get_supplier_overrides_for_barcodes(
+            barcodes, self._po['supplier_id']
+        )
+        return product_map, soh_map, sales_map, supplier_overrides
+
     def _populate_table(self, lines):
         self.table.blockSignals(True)
         try:
@@ -439,140 +469,131 @@ class PODetail(BaseView):
             self._line_pack_info = []
             self._line_tax_rates = []
 
-            barcodes = [line['barcode'] for line in lines if not line['is_note']]
-            d_from = self._date_from.date().toPyDate()
-            d_to   = self._date_to.date().toPyDate()
-
-            product_map    = product_ctrl.get_products_by_barcodes(barcodes)
-            soh_map        = product_ctrl.get_soh_by_barcodes(barcodes)
-            sales_map      = po_controller.get_sales_for_barcodes_range(barcodes, d_from, d_to)
-            # Per-supplier SKU/pack size — a product can be linked to
-            # multiple suppliers with different codes/pack sizes, so this PO
-            # must show what *this* supplier actually uses, not whichever
-            # supplier happens to be the product's default.
-            supplier_overrides = product_ctrl.get_supplier_overrides_for_barcodes(
-                barcodes, self._po['supplier_id']
-            )
+            product_map, soh_map, sales_map, supplier_overrides = self._fetch_bulk_row_data(lines)
 
             for line in lines:
                 r = self.table.rowCount()
                 self.table.insertRow(r)
                 self._line_ids.append(line['id'])
 
-                # ── Note line ─────────────────────────────────────────────
                 if line['is_note']:
-                    note_colour = QColor(styles.CLR_MUTED)
-                    note_bg     = QColor(styles.CLR_BG_PANEL)
-                    note_item   = QTableWidgetItem(f"📝  {line['description']}")
-                    note_item.setForeground(note_colour)
-                    note_item.setBackground(note_bg)
-                    note_item.setFlags(note_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    font = note_item.font(); font.setItalic(True); note_item.setFont(font)
-                    self.table.setItem(r, 1, note_item)
-                    for col in [0, 2, 3, 4, 5, 6, 7, 8, 9]:
-                        blank = QTableWidgetItem('')
-                        blank.setBackground(note_bg)
-                        blank.setFlags(blank.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        self.table.setItem(r, col, blank)
-                    self._line_pack_info.append((1, 'EA'))
-                    self._line_tax_rates.append(0.0)
-                    continue
-
-                product  = product_map.get(line['barcode'])
-                override = supplier_overrides.get(line['barcode'])
-                if override:
-                    pack_qty  = int(override['pack_qty']) or 1
-                    pack_unit = override['pack_unit'] or 'EA'
+                    self._add_note_row(r, line)
                 else:
-                    pack_qty  = int(product['pack_qty']) if product and product['pack_qty'] else 1
-                    pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
-                tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
-                self._line_pack_info.append((pack_qty, pack_unit))
-                self._line_tax_rates.append(tax_rate)
-
-                barcode_item = QTableWidgetItem(line['barcode'])
-                barcode_item.setFlags(barcode_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(r, 0, barcode_item)
-
-                desc_item = QTableWidgetItem(line['description'])
-                desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(r, 1, desc_item)
-
-                ctn_item = QTableWidgetItem(f"{pack_qty} × {pack_unit}")
-                ctn_item.setFlags(ctn_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                ctn_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(r, 2, ctn_item)
-
-                if override:
-                    sup_sku = override['supplier_sku'] or ''
-                else:
-                    sup_sku = (product['supplier_sku'] or '') if product else ''
-                sup_sku_item = QTableWidgetItem(sup_sku)
-                sup_sku_item.setFlags(sup_sku_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(r, 3, sup_sku_item)
-
-                on_hand = int(soh_map.get(line['barcode'], 0) or 0)
-                soh_item = QTableWidgetItem(str(on_hand))
-                soh_item.setFlags(soh_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                soh_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(r, 4, soh_item)
-
-                reorder_pt = int(product['reorder_point']) if product else 0
-                rp_item = QTableWidgetItem(str(reorder_pt))
-                rp_item.setFlags(rp_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                rp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(r, 5, rp_item)
-
-                if self._unit_mode:
-                    stored_units  = int(line['ordered_qty'])
-                    total_units   = -stored_units if self._is_return else stored_units
-                    qty_item = QTableWidgetItem(str(total_units))
-                    qty_item.setToolTip(f"{total_units} unit(s)")
-                else:
-                    cartons     = int(line['ordered_qty'])
-                    total_units = cartons * pack_qty
-                    qty_item = QTableWidgetItem(str(total_units))
-                    qty_item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {total_units} units total")
-                qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(r, 6, qty_item)
-
-                cost_item = QTableWidgetItem(f"{line['unit_cost']:.2f}")
-                cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                cost_item.setFlags(cost_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(r, 7, cost_item)
-
-                if product and product['variable_weight']:
-                    received_weight = float(line['received_weight'] or 0)
-                    if received_weight > 0:
-                        line_val = received_weight * line['unit_cost']
-                        total_item = QTableWidgetItem(fmt_money(line_val))
-                        total_item.setToolTip(f"{received_weight:.3f} kg × ${line['unit_cost']:.4f}/kg")
-                    else:
-                        total_item = QTableWidgetItem("— TBD")
-                        total_item.setToolTip("Priced by weight — total known once received")
-                    total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                    total_item.setForeground(QColor("#FFA500"))
-                else:
-                    line_val = total_units * line['unit_cost']
-                    line_str = fmt_money(line_val)
-                    total_item = QTableWidgetItem(line_str)
-                    total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(r, 8, total_item)
-
-                sales_val = sales_map.get(line['barcode'])
-                if sales_val is None:
-                    sales_cell = QTableWidgetItem("—")
-                    sales_cell.setForeground(QColor("#666666"))
-                else:
-                    sales_cell = QTableWidgetItem(str(sales_val) if sales_val > 0 else "0")
-                    sales_cell.setForeground(QColor(styles.CLR_SUCCESS_ALT if sales_val > 0 else "#666666"))
-                sales_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                sales_cell.setFlags(sales_cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.table.setItem(r, 9, sales_cell)
+                    self._add_product_row(r, line, product_map, soh_map, sales_map, supplier_overrides)
         finally:
             self.table.blockSignals(False)
         self._update_total()
+
+    def _add_note_row(self, r, line):
+        note_colour = QColor(styles.CLR_MUTED)
+        note_bg     = QColor(styles.CLR_BG_PANEL)
+        note_item   = QTableWidgetItem(f"📝  {line['description']}")
+        note_item.setForeground(note_colour)
+        note_item.setBackground(note_bg)
+        note_item.setFlags(note_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        font = note_item.font(); font.setItalic(True); note_item.setFont(font)
+        self.table.setItem(r, 1, note_item)
+        for col in [0, 2, 3, 4, 5, 6, 7, 8, 9]:
+            blank = QTableWidgetItem('')
+            blank.setBackground(note_bg)
+            blank.setFlags(blank.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(r, col, blank)
+        self._line_pack_info.append((1, 'EA'))
+        self._line_tax_rates.append(0.0)
+
+    def _add_product_row(self, r, line, product_map, soh_map, sales_map, supplier_overrides):
+        product  = product_map.get(line['barcode'])
+        override = supplier_overrides.get(line['barcode'])
+        if override:
+            pack_qty  = int(override['pack_qty']) or 1
+            pack_unit = override['pack_unit'] or 'EA'
+        else:
+            pack_qty  = int(product['pack_qty']) if product and product['pack_qty'] else 1
+            pack_unit = (product['pack_unit'] or 'EA') if product else 'EA'
+        tax_rate  = float(product['tax_rate']) if product and product['tax_rate'] else 0.0
+        self._line_pack_info.append((pack_qty, pack_unit))
+        self._line_tax_rates.append(tax_rate)
+
+        barcode_item = QTableWidgetItem(line['barcode'])
+        barcode_item.setFlags(barcode_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(r, 0, barcode_item)
+
+        desc_item = QTableWidgetItem(line['description'])
+        desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(r, 1, desc_item)
+
+        ctn_item = QTableWidgetItem(f"{pack_qty} × {pack_unit}")
+        ctn_item.setFlags(ctn_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        ctn_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setItem(r, 2, ctn_item)
+
+        if override:
+            sup_sku = override['supplier_sku'] or ''
+        else:
+            sup_sku = (product['supplier_sku'] or '') if product else ''
+        sup_sku_item = QTableWidgetItem(sup_sku)
+        sup_sku_item.setFlags(sup_sku_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(r, 3, sup_sku_item)
+
+        on_hand = int(soh_map.get(line['barcode'], 0) or 0)
+        soh_item = QTableWidgetItem(str(on_hand))
+        soh_item.setFlags(soh_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        soh_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setItem(r, 4, soh_item)
+
+        reorder_pt = int(product['reorder_point']) if product else 0
+        rp_item = QTableWidgetItem(str(reorder_pt))
+        rp_item.setFlags(rp_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        rp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setItem(r, 5, rp_item)
+
+        if self._unit_mode:
+            stored_units  = int(line['ordered_qty'])
+            total_units   = -stored_units if self._is_return else stored_units
+            qty_item = QTableWidgetItem(str(total_units))
+            qty_item.setToolTip(f"{total_units} unit(s)")
+        else:
+            cartons     = int(line['ordered_qty'])
+            total_units = cartons * pack_qty
+            qty_item = QTableWidgetItem(str(total_units))
+            qty_item.setToolTip(f"{cartons} carton(s) × {pack_qty} {pack_unit} = {total_units} units total")
+        qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setItem(r, 6, qty_item)
+
+        cost_item = QTableWidgetItem(f"{line['unit_cost']:.2f}")
+        cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        cost_item.setFlags(cost_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(r, 7, cost_item)
+
+        if product and product['variable_weight']:
+            received_weight = float(line['received_weight'] or 0)
+            if received_weight > 0:
+                line_val = received_weight * line['unit_cost']
+                total_item = QTableWidgetItem(fmt_money(line_val))
+                total_item.setToolTip(f"{received_weight:.3f} kg × ${line['unit_cost']:.4f}/kg")
+            else:
+                total_item = QTableWidgetItem("— TBD")
+                total_item.setToolTip("Priced by weight — total known once received")
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            total_item.setForeground(QColor("#FFA500"))
+        else:
+            line_val = total_units * line['unit_cost']
+            line_str = fmt_money(line_val)
+            total_item = QTableWidgetItem(line_str)
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(r, 8, total_item)
+
+        sales_val = sales_map.get(line['barcode'])
+        if sales_val is None:
+            sales_cell = QTableWidgetItem("—")
+            sales_cell.setForeground(QColor("#666666"))
+        else:
+            sales_cell = QTableWidgetItem(str(sales_val) if sales_val > 0 else "0")
+            sales_cell.setForeground(QColor(styles.CLR_SUCCESS_ALT if sales_val > 0 else "#666666"))
+        sales_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        sales_cell.setFlags(sales_cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(r, 9, sales_cell)
 
     def _fit_header_widths(self):
         """Expand any non-stretch column that is too narrow to show its header text."""
