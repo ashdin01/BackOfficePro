@@ -403,7 +403,7 @@ class TestViewTransactionPopup:
         )
         with patch('controllers.product_controller.generate_receipt_pdf',
                     side_effect=OSError("disk full")), \
-             patch('views.products.product_edit.show_error') as mock_show_error:
+             patch('views.products.transaction_history_dialog.show_error') as mock_show_error:
             product_edit_view._view_transaction_popup(product_edit_view, 'RCPT-UI-PRINT-002')
             receipt_dlg = captured['dlg']
             print_btn = next(
@@ -414,8 +414,8 @@ class TestViewTransactionPopup:
         mock_show_error.assert_called_once()
 
     def test_unknown_reference_shows_message_not_dialog(self, product_edit_view, qtbot):
-        with patch('views.products.product_edit.QMessageBox') as mock_mb, \
-             patch('views.products.product_edit.QDialog') as mock_dialog:
+        with patch('views.products.transaction_history_dialog.QMessageBox') as mock_mb, \
+             patch('views.products.transaction_history_dialog.QDialog') as mock_dialog:
             product_edit_view._view_transaction_popup(product_edit_view, 'NO-SUCH-REF')
             mock_mb.information.assert_called_once()
             mock_dialog.assert_not_called()
