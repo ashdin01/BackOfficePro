@@ -171,6 +171,46 @@ class TestApplyGuards:
         assert soh is None or soh["quantity"] == 0
 
 
+# ── Enter-key chain: search -> product -> qty -> reason -> Apply ──────────────
+
+class TestReasonEnterTriggersApply:
+    def test_enter_in_reason_field_triggers_apply(
+        self, qtbot, stock_adjust_view, product_barcode, monkeypatch
+    ):
+        """Regression: _LineEnterFilter's docstring promises "Enter on a
+        QLineEdit -> click next widget (button)", but the code only called
+        setFocus(), never click() -- so Enter after typing a reason code
+        silently did nothing instead of applying the adjustment."""
+        from PyQt6.QtCore import Qt
+        from views.stock_adjust.stock_adjust_view import _ConfirmAdjustDialog
+
+        _select_product(stock_adjust_view, product_barcode)
+        stock_adjust_view.qty_spin.setValue(5)
+        stock_adjust_view.adj_type.setText("DG")
+        stock_adjust_view.adj_type.setFocus()
+
+        confirm_exec = MagicMock(return_value=QDialog.DialogCode.Rejected)
+        monkeypatch.setattr(_ConfirmAdjustDialog, "exec", confirm_exec)
+
+        qtbot.keyClick(stock_adjust_view.adj_type, Qt.Key.Key_Return)
+
+        confirm_exec.assert_called_once()
+
+    def test_enter_in_reason_field_does_not_click_disabled_apply(
+        self, qtbot, stock_adjust_view
+    ):
+        """No product selected yet -> Apply is disabled -> Enter must only
+        move focus, never fire a click on a disabled button."""
+        from PyQt6.QtCore import Qt
+
+        assert not stock_adjust_view.apply_btn.isEnabled()
+        stock_adjust_view.adj_type.setFocus()
+
+        qtbot.keyClick(stock_adjust_view.adj_type, Qt.Key.Key_Return)
+
+        assert stock_adjust_view._thread is None
+
+
 # ── _on_adjust_done / _on_adjust_error in isolation ────────────────────────────
 
 class TestAdjustCallbacks:

@@ -243,7 +243,10 @@ class _LineEnterFilter(QObject):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.KeyPress:
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self._next.setFocus()
+                if self._next.isEnabled():
+                    self._next.click()
+                else:
+                    self._next.setFocus()
                 return True
         return False
 
