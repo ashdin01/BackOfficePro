@@ -94,103 +94,133 @@ class ProductEdit(KeyboardMixin, QWidget):
         layout.setSpacing(8)
 
         if self._is_selling_unit:
-            m = self._su_master
-            banner = QLabel(
-                f"⚠  Selling unit of:  {m['master_desc']}  —  barcode {m['master_barcode']}  "
-                f"({int(m['unit_qty'])} units per pack).  "
-                "Pricing, PLU and description are managed on the master product."
-            )
-            banner.setWordWrap(True)
-            banner.setStyleSheet(
-                "background: #3a2a00; color: #ffcc44; border: 1px solid #7a5a00;"
-                "border-radius: 6px; padding: 8px 12px; font-size: 12px;"
-            )
-            layout.addWidget(banner)
+            self._build_selling_unit_banner(layout)
 
-        def ro_row(field_label, value, on_edit, force_enabled=False):
-            # force_enabled lets a specific row stay clickable for STAFF even
-            # though the rest of Product Detail is locked — used for Manage
-            # Suppliers, which STAFF may open to view (not edit). The icon
-            # switches to an eye so it reads as "view", not "edit".
-            row = QHBoxLayout()
-            view_only = self._read_only and force_enabled
-            btn = QPushButton("👁" if view_only else "✎")
-            btn.setFixedSize(28, 28)
-            if self._read_only and not force_enabled:
-                btn.setEnabled(False)
-                btn.setStyleSheet("background: transparent; border: none;")
-            else:
-                btn.clicked.connect(on_edit)
-            key = QLabel(field_label)
-            key.setMinimumWidth(130)
-            key.setStyleSheet(f'color: {styles.CLR_MUTED};')
-            lbl = QLabel(str(value))
-            lbl.setMinimumWidth(180)
-            row.addWidget(btn)
-            row.addWidget(key)
-            row.addWidget(lbl)
-            row.addStretch()
-            return row, lbl
+        self._build_field_columns(layout)
+        self._build_image_and_aliases_row(layout)
 
-        def info_row(field_label, widget):
-            row = QHBoxLayout()
-            stub = QPushButton()
-            stub.setFixedSize(28, 28)
-            stub.setEnabled(False)
-            stub.setStyleSheet("background: transparent; border: none;")
-            key = QLabel(field_label)
-            key.setMinimumWidth(130)
-            key.setStyleSheet(f"color: {styles.CLR_MUTED};")
-            row.addWidget(stub)
-            row.addWidget(key)
-            row.addWidget(widget)
-            row.addStretch()
-            return row
+        # ── Selling Units ─────────────────────────────────────────────
+        layout.addWidget(self._build_selling_units_section())
 
-        # ── Three-column field area ───────────────────────────────────
+        self._build_online_notes_group(layout)
+        self._build_bottom_action_buttons(layout)
+
+    def _build_selling_unit_banner(self, layout):
+        m = self._su_master
+        banner = QLabel(
+            f"⚠  Selling unit of:  {m['master_desc']}  —  barcode {m['master_barcode']}  "
+            f"({int(m['unit_qty'])} units per pack).  "
+            "Pricing, PLU and description are managed on the master product."
+        )
+        banner.setWordWrap(True)
+        banner.setStyleSheet(
+            "background: #3a2a00; color: #ffcc44; border: 1px solid #7a5a00;"
+            "border-radius: 6px; padding: 8px 12px; font-size: 12px;"
+        )
+        layout.addWidget(banner)
+
+    def _ro_row(self, field_label, value, on_edit, force_enabled=False):
+        # force_enabled lets a specific row stay clickable for STAFF even
+        # though the rest of Product Detail is locked — used for Manage
+        # Suppliers, which STAFF may open to view (not edit). The icon
+        # switches to an eye so it reads as "view", not "edit".
+        row = QHBoxLayout()
+        view_only = self._read_only and force_enabled
+        btn = QPushButton("👁" if view_only else "✎")
+        btn.setFixedSize(28, 28)
+        if self._read_only and not force_enabled:
+            btn.setEnabled(False)
+            btn.setStyleSheet("background: transparent; border: none;")
+        else:
+            btn.clicked.connect(on_edit)
+        key = QLabel(field_label)
+        key.setMinimumWidth(130)
+        key.setStyleSheet(f'color: {styles.CLR_MUTED};')
+        lbl = QLabel(str(value))
+        lbl.setMinimumWidth(180)
+        row.addWidget(btn)
+        row.addWidget(key)
+        row.addWidget(lbl)
+        row.addStretch()
+        return row, lbl
+
+    def _info_row(self, field_label, widget):
+        row = QHBoxLayout()
+        stub = QPushButton()
+        stub.setFixedSize(28, 28)
+        stub.setEnabled(False)
+        stub.setStyleSheet("background: transparent; border: none;")
+        key = QLabel(field_label)
+        key.setMinimumWidth(130)
+        key.setStyleSheet(f"color: {styles.CLR_MUTED};")
+        row.addWidget(stub)
+        row.addWidget(key)
+        row.addWidget(widget)
+        row.addStretch()
+        return row
+
+    def _make_vsep(self):
+        s = QFrame()
+        s.setFrameShape(QFrame.Shape.VLine)
+        s.setFrameShadow(QFrame.Shadow.Sunken)
+        s.setStyleSheet(styles.STYLE_SEPARATOR)
+        return s
+
+    def _build_field_columns(self, layout):
         two_col = QHBoxLayout()
         two_col.setSpacing(12)
 
+        left_col = self._build_identification_column()
+        right_col = self._build_pricing_column()
+        third_col = self._build_status_column()
+
+        two_col.addLayout(left_col, 1)
+        two_col.addWidget(self._make_vsep())
+        two_col.addLayout(right_col, 1)
+        two_col.addWidget(self._make_vsep())
+        two_col.addLayout(third_col, 1)
+        layout.addLayout(two_col)
+
+    def _build_identification_column(self):
         left_col = QVBoxLayout()
         left_col.setSpacing(5)
-        right_col = QVBoxLayout()
-        right_col.setSpacing(5)
-        third_col = QVBoxLayout()
-        third_col.setSpacing(5)
 
-        # Left — identification & classification
-        r, self.lbl_barcode = ro_row("Barcode", self.product['barcode'], self._edit_barcode)
+        r, self.lbl_barcode = self._ro_row("Barcode", self.product['barcode'], self._edit_barcode)
         left_col.addLayout(r)
 
-        r, self.lbl_carton_sku = ro_row("Carton SKU", self._carton_sku or "—", self._edit_carton_sku)
+        r, self.lbl_carton_sku = self._ro_row("Carton SKU", self._carton_sku or "—", self._edit_carton_sku)
         left_col.addLayout(r)
 
-        r, self.lbl_desc = ro_row("Description", self._description, self._edit_description)
+        r, self.lbl_desc = self._ro_row("Description", self._description, self._edit_description)
         left_col.addLayout(r)
 
-        r, self.lbl_brand = ro_row("Brand", self._brand or "—", self._edit_brand)
+        r, self.lbl_brand = self._ro_row("Brand", self._brand or "—", self._edit_brand)
         left_col.addLayout(r)
 
-        r, self.lbl_plu = ro_row("PLU", self._plu or "—", self._edit_plu)
+        r, self.lbl_plu = self._ro_row("PLU", self._plu or "—", self._edit_plu)
         left_col.addLayout(r)
 
-        r, self.lbl_supplier = ro_row("Supplier Details", self._supplier_name(),
-                                       self._edit_supplier, force_enabled=True)
+        r, self.lbl_supplier = self._ro_row("Supplier Details", self._supplier_name(),
+                                             self._edit_supplier, force_enabled=True)
         left_col.addLayout(r)
 
-        r, self.lbl_dept = ro_row("Department", self._dept_name(), self._edit_dept)
+        r, self.lbl_dept = self._ro_row("Department", self._dept_name(), self._edit_dept)
         left_col.addLayout(r)
 
-        r, self.lbl_group = ro_row("Group", self._group_name(), self._edit_group)
+        r, self.lbl_group = self._ro_row("Group", self._group_name(), self._edit_group)
         left_col.addLayout(r)
 
-        r, self.lbl_unit = ro_row("Unit", self._unit, self._edit_unit)
+        r, self.lbl_unit = self._ro_row("Unit", self._unit, self._edit_unit)
         left_col.addLayout(r)
 
         left_col.addStretch()
+        return left_col
 
-        # Right — pricing, stock & flags
-        r, self.lbl_cost = ro_row("Cost Price (ex GST)", f"${self._cost_price:.4f}", self._edit_cost)
+    def _build_pricing_column(self):
+        right_col = QVBoxLayout()
+        right_col.setSpacing(5)
+
+        r, self.lbl_cost = self._ro_row("Cost Price (ex GST)", f"${self._cost_price:.4f}", self._edit_cost)
         right_col.addLayout(r)
 
         tax = self._tax_rate or 0.0
@@ -198,29 +228,33 @@ class ProductEdit(KeyboardMixin, QWidget):
         color = styles.CLR_SUCCESS_ALT if tax > 0 else "grey"
         self.lbl_cost_inc = QLabel(f"<b style='color:{color}'>${inc:.2f}</b>")
         self.lbl_cost_inc.setTextFormat(Qt.TextFormat.RichText)
-        right_col.addLayout(info_row("Cost Price (inc GST)", self.lbl_cost_inc))
+        right_col.addLayout(self._info_row("Cost Price (inc GST)", self.lbl_cost_inc))
 
-        r, self.lbl_sell = ro_row("Sell Price (inc GST)", f"${self._sell_price:.2f}", self._edit_sell)
+        r, self.lbl_sell = self._ro_row("Sell Price (inc GST)", f"${self._sell_price:.2f}", self._edit_sell)
         right_col.addLayout(r)
 
         self.lbl_gp = QLabel()
         self.lbl_gp.setTextFormat(Qt.TextFormat.RichText)
         self._refresh_gp()
-        right_col.addLayout(info_row("Gross Profit", self.lbl_gp))
+        right_col.addLayout(self._info_row("Gross Profit", self.lbl_gp))
 
-        r, self.lbl_tax = ro_row("Tax Rate", self._tax_label(), self._edit_tax)
+        r, self.lbl_tax = self._ro_row("Tax Rate", self._tax_label(), self._edit_tax)
         right_col.addLayout(r)
 
-        r, self.lbl_reorder_pt = ro_row("Reorder Point (Min)", int(self._reorder_point), self._edit_reorder_point)
+        r, self.lbl_reorder_pt = self._ro_row("Reorder Point (Min)", int(self._reorder_point), self._edit_reorder_point)
         right_col.addLayout(r)
 
-        r, self.lbl_reorder_max = ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
+        r, self.lbl_reorder_max = self._ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
         right_col.addLayout(r)
 
         right_col.addStretch()
+        return right_col
 
-        # Third column — status & product flags
-        r, self.lbl_active = ro_row("Active", "Yes" if self._active else "No", self._edit_active)
+    def _build_status_column(self):
+        third_col = QVBoxLayout()
+        third_col.setSpacing(5)
+
+        r, self.lbl_active = self._ro_row("Active", "Yes" if self._active else "No", self._edit_active)
         third_col.addLayout(r)
 
         soh = product_controller.get_soh_by_barcode(self.barcode)
@@ -228,7 +262,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         soh_color = styles.CLR_SUCCESS_ALT if soh_qty > 0 else styles.CLR_ORANGE if soh_qty == 0 else styles.CLR_DANGER_ALT
         self.lbl_soh = QLabel(f'<span style="color:{soh_color};font-weight:bold;">{soh_qty}</span>')
         self.lbl_soh.setTextFormat(Qt.TextFormat.RichText)
-        third_col.addLayout(info_row("Stock on Hand", self.lbl_soh))
+        third_col.addLayout(self._info_row("Stock on Hand", self.lbl_soh))
 
         on_order = product_controller.get_stock_on_order(self.barcode)
         on_order_color = styles.CLR_BLUE if on_order > 0 else styles.CLR_MUTED
@@ -261,40 +295,27 @@ class ProductEdit(KeyboardMixin, QWidget):
                 )
             else:
                 self.lbl_vol_sold.setToolTip("No PLU mapping — weight sold cannot be calculated")
-            third_col.addLayout(info_row("Volume Sold (This Month)", self.lbl_vol_sold))
+            third_col.addLayout(self._info_row("Volume Sold (This Month)", self.lbl_vol_sold))
 
-        r, self.lbl_vw = ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
+        r, self.lbl_vw = self._ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
         third_col.addLayout(r)
 
-        r, self.lbl_stocktake = ro_row("In Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
+        r, self.lbl_stocktake = self._ro_row("In Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
         third_col.addLayout(r)
 
-        r, self.lbl_auto_reorder = ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
+        r, self.lbl_auto_reorder = self._ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
         third_col.addLayout(r)
 
-        r, self.lbl_online = ro_row("Online Shop", "Yes" if self._online_available else "No", self._edit_online_available)
+        r, self.lbl_online = self._ro_row("Online Shop", "Yes" if self._online_available else "No", self._edit_online_available)
         third_col.addLayout(r)
 
-        r, self.lbl_order_prep = ro_row("Order Prep App", "Yes" if self._order_prep_include else "No", self._edit_order_prep_include)
+        r, self.lbl_order_prep = self._ro_row("Order Prep App", "Yes" if self._order_prep_include else "No", self._edit_order_prep_include)
         third_col.addLayout(r)
 
         third_col.addStretch()
+        return third_col
 
-        def _make_vsep():
-            s = QFrame()
-            s.setFrameShape(QFrame.Shape.VLine)
-            s.setFrameShadow(QFrame.Shadow.Sunken)
-            s.setStyleSheet(styles.STYLE_SEPARATOR)
-            return s
-
-        two_col.addLayout(left_col, 1)
-        two_col.addWidget(_make_vsep())
-        two_col.addLayout(right_col, 1)
-        two_col.addWidget(_make_vsep())
-        two_col.addLayout(third_col, 1)
-        layout.addLayout(two_col)
-
-        # ── Bottom row: image + alternate barcodes ────────────────────
+    def _build_image_and_aliases_row(self, layout):
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(12)
 
@@ -357,10 +378,7 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         layout.addLayout(bottom_row)
 
-        # ── Selling Units ─────────────────────────────────────────────
-        layout.addWidget(self._build_selling_units_section())
-
-        # ── Online shop description ───────────────────────────────────
+    def _build_online_notes_group(self, layout):
         notes_group = QGroupBox("Online Shop Description")
         notes_lay = QVBoxLayout(notes_group)
         notes_lay.setContentsMargins(8, 6, 8, 6)
@@ -374,7 +392,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         notes_lay.addWidget(self._txt_notes)
         layout.addWidget(notes_group)
 
-        # ── Action buttons ────────────────────────────────────────────
+    def _build_bottom_action_buttons(self, layout):
         act_row = QHBoxLayout()
         btn_history = QPushButton("📋 View Movement History")
         btn_history.setFixedHeight(30)
