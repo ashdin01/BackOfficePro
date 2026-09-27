@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (
-    QWidget, QFormLayout, QComboBox, QFrame,
+    QWidget, QComboBox, QFrame,
     QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox,
     QLabel, QDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-    QCheckBox, QSpinBox, QFileDialog, QScrollArea, QSizePolicy,
+    QCheckBox, QFileDialog, QScrollArea, QSizePolicy,
     QPlainTextEdit
 )
 from PyQt6.QtCore import Qt
@@ -788,178 +788,32 @@ class ProductEdit(KeyboardMixin, QWidget):
         dlg.exec()
 
     def _print_label(self, large=False):
-        from utils.label_print import get_configured_printer_name, print_label_direct
-
-        printer_name = get_configured_printer_name()
-        if printer_name:
-            # A printer is configured — print one label straight to it, no
-            # dialog. Pressing the button again prints another; that's the
-            # whole workflow for printing several labels in a row.
-            ok, msg = print_label_direct(
-                barcode=self.barcode,
-                description=self._description,
-                price_inc_gst=self._sell_price,
-                plu=self._plu or None,
-                large=large,
-            )
-            if ok:
-                return
-            if "is not available" not in msg:
-                # A real failure (render error, driver fault) rather than
-                # "printer not found" — worth surfacing, not silently
-                # falling back to a PDF.
-                show_error(self, "Could not print the label.", RuntimeError(msg))
-                return
-            # else: configured printer isn't currently found (unplugged,
-            # renamed, etc.) — fall through to the PDF, same as unconfigured.
-
-        self._print_label_via_pdf(large=large)
+        from views.products.label_print_actions import print_shelf_label
+        print_shelf_label(
+            self, barcode=self.barcode, description=self._description,
+            sell_price=self._sell_price, plu=self._plu or None, large=large,
+        )
 
     def _print_label_via_pdf(self, large=False):
-        """No printer configured (Settings > Label Printing) — fall back to
-        generating a PDF and opening it for the user to print manually."""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QHBoxLayout
-        from PyQt6.QtGui import QShortcut, QKeySequence
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Print Large Shelf Label" if large else "Print Shelf Label")
-        dlg.setMinimumWidth(280)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
-
-        form = QFormLayout()
-        copies_spin = QSpinBox()
-        copies_spin.setMinimum(1)
-        copies_spin.setMaximum(200)
-        copies_spin.setValue(1)
-        form.addRow("Copies", copies_spin)
-        layout.addLayout(form)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        cancel_btn = QPushButton("Cancel  [Esc]")
-        cancel_btn.setFixedHeight(30)
-        print_btn = QPushButton("Print  [Ctrl+S]")
-        print_btn.setFixedHeight(30)
-        print_btn.setStyleSheet(
-            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
-            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
-            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
+        from views.products.label_print_actions import print_shelf_label_via_pdf
+        print_shelf_label_via_pdf(
+            self, barcode=self.barcode, description=self._description,
+            sell_price=self._sell_price, plu=self._plu or None, large=large,
         )
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(print_btn)
-        layout.addLayout(btn_row)
-
-        def confirm():
-            from utils.label_pdf import generate_label_pdf
-            from utils.open_file import open_with_default_app
-            try:
-                path = generate_label_pdf(
-                    barcode=self.barcode,
-                    description=self._description,
-                    price_inc_gst=self._sell_price,
-                    plu=self._plu or None,
-                    copies=copies_spin.value(),
-                    large=large,
-                )
-                open_with_default_app(path)
-            except Exception as e:
-                show_error(self, "Could not generate the label.", e)
-                return
-            dlg.accept()
-
-        print_btn.clicked.connect(confirm)
-        cancel_btn.clicked.connect(dlg.reject)
-        QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-        QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-        dlg.exec()
 
     def _print_edikio_label(self):
-        from utils.label_print import get_configured_edikio_printer_name, print_edikio_label_direct
-
-        printer_name = get_configured_edikio_printer_name()
-        if printer_name:
-            # A printer is configured — print one card straight to it, no
-            # dialog, matching _print_label's behaviour for shelf labels.
-            ok, msg = print_edikio_label_direct(
-                barcode=self.barcode,
-                description=self._description,
-                price_inc_gst=self._sell_price,
-                unit=self._unit,
-            )
-            if ok:
-                return
-            if "is not available" not in msg:
-                # A real failure (render error, driver fault) rather than
-                # "printer not found" — worth surfacing, not silently
-                # falling back to a PDF.
-                show_error(self, "Could not print the Edikio card.", RuntimeError(msg))
-                return
-            # else: configured printer isn't currently found (unplugged,
-            # renamed, etc.) — fall through to the PDF, same as unconfigured.
-
-        self._print_edikio_label_via_pdf()
+        from views.products.label_print_actions import print_edikio_label
+        print_edikio_label(
+            self, barcode=self.barcode, description=self._description,
+            sell_price=self._sell_price, unit=self._unit,
+        )
 
     def _print_edikio_label_via_pdf(self):
-        """No Edikio printer configured (Settings > Label Printing) — fall
-        back to generating a PDF and opening it for the user to print
-        manually."""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QHBoxLayout
-        from PyQt6.QtGui import QShortcut, QKeySequence
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Print Edikio Card")
-        dlg.setMinimumWidth(280)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
-
-        form = QFormLayout()
-        copies_spin = QSpinBox()
-        copies_spin.setMinimum(1)
-        copies_spin.setMaximum(200)
-        copies_spin.setValue(1)
-        form.addRow("Copies", copies_spin)
-        layout.addLayout(form)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        cancel_btn = QPushButton("Cancel  [Esc]")
-        cancel_btn.setFixedHeight(30)
-        print_btn = QPushButton("Print  [Ctrl+S]")
-        print_btn.setFixedHeight(30)
-        print_btn.setStyleSheet(
-            f"QPushButton {{ background: {styles.CLR_ACCENT}; color: white; border: none; "
-            "border-radius: 4px; padding: 0 18px; font-weight: bold; }"
-            f"QPushButton:hover {{ background: {styles.CLR_ACCENT_HOVER}; }}"
+        from views.products.label_print_actions import print_edikio_label_via_pdf
+        print_edikio_label_via_pdf(
+            self, barcode=self.barcode, description=self._description,
+            sell_price=self._sell_price, unit=self._unit,
         )
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(print_btn)
-        layout.addLayout(btn_row)
-
-        def confirm():
-            from utils.label_pdf import generate_edikio_label_pdf
-            from utils.open_file import open_with_default_app
-            try:
-                path = generate_edikio_label_pdf(
-                    barcode=self.barcode,
-                    description=self._description,
-                    price_inc_gst=self._sell_price,
-                    unit=self._unit,
-                    copies=copies_spin.value(),
-                )
-                open_with_default_app(path)
-            except Exception as e:
-                show_error(self, "Could not generate the Edikio card.", e)
-                return
-            dlg.accept()
-
-        print_btn.clicked.connect(confirm)
-        cancel_btn.clicked.connect(dlg.reject)
-        QShortcut(QKeySequence("Ctrl+S"), dlg, confirm)
-        QShortcut(QKeySequence("Escape"), dlg, dlg.reject)
-        dlg.exec()
 
     def _view_history(self):
         from PyQt6.QtWidgets import (

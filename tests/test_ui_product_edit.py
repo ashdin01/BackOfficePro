@@ -482,7 +482,7 @@ class TestPrintLabel:
         settings_model.set_setting('label_printer_name', 'Zebra GK420D')
         with patch('utils.label_print.print_label_direct',
                     return_value=(False, "Could not render the label.")), \
-             patch('views.products.product_edit.show_error') as mock_show_error:
+             patch('views.products.label_print_actions.show_error') as mock_show_error:
             product_edit_view._print_label()
         mock_show_error.assert_called_once()
 
@@ -507,7 +507,7 @@ class TestPrintLabel:
                     return_value=(False, "Printer 'Zebra GK420D' is not available — "
                                   "check it's connected, or choose a different one "
                                   "in Settings > Label Printing.")) as mock_print, \
-             patch('views.products.product_edit.show_error') as mock_show_error:
+             patch('views.products.label_print_actions.show_error') as mock_show_error:
             product_edit_view._print_label()
         mock_print.assert_called_once()
         mock_show_error.assert_not_called()
@@ -560,7 +560,7 @@ class TestPrintEdikioLabel:
         settings_model.set_setting('edikio_printer_name', 'Edikio Access')
         with patch('utils.label_print.print_edikio_label_direct',
                     return_value=(False, "Printer offline")), \
-             patch('views.products.product_edit.show_error') as mock_show_error:
+             patch('views.products.label_print_actions.show_error') as mock_show_error:
             product_edit_view._print_edikio_label()
         mock_show_error.assert_called_once()
 
@@ -585,7 +585,7 @@ class TestPrintEdikioLabel:
                     return_value=(False, "Printer 'Edikio Access' is not available — "
                                   "check it's connected, or choose a different one "
                                   "in Settings > Label Printing.")) as mock_print, \
-             patch('views.products.product_edit.show_error') as mock_show_error:
+             patch('views.products.label_print_actions.show_error') as mock_show_error:
             product_edit_view._print_edikio_label()
         mock_print.assert_called_once()
         mock_show_error.assert_not_called()
