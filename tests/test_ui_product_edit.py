@@ -314,7 +314,7 @@ class TestSellingUnitPopups:
     def test_add_selling_unit_popup_opens(self, product_edit_view, qtbot, monkeypatch):
         from PyQt6.QtWidgets import QDialog
         monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
-        product_edit_view._add_selling_unit_popup()
+        product_edit_view._selling_units_panel._add_selling_unit_popup()
 
     def test_edit_selling_unit_popup_opens(self, qtbot, monkeypatch, test_db, dept_id, supplier_id, product_barcode):
         from PyQt6.QtWidgets import QDialog
@@ -329,7 +329,7 @@ class TestSellingUnitPopups:
         w = ProductEdit(product_barcode)
         qtbot.addWidget(w)
         su_id = product_ctrl.get_selling_units(product_barcode)[0]['id']
-        w._edit_selling_unit_popup(su_id)
+        w._selling_units_panel._edit_selling_unit_popup(su_id)
 
 
 # ── Full-transaction receipt popup ────────────────────────────────────────────
