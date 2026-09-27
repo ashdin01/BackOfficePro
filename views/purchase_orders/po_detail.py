@@ -543,11 +543,14 @@ class PODetail(BaseView):
 
                 if product and product['variable_weight']:
                     received_weight = float(line['received_weight'] or 0)
-                    line_val = received_weight * line['unit_cost']
-                    line_str = fmt_money(line_val)
-                    total_item = QTableWidgetItem(line_str)
+                    if received_weight > 0:
+                        line_val = received_weight * line['unit_cost']
+                        total_item = QTableWidgetItem(fmt_money(line_val))
+                        total_item.setToolTip(f"{received_weight:.3f} kg × ${line['unit_cost']:.4f}/kg")
+                    else:
+                        total_item = QTableWidgetItem("— TBD")
+                        total_item.setToolTip("Priced by weight — total known once received")
                     total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                    total_item.setToolTip(f"{received_weight:.3f} kg × ${line['unit_cost']:.4f}/kg")
                     total_item.setForeground(QColor("#FFA500"))
                 else:
                     line_val = total_units * line['unit_cost']
