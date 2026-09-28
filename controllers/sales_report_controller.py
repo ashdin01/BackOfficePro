@@ -134,3 +134,35 @@ def record_pos_sale(reference: str, sale_date: str, operator: str, items: list,
         payment_method=payment_method, subtotal=subtotal,
         gst_amount=gst_amount, total=total,
     )
+
+
+def record_pos_refund(refund_reference: str, original_reference: str, refund_date: str,
+                       operator: str, lines: list,
+                       subtotal: float | None = None,
+                       gst_amount: float | None = None, total: float | None = None) -> bool:
+    """
+    Record a POS cash refund.
+    lines: list of {barcode, qty, line_total, description} — barcodes are resolved here.
+    Returns True if newly recorded, False if this reference was already processed.
+    Raises ValueError on invalid input (unknown original sale, over-refund).
+    """
+    from models.barcode_alias import resolve as _resolve
+    import models.stock_on_hand as soh_model
+
+    resolved_lines = []
+    for line in lines:
+        barcode = str(line.get('barcode', '')).strip()
+        qty     = float(line.get('qty', 0))
+        if not barcode or qty <= 0:
+            continue
+        resolved_lines.append({
+            'barcode':     _resolve(barcode),
+            'qty':         qty,
+            'line_total':  float(line.get('line_total', 0)),
+            'description': str(line.get('description', '')).strip(),
+        })
+
+    return soh_model.record_pos_refund_atomic(
+        refund_reference, original_reference, refund_date, operator, resolved_lines,
+        subtotal=subtotal, gst_amount=gst_amount, total=total,
+    )

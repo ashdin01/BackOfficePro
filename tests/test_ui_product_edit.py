@@ -367,6 +367,55 @@ class TestViewTransactionPopup:
         assert captured['dlg'].windowTitle() == "Receipt — RCPT-UI-001"
         captured['dlg'].close()
 
+    def test_opens_for_known_refund_reference(self, product_edit_view, qtbot, monkeypatch,
+                                               product_barcode):
+        from PyQt6.QtWidgets import QLabel
+        import controllers.sales_report_controller as sr_ctrl
+        captured = self._capture_exec(monkeypatch, QApplication.instance())
+        sr_ctrl.record_pos_sale(
+            'RCPT-UI-RFD-SALE', '2026-05-01', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe', 'unit_price': 2.50}],
+            payment_method='CASH', subtotal=2.50, gst_amount=0.0, total=2.50,
+        )
+        sr_ctrl.record_pos_refund(
+            'RCPT-UI-RFD-001', 'RCPT-UI-RFD-SALE', '2026-05-02', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe'}],
+            subtotal=2.50, gst_amount=0.0, total=2.50,
+        )
+        product_edit_view._view_transaction_popup(product_edit_view, 'RCPT-UI-RFD-001')
+        dlg = captured['dlg']
+        assert dlg.windowTitle() == "Refund Receipt — RCPT-UI-RFD-001"
+        labels = [l.text() for l in dlg.findChildren(QLabel)]
+        assert 'RCPT-UI-RFD-SALE' in labels
+        dlg.close()
+
+    def test_refund_receipt_shows_positive_qty_not_negative(
+        self, product_edit_view, qtbot, monkeypatch, product_barcode
+    ):
+        """RETURN movements store quantity positive (stock increased) unlike
+        SALE's negative (stock decreased) — the shared receipt renderer must
+        not blindly negate both the same way."""
+        from PyQt6.QtWidgets import QTableWidget
+        import controllers.sales_report_controller as sr_ctrl
+        captured = self._capture_exec(monkeypatch, QApplication.instance())
+        sr_ctrl.record_pos_sale(
+            'RCPT-UI-RFD-QTY-SALE', '2026-05-01', 'ash',
+            [{'barcode': product_barcode, 'qty': 2, 'line_total': 5.00,
+              'description': 'Half Cantaloupe', 'unit_price': 2.50}],
+        )
+        sr_ctrl.record_pos_refund(
+            'RCPT-UI-RFD-QTY-001', 'RCPT-UI-RFD-QTY-SALE', '2026-05-02', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe'}],
+        )
+        product_edit_view._view_transaction_popup(product_edit_view, 'RCPT-UI-RFD-QTY-001')
+        dlg = captured['dlg']
+        tbl = dlg.findChild(QTableWidget)
+        assert tbl.item(0, 2).text() == "1"
+        dlg.close()
+
     def test_print_receipt_button_opens_generated_pdf(
         self, product_edit_view, qtbot, monkeypatch, tmp_path
     ):
@@ -444,6 +493,39 @@ class TestViewTransactionPopup:
             assert tbl.item(0, 1).text() == "SALE"
             tbl.cellDoubleClicked.emit(0, 1)
             mock_popup.assert_called_once_with(dlg, 'RCPT-UI-002')
+        dlg.close()
+
+    def test_movement_history_double_click_on_return_row_opens_receipt(
+        self, product_edit_view, qtbot, monkeypatch
+    ):
+        from PyQt6.QtWidgets import QDialog, QTableWidget
+        import controllers.sales_report_controller as sr_ctrl
+        sr_ctrl.record_pos_sale(
+            'RCPT-UI-RET-SALE', '2026-05-01', 'ash',
+            [{'barcode': product_edit_view.barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe', 'unit_price': 2.50}],
+        )
+        sr_ctrl.record_pos_refund(
+            'RCPT-UI-RET-001', 'RCPT-UI-RET-SALE', '2026-05-02', 'ash',
+            [{'barcode': product_edit_view.barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe'}],
+        )
+        opened = {}
+
+        def fake_exec(self):
+            opened['dlg'] = self
+            return QDialog.DialogCode.Accepted
+
+        monkeypatch.setattr(QDialog, "exec", fake_exec)
+        with patch.object(product_edit_view, '_view_transaction_popup') as mock_popup:
+            product_edit_view._view_history()
+            dlg = opened['dlg']
+            tbl = dlg.findChild(QTableWidget)
+            return_row = next(
+                r for r in range(tbl.rowCount()) if tbl.item(r, 1).text() == "RETURN"
+            )
+            tbl.cellDoubleClicked.emit(return_row, 1)
+            mock_popup.assert_called_once_with(dlg, 'RCPT-UI-RET-001')
         dlg.close()
 
 

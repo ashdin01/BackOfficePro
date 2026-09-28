@@ -280,6 +280,48 @@ class TestProductControllerWrappers:
         descriptions = {item['notes'] for item in txn['items']}
         assert descriptions == {'Half Cantaloupe', 'Second Item'}
 
+    def test_get_transaction_for_refund_reference_returns_refund_type(
+        self, test_db, product_barcode
+    ):
+        import controllers.sales_report_controller as sr_ctrl
+        sr_ctrl.record_pos_sale(
+            'RCPT-SALE-001', '2026-05-01', 'ash',
+            [{'barcode': product_barcode, 'qty': 2, 'line_total': 5.00,
+              'description': 'Test Product', 'unit_price': 2.50, 'tax_rate': 10.0}],
+            payment_method='CASH', subtotal=4.55, gst_amount=0.45, total=5.00,
+        )
+        sr_ctrl.record_pos_refund(
+            'RCPT-RFD-001', 'RCPT-SALE-001', '2026-05-02', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Test Product'}],
+            subtotal=2.27, gst_amount=0.23, total=2.50,
+        )
+        txn = product_ctrl.get_transaction('RCPT-RFD-001')
+        assert txn is not None
+        assert txn['transaction_type'] == 'REFUND'
+        assert txn['original_reference'] == 'RCPT-SALE-001'
+        assert txn['operator'] == 'ash'
+        assert len(txn['items']) == 1
+        # RETURN movements store quantity positive (stock increased).
+        assert txn['items'][0]['quantity'] == pytest.approx(1.0)
+        assert txn['items'][0]['notes'] == 'Test Product'
+
+    def test_get_transaction_prefers_sale_over_refund_when_both_exist(
+        self, test_db, product_barcode
+    ):
+        """A sale reference and a refund reference are never the same string
+        in practice (RFD- prefix), but confirm get_transaction() checks
+        pos_sales first regardless."""
+        import controllers.sales_report_controller as sr_ctrl
+        sr_ctrl.record_pos_sale(
+            'RCPT-BOTH-001', '2026-05-01', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Test Product', 'unit_price': 2.50, 'tax_rate': 10.0}],
+            payment_method='CASH', subtotal=2.27, gst_amount=0.23, total=2.50,
+        )
+        txn = product_ctrl.get_transaction('RCPT-BOTH-001')
+        assert txn['transaction_type'] == 'SALE'
+
     def test_generate_receipt_pdf_unknown_reference_raises(self, test_db):
         with pytest.raises(ValueError):
             product_ctrl.generate_receipt_pdf('NO-SUCH-REF')
@@ -294,6 +336,25 @@ class TestProductControllerWrappers:
         )
         out = str(tmp_path / "receipt.pdf")
         path = product_ctrl.generate_receipt_pdf('RCPT-PDF-001', output_path=out)
+        assert path == out
+        assert os.path.exists(path)
+
+    def test_generate_receipt_pdf_writes_file_for_refund(self, test_db, product_barcode, tmp_path):
+        import controllers.sales_report_controller as sr_ctrl
+        sr_ctrl.record_pos_sale(
+            'RCPT-PDF-SALE-001', '2026-05-01', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe', 'unit_price': 2.50}],
+            payment_method='CASH', subtotal=2.50, gst_amount=0.0, total=2.50,
+        )
+        sr_ctrl.record_pos_refund(
+            'RCPT-PDF-RFD-001', 'RCPT-PDF-SALE-001', '2026-05-02', 'ash',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 2.50,
+              'description': 'Half Cantaloupe'}],
+            subtotal=2.50, gst_amount=0.0, total=2.50,
+        )
+        out = str(tmp_path / "refund.pdf")
+        path = product_ctrl.generate_receipt_pdf('RCPT-PDF-RFD-001', output_path=out)
         assert path == out
         assert os.path.exists(path)
 

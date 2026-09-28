@@ -44,10 +44,14 @@ def get_writeoff_qty_for_barcodes_range(barcodes, date_from, date_to, movement_t
         return {r['barcode']: float(r['total']) for r in rows}
 
 
-def get_by_reference(reference):
+def get_by_reference(reference, movement_type='SALE'):
     """
-    Return every SALE movement line sharing one POS transaction reference,
-    across all products — i.e. the full receipt, not just this product's row.
+    Return every movement line of the given movement_type sharing one POS
+    transaction reference, across all products — i.e. the full receipt, not
+    just this product's row. Defaults to 'SALE'; a refund's own reference is
+    written onto its RETURN movements the same way a sale's is onto its SALE
+    movements (see record_pos_refund_atomic), so movement_type='RETURN'
+    returns a refund's line items.
     Newest-inserted-first is irrelevant here; ordered by id for receipt order.
     """
     with db_conn() as conn:
@@ -56,9 +60,9 @@ def get_by_reference(reference):
                    m.line_total, m.tax_rate, m.notes, m.created_at
             FROM stock_movements m
             LEFT JOIN products p ON m.barcode = p.barcode
-            WHERE m.reference = ? AND m.movement_type = 'SALE'
+            WHERE m.reference = ? AND m.movement_type = ?
             ORDER BY m.id
-        """, (reference,)).fetchall()
+        """, (reference, movement_type)).fetchall()
         return [dict(r) for r in rows]
 
 

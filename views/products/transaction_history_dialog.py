@@ -1,9 +1,13 @@
 """Movement history and full-receipt viewer dialogs for Product Detail.
 
 show_movement_history_dialog lists every stock movement for a barcode;
-double-clicking a SALE row calls `on_view_receipt(dialog, reference)` so the
-caller decides how to open the full receipt (ProductEdit wires this straight
-to show_receipt_dialog via its own _view_transaction_popup wrapper).
+double-clicking a SALE or RETURN row calls `on_view_receipt(dialog,
+reference)` so the caller decides how to open the full receipt (ProductEdit
+wires this straight to show_receipt_dialog via its own
+_view_transaction_popup wrapper). A RETURN row's reference is the refund's
+own reference (not the original sale's) — show_receipt_dialog resolves
+either kind via product_controller.get_transaction() and, for a refund,
+also shows the original sale it refunds.
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTableWidget,
@@ -30,7 +34,7 @@ def show_movement_history_dialog(parent, barcode, on_view_receipt):
                       "REVALUE"])
     filter_row.addWidget(type_cb)
     filter_row.addStretch()
-    hint_lbl = QLabel("Double-click a SALE row to view the full receipt")
+    hint_lbl = QLabel("Double-click a SALE or RETURN row to view the full receipt")
     hint_lbl.setStyleSheet(f"color: {styles.CLR_MUTED};")
     filter_row.addWidget(hint_lbl)
     status_lbl = QLabel()
@@ -59,7 +63,7 @@ def show_movement_history_dialog(parent, barcode, on_view_receipt):
         ref_item = tbl.item(r, 4)
         if type_item is None or ref_item is None:
             return
-        if type_item.text() != "SALE" or not ref_item.text():
+        if type_item.text() not in ("SALE", "RETURN") or not ref_item.text():
             return
         on_view_receipt(dlg, ref_item.text())
 
@@ -130,8 +134,10 @@ def show_movement_history_dialog(parent, barcode, on_view_receipt):
 
 
 def show_receipt_dialog(parent, reference: str):
-    """Show the full POS receipt (all line items across all products,
-    plus receipt number and totals) for a SALE row's reference."""
+    """Show the full POS receipt (all line items across all products, plus
+    receipt number and totals) for a SALE row's reference, or the equivalent
+    view — including the original sale it refunds — for a RETURN row's
+    reference."""
     txn = product_controller.get_transaction(reference)
     if txn is None:
         QMessageBox.information(
@@ -139,14 +145,17 @@ def show_receipt_dialog(parent, reference: str):
             f"No transaction record found for reference {reference}."
         )
         return
+    is_refund = txn.get('transaction_type') == 'REFUND'
 
     dlg = QDialog(parent)
-    dlg.setWindowTitle(f"Receipt — {reference}")
+    dlg.setWindowTitle(f"Refund Receipt — {reference}" if is_refund else f"Receipt — {reference}")
     dlg.setMinimumSize(640, 480)
     layout = QVBoxLayout(dlg)
 
     header = QFormLayout()
     header.addRow("Receipt #", QLabel(reference))
+    if is_refund and txn.get('original_reference'):
+        header.addRow("Original Sale", QLabel(txn['original_reference']))
     header.addRow("Date/Time", QLabel(str(txn.get('received_at') or txn.get('sale_date') or '')))
     header.addRow("Operator", QLabel(txn.get('operator') or ''))
     if txn.get('payment_method'):
@@ -177,7 +186,10 @@ def show_receipt_dialog(parent, reference: str):
         line_total = item['line_total']
         tbl.setItem(r, 0, QTableWidgetItem(item['barcode']))
         tbl.setItem(r, 1, QTableWidgetItem(desc))
-        qty_val = -qty if qty is not None else None
+        # SALE movements store quantity negative (stock decreased); RETURN
+        # movements store it positive (stock increased) — display always
+        # wants the positive "how many" count either way.
+        qty_val = qty if is_refund else (-qty if qty is not None else None)
         qty_text = "" if qty_val is None else (
             f"{qty_val:g}" if qty_val != int(qty_val) else f"{qty_val:.0f}"
         )

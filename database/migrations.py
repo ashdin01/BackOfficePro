@@ -2795,6 +2795,45 @@ def migrate_v71(conn):
     conn.commit()
 
 
+def migrate_v72(conn):
+    """Add pos_refunds / pos_refund_lines — a POS cash refund's own idempotency
+    ledger (mirrors pos_sales) plus per-line qty/line_total, needed so a
+    refund can validate it never exceeds what pos_sales/stock_movements
+    actually recorded as sold, even across several partial refunds of the
+    same original sale."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pos_refunds (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference          TEXT NOT NULL UNIQUE,
+            original_reference TEXT NOT NULL REFERENCES pos_sales(reference),
+            refund_date        TEXT NOT NULL,
+            operator           TEXT NOT NULL DEFAULT '',
+            received_at        TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            subtotal           REAL,
+            gst_amount         REAL,
+            total              REAL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pos_refunds_original "
+        "ON pos_refunds(original_reference)"
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pos_refund_lines (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            refund_id  INTEGER NOT NULL REFERENCES pos_refunds(id),
+            barcode    TEXT NOT NULL,
+            qty        REAL NOT NULL,
+            line_total REAL NOT NULL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pos_refund_lines_refund "
+        "ON pos_refund_lines(refund_id)"
+    )
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2866,4 +2905,5 @@ _MIGRATIONS: dict[int, tuple] = {
     69: (migrate_v69, "product_batches table for per-batch use-by/best-before tracking"),
     70: (migrate_v70, "pos_sales totals + stock_movements unit_price/line_total/tax_rate for full-transaction view"),
     71: (migrate_v71, "carton_sku column on products"),
+    72: (migrate_v72, "pos_refunds, pos_refund_lines tables for POS cash refunds"),
 }

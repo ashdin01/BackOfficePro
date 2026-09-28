@@ -755,6 +755,238 @@ def test_pos_sale_non_lock_operational_error_returns_500(api_client, product_bar
     assert r.get_json()["error"] == "SALE_ERROR"
 
 
+# ── /pos/refund ────────────────────────────────────────────────────────────────
+
+def _sell_via_api(client, key, reference, product_barcode, qty=3, line_total=10.50):
+    payload = {
+        "reference": reference,
+        "sale_date": "2026-05-01",
+        "operator": "test",
+        "items": [{
+            "barcode": product_barcode, "description": "Test Product",
+            "qty": qty, "unit_price": round(line_total / qty, 2),
+            "line_total": line_total, "tax_rate": 10.0,
+        }],
+    }
+    r = client.post("/api/v1/pos/sale", json=payload, headers=_h(key))
+    assert r.status_code == 200
+    return r
+
+
+def test_pos_refund_missing_required_fields_is_400(api_client):
+    client, key = api_client
+    r = client.post("/api/v1/pos/refund", json={}, headers=_h(key))
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("bad_date", [
+    "not-a-date", "29-01-2026", "2026/01/01", "2026-13-01", "2026-01-32",
+])
+def test_pos_refund_invalid_date_is_400(api_client, bad_date):
+    client, key = api_client
+    r = client.post(
+        "/api/v1/pos/refund",
+        json={"reference": "RFD-BAD", "original_reference": "X", "refund_date": bad_date,
+              "lines": [{"barcode": "x", "qty": 1, "line_total": 1.0}]},
+        headers=_h(key),
+    )
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "INVALID_DATE"
+
+
+def test_pos_refund_no_lines_is_400(api_client):
+    client, key = api_client
+    r = client.post(
+        "/api/v1/pos/refund",
+        json={"reference": "RFD-001", "original_reference": "X",
+              "refund_date": "2026-01-01", "lines": []},
+        headers=_h(key),
+    )
+    assert r.status_code == 400
+
+
+def test_pos_refund_unknown_original_reference_is_409(api_client):
+    client, key = api_client
+    r = client.post(
+        "/api/v1/pos/refund",
+        json={"reference": "RFD-002", "original_reference": "NO-SUCH-SALE",
+              "refund_date": "2026-01-01",
+              "lines": [{"barcode": "x", "qty": 1, "line_total": 1.0}]},
+        headers=_h(key),
+    )
+    assert r.status_code == 409
+    assert r.get_json()["error"] == "REFUND_REJECTED"
+
+
+def test_pos_refund_success(api_client, product_barcode):
+    client, key = api_client
+    _sell_via_api(client, key, "POS-REFUND-SRC-001", product_barcode, qty=2, line_total=7.00)
+
+    payload = {
+        "reference": "RFD-SMOKE-0001",
+        "original_reference": "POS-REFUND-SRC-001",
+        "refund_date": "2026-05-02",
+        "operator": "test",
+        "subtotal": 3.18, "gst_amount": 0.32, "total": 3.50,
+        "lines": [{"barcode": product_barcode, "description": "Test Product",
+                   "qty": 1, "line_total": 3.50}],
+    }
+    r = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["ok"] is True
+    assert data["reference"] == "RFD-SMOKE-0001"
+    assert data["duplicate"] is False
+
+
+def test_pos_refund_increases_stock_on_hand(api_client, db_conn, product_barcode):
+    client, key = api_client
+    _sell_via_api(client, key, "POS-REFUND-SOH-001", product_barcode, qty=3, line_total=10.50)
+    before = db_conn.execute(
+        "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+    ).fetchone()["quantity"]
+
+    payload = {
+        "reference": "RFD-SOH-0001",
+        "original_reference": "POS-REFUND-SOH-001",
+        "refund_date": "2026-05-02",
+        "lines": [{"barcode": product_barcode, "qty": 1, "line_total": 3.50}],
+    }
+    client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+
+    after = db_conn.execute(
+        "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+    ).fetchone()["quantity"]
+    assert after == pytest.approx(before + 1)
+
+
+def test_pos_refund_idempotent_returns_200_not_500(api_client, product_barcode):
+    client, key = api_client
+    _sell_via_api(client, key, "POS-REFUND-IDEM-001", product_barcode, qty=2, line_total=7.00)
+    payload = {
+        "reference": "RFD-IDEM-0001",
+        "original_reference": "POS-REFUND-IDEM-001",
+        "refund_date": "2026-05-02",
+        "lines": [{"barcode": product_barcode, "qty": 1, "line_total": 3.50}],
+    }
+    r1 = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r1.status_code == 200
+    assert r1.get_json()["duplicate"] is False
+
+    r2 = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r2.status_code == 200
+    assert r2.get_json()["duplicate"] is True
+
+
+def test_pos_refund_idempotent_does_not_double_increment_soh(api_client, db_conn, product_barcode):
+    client, key = api_client
+    _sell_via_api(client, key, "POS-REFUND-IDEM-SOH-001", product_barcode, qty=3, line_total=10.50)
+    before = db_conn.execute(
+        "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+    ).fetchone()["quantity"]
+
+    payload = {
+        "reference": "RFD-IDEM-SOH-0001",
+        "original_reference": "POS-REFUND-IDEM-SOH-001",
+        "refund_date": "2026-05-02",
+        "lines": [{"barcode": product_barcode, "qty": 1, "line_total": 3.50}],
+    }
+    client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+
+    after = db_conn.execute(
+        "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+    ).fetchone()["quantity"]
+    assert after == pytest.approx(before + 1)   # +1 once, not thrice
+
+
+def test_pos_refund_over_refund_is_409(api_client, product_barcode):
+    client, key = api_client
+    _sell_via_api(client, key, "POS-REFUND-OVER-001", product_barcode, qty=2, line_total=7.00)
+    payload = {
+        "reference": "RFD-OVER-0001",
+        "original_reference": "POS-REFUND-OVER-001",
+        "refund_date": "2026-05-02",
+        "lines": [{"barcode": product_barcode, "qty": 5, "line_total": 17.50}],
+    }
+    r = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r.status_code == 409
+    assert r.get_json()["error"] == "REFUND_REJECTED"
+
+
+def test_pos_refund_rate_limit(api_client):
+    from collections import deque
+    from api_server import _sale_clients, _SALE_MAX
+    now = time.monotonic()
+    _sale_clients["127.0.0.1"] = deque([now] * _SALE_MAX)
+
+    client, key = api_client
+    payload = {
+        "reference": "RFD-RL-001", "original_reference": "X",
+        "refund_date": "2026-01-01",
+        "lines": [{"barcode": "x", "qty": 1, "line_total": 1.0}],
+    }
+    r = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r.status_code == 429
+
+
+def test_read_rate_limit_does_not_affect_pos_refund(api_client, product_barcode):
+    """Filling the read window must not block /pos/refund, which has its own limiter."""
+    from collections import deque
+    from api_server import _read_clients, _READ_MAX
+    client, key = api_client
+    _sell_via_api(client, key, "POS-REFUND-RRL-001", product_barcode, qty=1, line_total=3.50)
+
+    now = time.monotonic()
+    _read_clients["127.0.0.1"] = deque([now] * _READ_MAX)
+
+    payload = {
+        "reference": "RFD-RRL-0001",
+        "original_reference": "POS-REFUND-RRL-001",
+        "refund_date": "2026-05-02",
+        "lines": [{"barcode": product_barcode, "qty": 1, "line_total": 3.50}],
+    }
+    r = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r.status_code == 200
+
+
+def test_pos_refund_db_locked_returns_503(api_client, product_barcode, monkeypatch):
+    import sqlite3
+    import controllers.sales_report_controller as sr
+    monkeypatch.setattr(
+        sr, "record_pos_refund",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            sqlite3.OperationalError("database is locked")
+        ),
+    )
+    client, key = api_client
+    payload = {
+        "reference": "RFD-ERR-LOCK-001", "original_reference": "X",
+        "refund_date": "2026-05-01",
+        "lines": [{"barcode": "x", "qty": 1, "line_total": 1.0}],
+    }
+    r = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r.status_code == 503
+
+
+def test_pos_refund_generic_error_returns_500(api_client, product_barcode, monkeypatch):
+    import controllers.sales_report_controller as sr
+    monkeypatch.setattr(
+        sr, "record_pos_refund",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    client, key = api_client
+    payload = {
+        "reference": "RFD-ERR-BOOM-001", "original_reference": "X",
+        "refund_date": "2026-05-01",
+        "lines": [{"barcode": "x", "qty": 1, "line_total": 1.0}],
+    }
+    r = client.post("/api/v1/pos/refund", json=payload, headers=_h(key))
+    assert r.status_code == 500
+    assert r.get_json()["error"] == "REFUND_ERROR"
+
+
 # ── add_count edge cases ──────────────────────────────────────────────────────
 
 def test_add_count_qty_over_limit_returns_400(api_client, db_conn, supplier_id, product_barcode):

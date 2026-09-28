@@ -162,26 +162,38 @@ def get_movement_history(barcode, move_type=None) -> list[dict]:
 
 def get_transaction(reference: str) -> dict | None:
     """
-    Return the full POS transaction for a receipt reference: the pos_sales
-    header (sale_date, operator, payment_method, subtotal, gst_amount, total —
-    the totals fields are None for sales recorded before migrate_v70) plus
-    every line item across all products sold under that reference.
-    Returns None if the reference is unknown (e.g. a pre-pos_sales-ledger
-    import, or a non-SALE reference such as a PO receipt).
+    Return the full POS transaction for a receipt reference — a SALE (the
+    pos_sales header: sale_date, operator, payment_method, subtotal,
+    gst_amount, total — totals are None for sales recorded before
+    migrate_v70) or a REFUND (the pos_refunds header, including
+    original_reference — the sale it refunds) — plus every line item across
+    all products under that reference. The returned dict's 'transaction_type'
+    key is 'SALE' or 'REFUND' so callers can render either without guessing.
+    Returns None if the reference is unknown to both ledgers (e.g. a
+    pre-pos_sales-ledger import, or a non-POS reference such as a PO receipt).
     """
     header = soh_model.get_sale_header(reference)
-    if header is None:
-        return None
-    header['items'] = movements_model.get_by_reference(reference)
-    return header
+    if header is not None:
+        header['transaction_type'] = 'SALE'
+        header['items'] = movements_model.get_by_reference(reference, 'SALE')
+        return header
+
+    header = soh_model.get_refund_header(reference)
+    if header is not None:
+        header['transaction_type'] = 'REFUND'
+        header['items'] = movements_model.get_by_reference(reference, 'RETURN')
+        return header
+
+    return None
 
 
 def generate_receipt_pdf(reference: str, output_path=None) -> str:
     """
-    Render a printable reprint of a POS receipt (see get_transaction) to a
-    PDF and return the path written. Raises ValueError if the reference has
-    no pos_sales record (unknown reference, or a pre-migration/backfilled
-    sale that was never posted through the POS-sale API).
+    Render a printable reprint of a POS sale or refund receipt (see
+    get_transaction) to a PDF and return the path written. Raises ValueError
+    if the reference has no pos_sales or pos_refunds record (unknown
+    reference, or a pre-migration/backfilled sale that was never posted
+    through the POS-sale API).
     """
     import models.settings as settings_model
     from utils.receipt_pdf import render_receipt_pdf

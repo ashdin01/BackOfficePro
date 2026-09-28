@@ -47,6 +47,48 @@ class TestGetByBarcode:
         assert row['reference'] == 'MYREF'
 
 
+class TestGetByReference:
+    def test_defaults_to_sale_movements(self, test_db, product_barcode):
+        soh_model.record_pos_sale_atomic(
+            'REF-A', '2026-05-01', 'cashier',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.5, 'description': 'Milk'}],
+        )
+        rows = movements_model.get_by_reference('REF-A')
+        assert len(rows) == 1
+        assert rows[0]['notes'] == 'Milk'
+
+    def test_ignores_other_movement_types_sharing_no_reference(self, test_db, product_barcode):
+        soh_model.adjust(product_barcode, 5, 'RECEIPT', reference='REF-A')
+        assert movements_model.get_by_reference('REF-A') == []
+
+    def test_return_movement_type_finds_refund_lines(self, test_db, product_barcode):
+        soh_model.record_pos_sale_atomic(
+            'REF-B', '2026-05-01', 'cashier',
+            [{'barcode': product_barcode, 'qty': 2, 'line_total': 7.0, 'description': 'Milk'}],
+        )
+        soh_model.record_pos_refund_atomic(
+            'RFD-B', 'REF-B', '2026-05-02', 'cashier',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.5, 'description': 'Milk'}],
+        )
+        sale_rows = movements_model.get_by_reference('RFD-B', 'SALE')
+        return_rows = movements_model.get_by_reference('RFD-B', 'RETURN')
+        assert sale_rows == []
+        assert len(return_rows) == 1
+        assert return_rows[0]['quantity'] == 1.0   # stored positive — stock increased
+        assert return_rows[0]['notes'] == 'Milk'
+
+    def test_orders_by_id_for_receipt_order(self, test_db, product_barcode, gst_free_barcode):
+        soh_model.record_pos_sale_atomic(
+            'REF-C', '2026-05-01', 'cashier',
+            [
+                {'barcode': product_barcode, 'qty': 1, 'line_total': 3.5, 'description': 'First'},
+                {'barcode': gst_free_barcode, 'qty': 1, 'line_total': 4.0, 'description': 'Second'},
+            ],
+        )
+        rows = movements_model.get_by_reference('REF-C')
+        assert [r['notes'] for r in rows] == ['First', 'Second']
+
+
 class TestGetRecentAdjustments:
     def test_empty_when_no_adjustments(self, test_db, product_barcode):
         assert movements_model.get_recent_adjustments() == []

@@ -66,7 +66,10 @@ def render_receipt_pdf(reference: str, txn: dict, store_info: dict, output_path:
                  unit_price, line_total}). Any of the pricing fields may be
                  None for a sale recorded before unit_price/line_total/totals
                  were tracked — printed as blank rather than "$0.00" so an
-                 old reprint doesn't claim a false total.
+                 old reprint doesn't claim a false total. transaction_type is
+                 'SALE' or 'REFUND'; a REFUND also carries original_reference
+                 (the sale it refunds) and stores item quantity positive
+                 rather than negative — both handled here, not by the caller.
     store_info — dict with store_name, store_address, store_phone, store_abn.
     """
     page_w = PAGE_WIDTH_MM * mm
@@ -149,11 +152,16 @@ def _build_layout(reference, txn, store_info, content_w):
         text(f"Ph: {store_info['store_phone']}", size=8, align='center')
     if store_info.get('store_abn'):
         text(f"ABN: {store_info['store_abn']}", size=8, align='center')
+    is_refund = txn.get('transaction_type') == 'REFUND'
+
     gap()
-    text("RECEIPT REPRINT", font=_FONT_BOLD, size=9, align='center')
+    text("REFUND RECEIPT" if is_refund else "RECEIPT REPRINT",
+         font=_FONT_BOLD, size=9, align='center')
     rule()
 
     text(f"Receipt #: {reference}", size=8)
+    if is_refund and txn.get('original_reference'):
+        text(f"Original Sale: {txn['original_reference']}", size=8)
     when = txn.get('received_at') or txn.get('sale_date') or ''
     text(f"Date: {when}", size=8)
     if txn.get('operator'):
@@ -175,7 +183,10 @@ def _build_layout(reference, txn, store_info, content_w):
                 text(wline, size=9)
 
         qty = it.get('quantity')
-        qty_val = -qty if qty is not None else None
+        # SALE movements store quantity negative (stock decreased); RETURN
+        # movements store it positive (stock increased) — display always
+        # wants the positive "how many" count either way.
+        qty_val = qty if is_refund else (-qty if qty is not None else None)
         qty_text = "" if qty_val is None else (
             f"{qty_val:g}" if qty_val != int(qty_val) else f"{qty_val:.0f}"
         )

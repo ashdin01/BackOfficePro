@@ -188,10 +188,10 @@ def _setup_audit_context():
 
 @app.before_request
 def _rate_limit_reads():
-    """/pos/sale has its own tighter limiter; apply the general one to everything else."""
+    """/pos/sale and /pos/refund have their own tighter limiter; apply the general one to everything else."""
     if request.path in _AUTH_EXEMPT:
         return
-    if request.endpoint in ('record_pos_sale', 'create_held_sale'):
+    if request.endpoint in ('record_pos_sale', 'record_pos_refund', 'create_held_sale'):
         return
     if not _read_rate_ok(request.remote_addr or ""):
         logging.warning("API read rate limit exceeded [client=%s req=%s]",
@@ -452,6 +452,85 @@ def record_pos_sale():
         logging.exception("POST /pos/sale failed [ref=%s req=%s]",
                           reference, getattr(g, 'request_id', '?'))
         return _err("SALE_ERROR", "Sale could not be recorded — try again", 500)
+
+
+@app.route("/api/v1/pos/refund", methods=["POST"])
+def record_pos_refund():
+    """
+    Record a POS cash refund from RetailPOSPro.
+    Reverses stock on hand and sales_daily for each refunded line item.
+
+    Expected JSON body:
+    {
+      "reference":          "RFD-POS-001-20260928-0001",
+      "original_reference": "POS-001-20260927-0002",
+      "refund_date":        "2026-09-28",
+      "operator":           "ashley",
+      "subtotal":           5.00,
+      "gst_amount":         0.50,
+      "total":              5.50,
+      "lines": [
+        {
+          "barcode":     "9300605001234",
+          "description": "MILK 2L",
+          "qty":         1,
+          "line_total":  5.50
+        }
+      ]
+    }
+    """
+    if not _sale_rate_ok(request.remote_addr or ""):
+        logging.warning("API /pos/refund rate limit exceeded [client=%s req=%s]",
+                        request.remote_addr, getattr(g, 'request_id', '?'))
+        return _err("RATE_LIMIT", "Rate limit exceeded — slow down and retry", 429)
+
+    def _opt_float(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    data                = request.get_json(force=True) or {}
+    reference           = str(data.get("reference", "")).strip()
+    original_reference  = str(data.get("original_reference", "")).strip()
+    refund_date         = str(data.get("refund_date", "")).strip()
+    operator            = str(data.get("operator", "POS")).strip()[:64]
+    lines               = data.get("lines", [])
+    subtotal            = _opt_float(data.get("subtotal"))
+    gst_amount          = _opt_float(data.get("gst_amount"))
+    total               = _opt_float(data.get("total"))
+
+    if not reference or not original_reference or not refund_date or not lines:
+        return _err("MISSING_FIELD",
+                    "reference, original_reference, refund_date, and lines are required", 400)
+
+    try:
+        datetime.strptime(refund_date, "%Y-%m-%d")
+    except ValueError:
+        return _err("INVALID_DATE", "refund_date must be YYYY-MM-DD", 400)
+
+    try:
+        is_new = sales_ctrl.record_pos_refund(reference, original_reference, refund_date,
+                                               operator, lines, subtotal=subtotal,
+                                               gst_amount=gst_amount, total=total)
+        return jsonify({"ok": True, "reference": reference, "duplicate": not is_new}), 200
+    except ValueError as e:
+        # Unknown original sale, or a line would refund more than was ever sold.
+        logging.warning("POST /pos/refund rejected [ref=%s req=%s]: %s",
+                        reference, getattr(g, 'request_id', '?'), e)
+        return _err("REFUND_REJECTED", str(e), 409)
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e).lower():
+            logging.warning("POST /pos/refund DB locked [ref=%s req=%s]: %s",
+                            reference, getattr(g, 'request_id', '?'), e)
+            return _err("DB_LOCKED", "Database busy — retry shortly", 503)
+        logging.exception("POST /pos/refund DB error [ref=%s req=%s]",
+                          reference, getattr(g, 'request_id', '?'))
+        return _err("REFUND_ERROR", "Refund could not be recorded", 500)
+    except Exception:
+        logging.exception("POST /pos/refund failed [ref=%s req=%s]",
+                          reference, getattr(g, 'request_id', '?'))
+        return _err("REFUND_ERROR", "Refund could not be recorded — try again", 500)
 
 
 @app.route("/api/v1/bundles")

@@ -532,6 +532,32 @@ CREATE TABLE IF NOT EXISTS pos_sales (
     total           REAL
 );
 
+-- POS cash refund ledger. Its own reference is the idempotency gate (a retry
+-- of the same refund is a no-op, same pattern as pos_sales); original_reference
+-- links back to the sale being refunded so a refund can never be validated
+-- against anything but that sale's own recorded stock_movements.
+CREATE TABLE IF NOT EXISTS pos_refunds (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference          TEXT NOT NULL UNIQUE,
+    original_reference TEXT NOT NULL REFERENCES pos_sales(reference),
+    refund_date        TEXT NOT NULL,
+    operator           TEXT NOT NULL DEFAULT '',
+    received_at        TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    subtotal           REAL,
+    gst_amount         REAL,
+    total              REAL
+);
+CREATE INDEX IF NOT EXISTS idx_pos_refunds_original ON pos_refunds(original_reference);
+
+CREATE TABLE IF NOT EXISTS pos_refund_lines (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    refund_id  INTEGER NOT NULL REFERENCES pos_refunds(id),
+    barcode    TEXT NOT NULL,
+    qty        REAL NOT NULL,
+    line_total REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pos_refund_lines_refund ON pos_refund_lines(refund_id);
+
 -- POS suspend/resume ("hold sale"): RetailPOSPro terminals share no local
 -- datastore, so BackOfficePro is the cross-terminal source of truth for
 -- sales that have been parked mid-transaction and not yet completed.

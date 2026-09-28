@@ -224,3 +224,166 @@ class TestRecordPosSaleAtomic:
         ).fetchone()
         # 1 selling unit = 2 master units consumed
         assert row["quantity"] == pytest.approx(8.0)
+
+
+# ── record_pos_refund_atomic ───────────────────────────────────────────────────
+
+def _sell(product_barcode, qty=3, line_total=10.50, reference='SALE-REF'):
+    soh_model.record_pos_sale_atomic(
+        reference, '2026-05-01', 'cashier',
+        [{'barcode': product_barcode, 'qty': qty, 'line_total': line_total, 'description': 'Test'}],
+    )
+
+
+class TestRecordPosRefundAtomic:
+    def test_happy_path_returns_true_and_increases_stock(
+        self, test_db, product_barcode, db_conn
+    ):
+        _sell(product_barcode, qty=3, line_total=10.50)
+        lines = [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50, 'description': 'Test'}]
+        result = soh_model.record_pos_refund_atomic(
+            'RFD-001', 'SALE-REF', '2026-05-02', 'cashier', lines
+        )
+        assert result is True
+        row = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+        ).fetchone()
+        # -3 from the sale, +1 from the refund
+        assert row["quantity"] == pytest.approx(-2.0)
+
+    def test_duplicate_refund_reference_returns_false_and_does_not_double_refund(
+        self, test_db, product_barcode, db_conn
+    ):
+        _sell(product_barcode, qty=3, line_total=10.50)
+        lines = [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50}]
+        soh_model.record_pos_refund_atomic('RFD-DUP', 'SALE-REF', '2026-05-02', 'cashier', lines)
+        result = soh_model.record_pos_refund_atomic(
+            'RFD-DUP', 'SALE-REF', '2026-05-02', 'cashier', lines
+        )
+        assert result is False
+        row = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+        ).fetchone()
+        # Only the first attempt's +1 applied, not +2
+        assert row["quantity"] == pytest.approx(-2.0)
+
+    def test_unknown_original_reference_raises(self, test_db, product_barcode):
+        lines = [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50}]
+        with pytest.raises(ValueError, match="never recorded as a sale"):
+            soh_model.record_pos_refund_atomic(
+                'RFD-BAD', 'NO-SUCH-SALE', '2026-05-02', 'cashier', lines
+            )
+
+    def test_refund_exceeding_sold_qty_raises_and_rolls_back(
+        self, test_db, product_barcode, db_conn
+    ):
+        _sell(product_barcode, qty=3, line_total=10.50)
+        lines = [{'barcode': product_barcode, 'qty': 5, 'line_total': 17.50}]
+        with pytest.raises(ValueError, match="exceeds remaining refundable"):
+            soh_model.record_pos_refund_atomic(
+                'RFD-OVER', 'SALE-REF', '2026-05-02', 'cashier', lines
+            )
+        # Nothing should have been applied — stock still reflects only the sale.
+        row = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+        ).fetchone()
+        assert row["quantity"] == pytest.approx(-3.0)
+        refund_rows = db_conn.execute("SELECT * FROM pos_refunds WHERE reference='RFD-OVER'").fetchall()
+        assert refund_rows == []
+
+    def test_second_partial_refund_cannot_exceed_remaining_after_first(
+        self, test_db, product_barcode, db_conn
+    ):
+        _sell(product_barcode, qty=3, line_total=10.50)
+        soh_model.record_pos_refund_atomic(
+            'RFD-1', 'SALE-REF', '2026-05-02', 'cashier',
+            [{'barcode': product_barcode, 'qty': 2, 'line_total': 7.00}],
+        )
+        # Only 1 remains refundable — asking for 2 more must fail.
+        with pytest.raises(ValueError, match="exceeds remaining refundable"):
+            soh_model.record_pos_refund_atomic(
+                'RFD-2', 'SALE-REF', '2026-05-02', 'cashier',
+                [{'barcode': product_barcode, 'qty': 2, 'line_total': 7.00}],
+            )
+        # But exactly the remaining 1 is fine.
+        result = soh_model.record_pos_refund_atomic(
+            'RFD-3', 'SALE-REF', '2026-05-02', 'cashier',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50}],
+        )
+        assert result is True
+
+    def test_refund_records_return_movement(self, test_db, product_barcode, db_conn):
+        _sell(product_barcode, qty=3, line_total=10.50)
+        soh_model.record_pos_refund_atomic(
+            'RFD-MOV', 'SALE-REF', '2026-05-02', 'cashier',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50, 'description': 'Test Product'}],
+        )
+        row = db_conn.execute(
+            "SELECT * FROM stock_movements WHERE reference='RFD-MOV'"
+        ).fetchone()
+        assert row is not None
+        assert row["movement_type"] == "RETURN"
+        assert row["quantity"] == pytest.approx(1.0)
+        # notes holds the item description, same convention as a SALE movement
+        # (the receipt viewer reads notes-or-description as the product name)
+        # — the link back to the original sale lives on pos_refunds.original_reference.
+        assert row["notes"] == "Test Product"
+
+    def test_refund_original_reference_recoverable_via_pos_refunds(
+        self, test_db, product_barcode, db_conn
+    ):
+        _sell(product_barcode, qty=3, line_total=10.50)
+        soh_model.record_pos_refund_atomic(
+            'RFD-MOV2', 'SALE-REF', '2026-05-02', 'cashier',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50}],
+        )
+        header = soh_model.get_refund_header('RFD-MOV2')
+        assert header is not None
+        assert header['original_reference'] == 'SALE-REF'
+
+    def test_refund_decreases_sales_daily(self, test_db, product_barcode, db_conn):
+        _sell(product_barcode, qty=3, line_total=10.50)
+        before = db_conn.execute(
+            "SELECT quantity, sales_dollars FROM sales_daily WHERE plu=?", (product_barcode,)
+        ).fetchone()
+        soh_model.record_pos_refund_atomic(
+            'RFD-SD', 'SALE-REF', '2026-05-01', 'cashier',
+            [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50}],
+        )
+        after = db_conn.execute(
+            "SELECT quantity, sales_dollars FROM sales_daily WHERE plu=?", (product_barcode,)
+        ).fetchone()
+        assert after["quantity"] == pytest.approx(before["quantity"] - 1)
+        assert after["sales_dollars"] == pytest.approx(before["sales_dollars"] - 3.50)
+
+    def test_selling_unit_refund_uses_master_barcode(
+        self, test_db, product_barcode, db_conn
+    ):
+        su_bc = '9300000099888'
+        db_conn.execute("""
+            INSERT INTO product_selling_units
+                (master_barcode, barcode, label, unit_qty, sell_price, active)
+            VALUES (?, ?, '2-pack', 2, 7.00, 1)
+        """, (product_barcode, su_bc))
+        db_conn.commit()
+        soh_model.record_pos_sale_atomic(
+            'SALE-SU', '2026-05-01', 'cashier',
+            [{'barcode': su_bc, 'qty': 1, 'line_total': 7.00, 'description': '2-pack'}],
+        )
+        soh_model.record_pos_refund_atomic(
+            'RFD-SU', 'SALE-SU', '2026-05-02', 'cashier',
+            [{'barcode': su_bc, 'qty': 1, 'line_total': 7.00}],
+        )
+        row = db_conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode=?", (product_barcode,)
+        ).fetchone()
+        # -2 from the sale (1 selling unit = 2 master units), +2 from the refund
+        assert row["quantity"] == pytest.approx(0.0)
+
+    def test_invalid_refund_date_raises(self, test_db, product_barcode):
+        _sell(product_barcode)
+        with pytest.raises(ValueError, match="refund_date"):
+            soh_model.record_pos_refund_atomic(
+                'RFD-BADDATE', 'SALE-REF', 'not-a-date', 'cashier',
+                [{'barcode': product_barcode, 'qty': 1, 'line_total': 3.50}],
+            )
