@@ -4,7 +4,7 @@ Black-and-white, print-safe layout. No coloured backgrounds or text.
 """
 import os
 from datetime import datetime
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from utils.calculations import gst_on_ex
 from utils.po_type_helpers import po_unit_mode, po_is_return, po_display_qty, fmt_money
 from reportlab.lib.units import mm
@@ -48,6 +48,10 @@ def _styles():
             fontSize=9, fontName="Helvetica", textColor=C_BLACK, alignment=TA_CENTER),
         "hdr": ParagraphStyle("hdr",
             fontSize=9, fontName="Helvetica-Bold", textColor=C_BLACK),
+        "hdr_plain": ParagraphStyle("hdr_plain",
+            fontSize=9, fontName="Helvetica", textColor=C_BLACK),
+        "hdr_plain_right": ParagraphStyle("hdr_plain_right",
+            fontSize=9, fontName="Helvetica", textColor=C_BLACK, alignment=TA_RIGHT),
         "hdr_ctr": ParagraphStyle("hdr_ctr",
             fontSize=9, fontName="Helvetica-Bold", textColor=C_BLACK, alignment=TA_CENTER),
         "hdr_right": ParagraphStyle("hdr_right",
@@ -67,6 +71,43 @@ def _styles():
         "footer": ParagraphStyle("footer",
             fontSize=7, fontName="Helvetica", textColor=C_GREY, alignment=TA_CENTER),
     }
+
+
+def _po_date(po) -> str:
+    """PO creation date (not today's), so reprints keep the original date."""
+    raw = str(po["created_at"] or "")[:10]
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return datetime.today().strftime("%d/%m/%Y")
+
+
+def _numbered_canvas_cls(po_number):
+    from reportlab.pdfgen import canvas as _canvas
+
+    class _NumberedCanvas(_canvas.Canvas):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._saved = []
+
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved)
+            for state in self._saved:
+                self.__dict__.update(state)
+                self.setFont("Helvetica", 7)
+                self.setFillColor(C_GREY)
+                w, _ = self._pagesize
+                self.drawCentredString(
+                    w / 2, 8 * mm,
+                    f"{po_number}  |  Page {self._pageNumber} of {total}")
+                super().showPage()
+            super().save()
+
+    return _NumberedCanvas
 
 
 def generate_po_pdf(po_id: int, output_path: str) -> str:
@@ -106,11 +147,11 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
 
     doc = SimpleDocTemplate(
         output_path,
-        pagesize=A4,
+        pagesize=landscape(A4),
         leftMargin=18*mm, rightMargin=18*mm,
-        topMargin=16*mm, bottomMargin=16*mm,
+        topMargin=16*mm, bottomMargin=20*mm,
     )
-    W = A4[0] - 36*mm
+    W = landscape(A4)[0] - 36*mm
     story = []
 
     # ── Header: store name left, PO number right ──────────────────────────────
@@ -153,8 +194,11 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     if po["account_number"]: sup_lines.append(f'Account: {po["account_number"]}')
 
     po_details = [
+        f'<b>PO Number:</b> {po["po_number"]}',
         f'<b>Status:</b> {po["status"]}',
-        f'<b>Date:</b> {datetime.today().strftime("%d/%m/%Y")}',
+        f'<b>Date:</b> {_po_date(po)}',
+        '<b>Currency:</b> AUD',
+        f'<b>Total lines:</b> {sum(1 for l in lines if not l["is_note"])}',
     ]
     if po["payment_terms"]:
         po_details.append(f'<b>Terms:</b> {po["payment_terms"]}')
@@ -181,17 +225,25 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         story.append(Spacer(1, 6))
 
     # ── Line items table ──────────────────────────────────────────────────────
-    col_widths = [W*0.36, W*0.14, W*0.10, W*0.16, W*0.12, W*0.12]
+    col_widths = [W*0.04, W*0.15, W*0.12, W*0.26, W*0.08,
+                  W*0.08, W*0.07, W*0.10, W*0.10]
 
-    qty_col_hdr = "Return Qty" if is_return else "Order Qty"
     tbl_data = [[
-        Paragraph("Description",  st["hdr"]),
-        Paragraph("Supplier SKU", st["hdr"]),
-        Paragraph("Pack",         st["hdr"]),
-        Paragraph(qty_col_hdr,    st["hdr_ctr"]),
-        Paragraph("Unit Cost",    st["hdr_right"]),
-        Paragraph("Line Total",   st["hdr_right"]),
+        Paragraph("#",            st["hdr_plain"]),
+        Paragraph("Supplier SKU", st["hdr_plain"]),
+        Paragraph("Barcode",      st["hdr_plain"]),
+        Paragraph("Description",  st["hdr_plain"]),
+        Paragraph("Pack",         st["hdr_plain"]),
+        Paragraph("Cartons",      st["hdr_right"]),   # only bold heading: guards carton vs unit mix-ups
+        Paragraph("Units",        st["hdr_plain_right"]),
+        Paragraph("Unit Cost (ex GST)", st["hdr_plain_right"]),
+        Paragraph("Line Total",   st["hdr_plain_right"]),
     ]]
+    line_no = 0
+    line_rates = set()   # non-zero GST rates seen on lines
+    tot_cartons = 0
+    tot_units   = 0
+    notes_out = []   # (line number it follows, text)
 
     fixed_total = 0.0
     gst_total   = 0.0
@@ -199,12 +251,9 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     for line in lines:
         # ── Note line — span description column, skip numeric columns ────
         if line["is_note"]:
-            note_para = Paragraph(
-                f'<i><font color="#888888">📝  {line["description"]}</font></i>',
-                st["body"]
-            )
-            tbl_data.append([note_para, "", "", "", "", ""])
+            notes_out.append((line_no, line["description"]))
             continue
+        line_no += 1
 
         product  = product_model.get_by_barcode(line["barcode"])
         override = supplier_overrides.get(line["barcode"])
@@ -217,6 +266,8 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
             pack_unit = (product["pack_unit"] or "EA")  if product else "EA"
             sup_sku   = (product["supplier_sku"] or "") if product else ""
         tax_rate  = float(product["tax_rate"])      if product and product["tax_rate"]  else 0.0
+        if tax_rate:
+            line_rates.add(tax_rate)
 
         total_units = po_display_qty(_po_type, int(line["ordered_qty"]), pack_qty)
         cartons     = int(line["ordered_qty"])
@@ -230,50 +281,62 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
             cost_str       = f"${unit_cost:.2f}"
             total_str      = fmt_money(line_total)
         except (TypeError, ValueError):
-            cost_str  = str(raw_cost) if raw_cost else "—"
-            total_str = "—"
+            cost_str  = str(raw_cost) if raw_cost else "-"
+            total_str = "-"
 
-        desc_para = Paragraph(
-            f'{line["description"]}<br/>'
-            f'<font size="7" color="#888888">{line["barcode"]}</font>',
-            st["body"]
-        )
-        pack_str = f"{pack_qty} × {pack_unit}" if pack_qty > 1 else pack_unit
-        if unit_mode:
-            qty_str = f"{total_units} units"
-        elif pack_qty > 1:
-            qty_str = f"{cartons} {'ctn' if cartons == 1 else 'ctns'}\n({total_units} units)"
-        else:
-            qty_str = f"{total_units} units"
+        pack_str = f"{pack_qty} x {pack_unit}" if pack_qty > 1 else pack_unit
+        # Cartons only mean something when the line is ordered in cartons
+        by_carton = not unit_mode and pack_qty > 1
+        ctn_str = f"{cartons} ctn" if by_carton else "-"
+        tot_cartons += cartons if by_carton else 0
+        tot_units   += total_units
 
         tbl_data.append([
-            desc_para,
-            Paragraph(sup_sku or "—", st["small"]),
-            Paragraph(pack_str,       st["small"]),
-            Paragraph(qty_str,        st["ctr"]),
+            Paragraph(str(line_no),   st["body"]),
+            Paragraph(sup_sku or "-", st["body"]),
+            Paragraph(str(line["barcode"]), st["body"]),
+            Paragraph(line["description"],  st["body"]),
+            Paragraph(pack_str,       st["body"]),
+            Paragraph(ctn_str,        st["right_bold"]),
+            Paragraph(str(total_units), st["right"]),
             Paragraph(cost_str,       st["right"]),
             Paragraph(total_str,      st["right"]),
         ])
 
-    lines_tbl = Table(tbl_data, colWidths=col_widths, repeatRows=1)
+    # Group heading over Cartons / Units (cols 5-6)
+    tbl_data.insert(0, ["", "", "", "", "",
+                        Paragraph("ORDER", st["hdr_ctr"]), "", "", ""])
+
+    lines_tbl = Table(tbl_data, colWidths=col_widths, repeatRows=2)
     lines_tbl.setStyle(TableStyle([
-        # Header — light grey background, bold black text
-        ("BACKGROUND",    (0, 0), (-1, 0), C_LGREY),
-        ("TOPPADDING",    (0, 0), (-1, 0), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("SPAN",          (5, 0), (6, 0)),
+        ("BOX",           (5, 0), (6, 0), 1.0, C_BLACK),
+        ("TOPPADDING",    (0, 0), (-1, 0), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
+        # Header — light grey background
+        ("BACKGROUND",    (0, 1), (-1, 1), C_LGREY),
+        ("TOPPADDING",    (0, 1), (-1, 1), 6),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 6),
         # Data rows
-        ("FONTSIZE",      (0, 1), (-1, -1), 8),
-        ("TOPPADDING",    (0, 1), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+        ("FONTSIZE",      (0, 2), (-1, -1), 8),
+        ("TOPPADDING",    (0, 2), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 2), (-1, -1), 4),
         ("LEFTPADDING",   (0, 0), (-1, -1), 4),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID",          (0, 0), (-1, -1), 0.4, C_BORDER),
-        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [C_WHITE, C_LGREY]),
-        ("BOX",           (0, 0), (-1, -1), 0.75, C_BLACK),
+        ("GRID",          (0, 1), (-1, -1), 0.25, C_BORDER),
+        ("BOX",           (5, 1), (5, -1), 1.0, C_BLACK),
+        ("BOX",           (0, 1), (-1, -1), 0.75, C_BLACK),
     ]))
     story.append(lines_tbl)
     story.append(Spacer(1, 8))
+
+    if notes_out:
+        story.append(Paragraph("<b>Line notes</b>", st["body"]))
+        for after, text in notes_out:
+            where = f"After line {after}" if after else "Before line 1"
+            story.append(Paragraph(f"{where}: {text}", st["body"]))
+        story.append(Spacer(1, 8))
 
     # ── Totals ────────────────────────────────────────────────────────────────
     subtotal    = round(fixed_total, 2)
@@ -281,23 +344,32 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
     grand_total = round(fixed_total + gst_total, 2)
 
     grand_label = "CREDIT TOTAL:" if is_return else "ORDER TOTAL:"
+    if abs(gst) < 0.005:
+        gst_label = "GST (none - GST-free):"
+    elif len(line_rates) == 1:
+        gst_label = f"GST ({line_rates.pop():g}%):"
+    else:
+        gst_label = "GST (mixed rates):"
+    qty_label = "ORDER QTY:" if not is_return else "RETURN QTY:"
     totals_tbl = Table([
+        [Paragraph(qty_label, st["total_label"]),
+         Paragraph(f"{tot_cartons} ctn / {tot_units} units", st["total_value"])],
         [Paragraph("Subtotal (ex GST):", st["total_label"]),
          Paragraph(fmt_money(subtotal),       st["total_value"])],
-        [Paragraph("GST (10%):",         st["total_label"]),
+        [Paragraph(gst_label,            st["total_label"]),
          Paragraph(fmt_money(gst),            st["total_value"])],
         [Paragraph(grand_label,          st["grand_label"]),
          Paragraph(fmt_money(grand_total),    st["grand_value"])],
-    ], colWidths=[W * 0.82, W * 0.18])
+    ], colWidths=[W * 0.76, W * 0.24])
     totals_tbl.setStyle(TableStyle([
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING",    (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LINEABOVE",     (0, 2), (-1, 2), 1,   C_BLACK),
-        ("LINEBELOW",     (0, 2), (-1, 2), 0.75, C_BLACK),
-        ("TOPPADDING",    (0, 2), (-1, 2), 6),
-        ("BOTTOMPADDING", (0, 2), (-1, 2), 6),
-        ("BACKGROUND",    (0, 2), (-1, 2), C_LGREY),
+        ("LINEABOVE",     (0, 3), (-1, 3), 1,   C_BLACK),
+        ("LINEBELOW",     (0, 3), (-1, 3), 0.75, C_BLACK),
+        ("TOPPADDING",    (0, 3), (-1, 3), 6),
+        ("BOTTOMPADDING", (0, 3), (-1, 3), 6),
+        ("BACKGROUND",    (0, 3), (-1, 3), C_LGREY),
     ]))
     story.append(totals_tbl)
 
@@ -310,5 +382,5 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         st["footer"]
     ))
 
-    doc.build(story)
+    doc.build(story, canvasmaker=_numbered_canvas_cls(po["po_number"]))
     return output_path

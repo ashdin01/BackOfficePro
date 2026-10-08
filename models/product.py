@@ -119,10 +119,10 @@ def search(term, active_only=True, limit=None, offset=0):
         """, params).fetchall()
 
 
-def create(barcode, description, department_id, supplier_id=None, unit='EA',
+def create(barcode, description, department_id, supplier_id=None, unit='ea',
         sell_price=0, cost_price=0, tax_rate=0, reorder_point=0,
         reorder_max=0, variable_weight=0, expected=1, brand='',
-        plu='', supplier_sku='', base_sku='', pack_qty=1, pack_unit='EA', group_id=None,
+        plu='', supplier_sku='', base_sku='', pack_qty=1, pack_unit='ea', group_id=None,
         carton_sku=''):
     with db_conn() as conn:
         conn.execute("""

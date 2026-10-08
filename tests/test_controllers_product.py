@@ -221,6 +221,26 @@ class TestProductControllerWrappers:
         )
         assert product_ctrl.get_product_by_barcode('9300000088881') is not None
 
+    def test_add_product_links_supplier_so_it_appears_on_po(self, test_db, dept_id, supplier_id):
+        import models.product_suppliers as ps_model
+        product_ctrl.add_product(
+            '9300000088882', 'Linked Product', dept_id, supplier_id=supplier_id,
+            supplier_sku='SKU-1', pack_qty=6, pack_unit='ea',
+        )
+        link = ps_model.get_for_barcode_and_supplier('9300000088882', supplier_id)
+        assert link is not None
+        assert ps_model.get_by_barcode('9300000088882')[0]['is_default'] == 1
+        assert link['supplier_sku'] == 'SKU-1'
+        assert link['pack_qty'] == 6
+        assert any(r['barcode'] == '9300000088882'
+                   for r in ps_model.get_by_supplier(supplier_id))
+
+    def test_add_product_without_supplier_creates_no_link(self, test_db, dept_id):
+        import models.product_suppliers as ps_model
+        product_ctrl.add_product('9300000088883', 'Unlinked Product', dept_id)
+        assert ps_model.get_by_barcode('9300000088883') in ([], None) or \
+            len(ps_model.get_by_barcode('9300000088883')) == 0
+
     def test_update_cost_price(self, test_db, product_barcode):
         product_ctrl.update_cost_price(product_barcode, 3.99)
         row = product_ctrl.get_product_by_barcode(product_barcode)

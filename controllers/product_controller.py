@@ -351,10 +351,10 @@ def get_supplier_overrides_for_barcodes(barcodes, supplier_id) -> dict:
     return ps_model.get_map_for_barcodes(barcodes, supplier_id)
 
 
-def add_product(barcode, description, department_id, supplier_id=None, unit='EA',
+def add_product(barcode, description, department_id, supplier_id=None, unit='ea',
                 sell_price=0, cost_price=0, tax_rate=0, reorder_point=0,
                 reorder_max=0, variable_weight=0, expected=1, brand='',
-                plu='', supplier_sku='', base_sku='', pack_qty=1, pack_unit='EA',
+                plu='', supplier_sku='', base_sku='', pack_qty=1, pack_unit='ea',
                 group_id=None) -> None:
     from utils.validators import positive_number, percentage
     if not str(description).strip():
@@ -371,6 +371,16 @@ def add_product(barcode, description, department_id, supplier_id=None, unit='EA'
                       expected=expected, brand=brand, plu=plu,
                       supplier_sku=supplier_sku, base_sku=base_sku,
                       pack_qty=pack_qty, pack_unit=pack_unit, group_id=group_id)
+    if supplier_id:
+        # PO pickers find products through product_suppliers, so a product
+        # added with a supplier must be linked here — not only on first edit.
+        ps_model.save_for_barcode(barcode, [{
+            'supplier_id':  supplier_id,
+            'is_default':   True,
+            'supplier_sku': supplier_sku,
+            'pack_qty':     pack_qty,
+            'pack_unit':    pack_unit,
+        }])
 
 
 def search_products(term, active_only=True, limit=None, offset=0) -> list[dict]:

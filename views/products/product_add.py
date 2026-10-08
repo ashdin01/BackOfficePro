@@ -56,7 +56,7 @@ class ProductAdd(KeyboardMixin, QWidget):
         self.pack_qty.setToolTip("How many units arrive per carton/case")
 
         self.pack_unit = QComboBox()
-        self.pack_unit.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
+        self.pack_unit.addItems(['ea', 'kg', 'l', 'pk', 'ctn', 'g', 'ml'])
 
         pack_row = QHBoxLayout()
         pack_row.addWidget(self.pack_qty)
@@ -80,7 +80,7 @@ class ProductAdd(KeyboardMixin, QWidget):
             self.group.addItem(f"{g['dept_name']} › {g['name']}", g['id'])
 
         self.unit = QComboBox()
-        self.unit.addItems(['EA', 'KG', 'L', 'PK', 'CTN', 'G', 'ML'])
+        self.unit.addItems(['ea', 'kg', 'l', 'pk', 'ctn', 'g', 'ml'])
 
         self.cost_price = QDoubleSpinBox()
         self.cost_price.setMaximum(99999)
@@ -116,8 +116,8 @@ class ProductAdd(KeyboardMixin, QWidget):
         self.reorder_max.setToolTip("Maximum stock level. Order qty = Max - On Hand.")
 
 
-        self.variable_weight = QCheckBox("Variable weight item (deli/meat)")
-        self.expected = QCheckBox("Include in stocktake")
+        self.variable_weight = QCheckBox("Variable Weight")
+        self.expected = QCheckBox("In Stocktake")
         self.expected.setChecked(True)
 
         # ── Field order per spec ──────────────────────────────────────
@@ -125,9 +125,9 @@ class ProductAdd(KeyboardMixin, QWidget):
         form.addRow("Description *",    self.description)
         form.addRow("Brand",            self.brand)
         form.addRow("PLU",              self.plu)
-        form.addRow("Supplier",         self.supplier)
+        form.addRow("Supplier Details", self.supplier)
         form.addRow("Supplier SKU",     self.supplier_sku)
-        form.addRow("Units per Carton", pack_row)
+        form.addRow("Pack Size",        pack_row)
         form.addRow("Department *",     self.dept)
         form.addRow("Group",            self.group)
         form.addRow("Unit",             self.unit)
