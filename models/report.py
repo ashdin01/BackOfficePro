@@ -424,6 +424,55 @@ def get_supplier_sales(supplier_id=None):
     return rows, totals
 
 
+def get_top_sellers(date_from, date_to, dept_id=None, rank_by='units',
+                    limit=50, weighed_only=False):
+    """
+    Best-selling PLUs between date_from and date_to (inclusive, 'YYYY-MM-DD').
+
+    sales_daily is keyed by PLU; a PLU's department comes from the product its
+    PLU maps to (plu_barcode_map). PLUs with no mapped product have
+    department_name 'Unmapped' and are excluded when dept_id is given.
+    rank_by: 'units' (quantity) or 'sales' (sales_dollars).
+    Returns dicts: plu, item, department_name, units, weight_kg,
+    sold_by_weight (bool), sales_dollars.
+    """
+    order = "sales_dollars" if rank_by == 'sales' else "units"
+    having = "HAVING SUM(sd.weight_kg) > 0" if weighed_only else ""
+    dept_clause = "AND p.department_id = ?" if dept_id else ""
+    params = [str(date_from), str(date_to)]
+    if dept_id:
+        params.append(dept_id)
+    params.append(int(limit))
+    with db_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT sd.plu AS plu,
+                   MAX(sd.plu_name)                     AS item,
+                   COALESCE(d.name, 'Unmapped')         AS department_name,
+                   COALESCE(SUM(sd.quantity), 0)        AS units,
+                   COALESCE(SUM(sd.weight_kg), 0)       AS weight_kg,
+                   COALESCE(SUM(sd.sales_dollars), 0)   AS sales_dollars
+            FROM sales_daily sd
+            LEFT JOIN plu_barcode_map pbm ON CAST(pbm.plu AS TEXT) = sd.plu
+            LEFT JOIN products p    ON p.barcode = pbm.barcode
+            LEFT JOIN departments d ON d.id = p.department_id
+            WHERE sd.sale_date BETWEEN ? AND ?
+              {dept_clause}
+            GROUP BY sd.plu
+            {having}
+            ORDER BY {order} DESC, sd.plu
+            LIMIT ?
+        """, params).fetchall()
+    return [{
+        'plu':             r['plu'],
+        'item':            r['item'] or '',
+        'department_name': r['department_name'],
+        'units':           r['units'],
+        'weight_kg':       r['weight_kg'],
+        'sold_by_weight':  r['weight_kg'] > 0,
+        'sales_dollars':   r['sales_dollars'],
+    } for r in rows]
+
+
 # ── Write-off Report ─────────────────────────────────────────────────────────
 
 _SPOILAGE_TYPES  = ['OD - Out of Date']

@@ -493,3 +493,53 @@ class TestWeightVariance:
         assert any(r["barcode"] == bc for r in rows)
         rows_other = report_model.get_weight_variance("2026-05-01", "2026-05-31", dept_id=dept_id + 999)
         assert not any(r["barcode"] == bc for r in rows_other)
+
+
+class TestGetTopSellers:
+    @pytest.fixture()
+    def sales(self, db_conn, product_barcode, dept_id):
+        """PLU 101 -> test product (dept_id); PLU 202 is unmapped; PLU 303 is weighed."""
+        db_conn.execute("INSERT INTO plu_barcode_map (plu, barcode) VALUES (101, ?)",
+                        (product_barcode,))
+        rows = [
+            ('2026-09-01', '101', 'MAPPED ITEM',   10, 0.0,  50.0),
+            ('2026-09-02', '101', 'MAPPED ITEM',    5, 0.0,  25.0),
+            ('2026-09-01', '202', 'UNMAPPED ITEM', 30, 0.0,  30.0),
+            ('2026-09-01', '303', 'WEIGHED ITEM',   8, 12.5, 90.0),
+            ('2026-08-01', '101', 'MAPPED ITEM',  100, 0.0, 500.0),   # outside range
+        ]
+        for d, plu, name, qty, kg, dollars in rows:
+            db_conn.execute(
+                "INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, weight_kg,"
+                " sales_dollars) VALUES (?, ?, ?, ?, ?, ?)", (d, plu, name, qty, kg, dollars))
+        db_conn.commit()
+        return dept_id
+
+    def test_ranks_by_units_within_date_range(self, sales):
+        rows = report_model.get_top_sellers('2026-09-01', '2026-09-30')
+        assert [(r['plu'], r['units']) for r in rows] == [('202', 30), ('101', 15), ('303', 8)]
+
+    def test_rank_by_sales(self, sales):
+        rows = report_model.get_top_sellers('2026-09-01', '2026-09-30', rank_by='sales')
+        assert [r['plu'] for r in rows] == ['303', '101', '202']
+
+    def test_department_filter_excludes_unmapped(self, sales):
+        rows = report_model.get_top_sellers('2026-09-01', '2026-09-30', dept_id=sales)
+        assert [r['plu'] for r in rows] == ['101']
+        assert rows[0]['department_name'] != 'Unmapped'
+
+    def test_unmapped_labelled_when_no_department_filter(self, sales):
+        rows = {r['plu']: r for r in report_model.get_top_sellers('2026-09-01', '2026-09-30')}
+        assert rows['202']['department_name'] == 'Unmapped'
+
+    def test_weighed_only_and_flag(self, sales):
+        rows = report_model.get_top_sellers('2026-09-01', '2026-09-30', weighed_only=True)
+        assert [r['plu'] for r in rows] == ['303']
+        assert rows[0]['sold_by_weight'] is True
+        assert rows[0]['weight_kg'] == pytest.approx(12.5)
+
+    def test_limit(self, sales):
+        assert len(report_model.get_top_sellers('2026-09-01', '2026-09-30', limit=2)) == 2
+
+    def test_empty_range_returns_empty_list(self, test_db):
+        assert report_model.get_top_sellers('2000-01-01', '2000-01-02') == []

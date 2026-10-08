@@ -122,3 +122,11 @@ def get_weight_variance(date_from, date_to, dept_id=None) -> list[dict]:
 def get_combined_daily_revenue(d_from, d_to) -> dict:
     """Return {date_str: {'pos': float, 'ar': float}} for the date range."""
     return report_model.get_combined_daily_revenue(d_from, d_to)
+
+
+def get_top_sellers(date_from, date_to, dept_id=None, rank_by='units',
+                    limit=50, weighed_only=False) -> list[dict]:
+    """Best-selling PLUs for a date range, optionally one department."""
+    return report_model.get_top_sellers(
+        date_from, date_to, dept_id=dept_id, rank_by=rank_by,
+        limit=limit, weighed_only=weighed_only)

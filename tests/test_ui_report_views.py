@@ -245,3 +245,41 @@ class TestWeightVarianceReport:
         assert w.table.item(row, 3).text() == "10.00"
         assert w.table.item(row, 4).text() == "6.00"
         assert w.table.item(row, 5).text() == "4.00"
+
+
+# ── TopSellersReport ──────────────────────────────────────────────────────────
+
+class TestTopSellersReport:
+    def test_constructs_and_loads_empty(self, qtbot, test_db):
+        from views.reports.top_sellers_report import TopSellersReport
+        w = TopSellersReport()
+        qtbot.addWidget(w)
+        assert w.table.rowCount() == 0
+        assert w.dept_combo.itemText(0) == "All Departments"
+        assert w.limit_combo.currentData() == 50
+
+    def test_default_range_is_last_4_weeks(self, qtbot, test_db):
+        from datetime import timedelta
+        from views.reports.top_sellers_report import TopSellersReport
+        w = TopSellersReport()
+        qtbot.addWidget(w)
+        assert w.date_to.date().toPyDate() == date.today()
+        assert w.date_from.date().toPyDate() == date.today() - timedelta(days=27)
+
+    def test_loads_rows_and_exports_csv(self, qtbot, test_db, db_conn, tmp_path):
+        db_conn.execute(
+            "INSERT INTO sales_daily (sale_date, plu, plu_name, quantity, weight_kg,"
+            " sales_dollars) VALUES (?, '55', 'TEST BANANAS', 7, 3.5, 21.0)",
+            (str(date.today()),))
+        db_conn.commit()
+        from views.reports.top_sellers_report import TopSellersReport
+        w = TopSellersReport()
+        qtbot.addWidget(w)
+        assert w.table.rowCount() == 1
+        assert w.table.item(0, 2).text() == "TEST BANANAS"
+        assert w.table.item(0, 6).text() == "Yes"
+        out = tmp_path / "top.csv"
+        w.write_csv(str(out))
+        lines = out.read_text().splitlines()
+        assert lines[0].startswith("rank,plu,item")
+        assert lines[1] == "1,55,TEST BANANAS,Unmapped,7,3.5,Y,21.00"
