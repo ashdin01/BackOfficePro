@@ -2834,6 +2834,36 @@ def migrate_v72(conn):
     conn.commit()
 
 
+def migrate_v73(conn):
+    """Backfill product_suppliers for products that have a supplier_id but no
+    supplier link at all. Add Product used to set only products.supplier_id,
+    so those products were invisible to PO item lookup (which joins
+    product_suppliers) until someone re-saved them in Product Detail. Each
+    gets its existing supplier as the default link, carrying over the
+    product's supplier SKU and pack size. Products that already have any link
+    are left untouched, so this is safe to re-run.
+
+    A database whose FKs were left dangling by an older table-rebuild
+    migration (product_suppliers -> "products_old") can't take the insert;
+    skip with a warning rather than aborting startup."""
+    try:
+        conn.execute("""
+            INSERT OR IGNORE INTO product_suppliers
+                (barcode, supplier_id, is_default, supplier_sku, pack_qty, pack_unit)
+            SELECT p.barcode, p.supplier_id, 1,
+                   COALESCE(p.supplier_sku, ''),
+                   COALESCE(NULLIF(p.pack_qty, 0), 1),
+                   COALESCE(NULLIF(p.pack_unit, ''), 'ea')
+            FROM products p
+            JOIN suppliers s ON s.id = p.supplier_id
+            WHERE p.supplier_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM product_suppliers ps WHERE ps.barcode = p.barcode)
+        """)
+    except sqlite3.OperationalError as e:
+        logging.warning("migrate_v73: supplier-link backfill skipped (%s)", e)
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2906,4 +2936,5 @@ _MIGRATIONS: dict[int, tuple] = {
     70: (migrate_v70, "pos_sales totals + stock_movements unit_price/line_total/tax_rate for full-transaction view"),
     71: (migrate_v71, "carton_sku column on products"),
     72: (migrate_v72, "pos_refunds, pos_refund_lines tables for POS cash refunds"),
+    73: (migrate_v73, "backfill product_suppliers link for products with a supplier_id but no link"),
 }

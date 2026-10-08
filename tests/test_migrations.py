@@ -539,3 +539,48 @@ class TestCheckIntegrityFunctionDrift:
             assert any("drift" in r.message.lower() for r in caplog.records)
         finally:
             mig._MIGRATIONS[2] = original_migrations[2]
+
+
+# ── v73: backfill product_suppliers ───────────────────────────────────────────
+
+class TestMigrateV73:
+    def _db(self, tmp_path):
+        c = sqlite3.connect(str(tmp_path / "v73.db"))
+        c.row_factory = sqlite3.Row
+        c.execute("PRAGMA foreign_keys=ON")
+        c.executescript(SCHEMA)
+        c.execute("INSERT INTO departments (code, name) VALUES ('D', 'Dept')")
+        c.execute("INSERT INTO suppliers (code, name) VALUES ('S1', 'Sup1')")
+        c.execute("INSERT INTO suppliers (code, name) VALUES ('S2', 'Sup2')")
+        return c
+
+    def _product(self, c, barcode, supplier_id, sku='', pack_qty=1, pack_unit='ea'):
+        c.execute(
+            "INSERT INTO products (barcode, description, department_id, supplier_id,"
+            " supplier_sku, pack_qty, pack_unit) VALUES (?, ?, 1, ?, ?, ?, ?)",
+            (barcode, barcode, supplier_id, sku, pack_qty, pack_unit))
+
+    def test_links_unlinked_product_with_its_sku_and_pack(self, tmp_path):
+        c = self._db(tmp_path)
+        self._product(c, 'A', 1, sku='SKU-A', pack_qty=6, pack_unit='ea')
+        mig.migrate_v73(c)
+        row = c.execute("SELECT * FROM product_suppliers WHERE barcode='A'").fetchone()
+        assert (row['supplier_id'], row['is_default']) == (1, 1)
+        assert (row['supplier_sku'], row['pack_qty'], row['pack_unit']) == ('SKU-A', 6, 'ea')
+
+    def test_leaves_already_linked_and_supplierless_products_alone(self, tmp_path):
+        c = self._db(tmp_path)
+        self._product(c, 'B', 1)
+        c.execute("INSERT INTO product_suppliers (barcode, supplier_id, is_default)"
+                  " VALUES ('B', 2, 0)")
+        self._product(c, 'C', None)
+        mig.migrate_v73(c)
+        rows = c.execute("SELECT barcode, supplier_id FROM product_suppliers").fetchall()
+        assert [(r['barcode'], r['supplier_id']) for r in rows] == [('B', 2)]
+
+    def test_is_idempotent(self, tmp_path):
+        c = self._db(tmp_path)
+        self._product(c, 'D', 1)
+        mig.migrate_v73(c)
+        mig.migrate_v73(c)
+        assert c.execute("SELECT COUNT(*) FROM product_suppliers").fetchone()[0] == 1
