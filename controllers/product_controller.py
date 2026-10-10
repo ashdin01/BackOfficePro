@@ -157,7 +157,35 @@ def get_movement_history(barcode, move_type=None) -> list[dict]:
     Each row: (movement_type, quantity, reference, notes, created_at)
     Optionally filter by a specific movement_type string.
     """
-    return movements_model.get_by_barcode(barcode, move_type)
+    rows = [dict(r) for r in movements_model.get_by_barcode(barcode, move_type)]
+    if move_type in (None, "ALL", "PRICE_CHANGE"):
+        rows.extend(_price_change_rows(barcode))
+        rows.sort(key=lambda r: str(r["created_at"]), reverse=True)
+    return rows
+
+
+def _price_change_rows(barcode) -> list[dict]:
+    """Sell-price changes from the audit log, shaped like zero-quantity
+    PRICE_CHANGE movement rows so they interleave with stock movements."""
+    import models.audit_log as audit_model
+
+    def _fmt(v):
+        try:
+            return f"${float(v):.2f}"
+        except (TypeError, ValueError):
+            return "—"
+
+    out = []
+    for a in audit_model.get_field_history("product", barcode, "sell_price"):
+        out.append({
+            "movement_type": "PRICE_CHANGE",
+            "quantity": 0.0,
+            "reference": "",
+            "notes": f"Sell price {_fmt(a['old_value'])} → {_fmt(a['new_value'])}"
+                     + (f"  |  by {a['changed_by']}" if a["changed_by"] else ""),
+            "created_at": a["changed_at"],
+        })
+    return out
 
 
 def get_transaction(reference: str) -> dict | None:
@@ -337,7 +365,28 @@ def get_all_products(active_only=True, include_nonzero_inactive=False) -> list[d
 
 
 def get_product_by_barcode(barcode) -> dict | None:
-    return product_model.get_by_barcode(barcode)
+    product = product_model.get_by_barcode(barcode)
+    if product is None:
+        # A weigh-and-label barcode has the PLU embedded, not a product barcode.
+        resolved = _product_from_scale_label(barcode)
+        if resolved:
+            product = product_model.get_by_barcode(resolved['barcode'])
+    return product
+
+
+def _product_from_scale_label(barcode) -> dict | None:
+    """POS-display product for a scale-label barcode, plus the embedded
+    'scale_label' {'weight_kg', 'price'}; None if it isn't one or the PLU is unknown."""
+    from models.barcode import decode_scale_label
+    label = decode_scale_label(str(barcode))
+    if not label:
+        return None
+    product = get_product_by_plu(label['plu'])
+    if not product:
+        return None
+    product = dict(product)
+    product['scale_label'] = {'weight_kg': label['weight_kg'], 'price': label['price']}
+    return product
 
 
 def get_products_by_barcodes(barcodes) -> list[dict]:
@@ -469,4 +518,4 @@ def get_product_for_pos(barcode: str) -> dict | None:
             'unit_qty':       su['unit_qty'],
             'soh_qty':        soh_in_units,
         }
-    return None
+    return _product_from_scale_label(barcode)

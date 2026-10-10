@@ -318,6 +318,11 @@ class PLUManager(QWidget):
                 or term in r['barcode'].lower()
                 or term in (r['description'] or '').lower()
             ]
+            # exact PLU first, then PLUs starting with the term; list order otherwise
+            def _rank(r):
+                plu = str(r['plu']).lower()
+                return 0 if plu == term else 1 if plu.startswith(term) else 2
+            filtered = sorted(filtered, key=_rank)
 
         if tab == 0:
             self._populate_all(filtered)

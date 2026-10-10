@@ -623,3 +623,24 @@ class TestProductControllerWrappers:
         assert result is not None
         assert result['master_barcode'] == product_barcode
         assert result['soh_qty'] == 8  # 4 units / 0.5 unit_qty per selling unit
+
+
+import models.product as product_model
+
+
+class TestPriceChangeHistory:
+    def test_sell_price_change_appears_in_movement_history(self, test_db, product_barcode):
+        p = product_ctrl.get_product_by_barcode(product_barcode)
+        old = float(p['sell_price'])
+        product_model.update(
+            product_barcode, p['description'], p['brand'], p['plu'], p['supplier_sku'],
+            p['pack_qty'], p['pack_unit'], p['group_id'], p['department_id'],
+            p['supplier_id'], p['unit'], old + 1.5, p['cost_price'], p['tax_rate'],
+            p['reorder_point'],
+        )
+        rows = product_ctrl.get_movement_history(product_barcode)
+        pc = [r for r in rows if r['movement_type'] == 'PRICE_CHANGE']
+        assert len(pc) == 1 and pc[0]['quantity'] == 0
+        assert f"${old + 1.5:.2f}" in pc[0]['notes']
+        only = product_ctrl.get_movement_history(product_barcode, 'PRICE_CHANGE')
+        assert len(only) == 1

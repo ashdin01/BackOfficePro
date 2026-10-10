@@ -1,4 +1,5 @@
 from database.connection import db_conn
+from models.search_rank import rank_order
 
 
 def get_all(active_only=True, include_nonzero_inactive=False):
@@ -100,6 +101,8 @@ def search(term, active_only=True, limit=None, offset=0):
         params.extend([like, like, like, like, like, like, like])
 
     where = " AND ".join(word_clauses)
+    rank_sql, rank_params = rank_order(words)
+    params.extend(rank_params)
     limit_clause = "LIMIT ? OFFSET ?" if limit is not None else ""
     if limit is not None:
         params.extend([int(limit), int(offset)])
@@ -114,7 +117,7 @@ def search(term, active_only=True, limit=None, offset=0):
             LEFT JOIN product_groups g ON p.group_id      = g.id
             WHERE {where}
             {active_clause}
-            ORDER BY p.active DESC, p.description
+            ORDER BY p.active DESC, {rank_sql}, p.description
             {limit_clause}
         """, params).fetchall()
 

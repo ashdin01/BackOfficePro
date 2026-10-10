@@ -31,7 +31,7 @@ def show_movement_history_dialog(parent, barcode, on_view_receipt):
     type_cb = QComboBox()
     type_cb.addItems(["ALL", "RECEIPT", "SALE", "ADJUSTMENT", "ADJUSTMENT_IN",
                       "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE",
-                      "REVALUE"])
+                      "REVALUE", "PRICE_CHANGE"])
     filter_row.addWidget(type_cb)
     filter_row.addStretch()
     hint_lbl = QLabel("Double-click a SALE or RETURN row to view the full receipt")
@@ -91,7 +91,7 @@ def show_movement_history_dialog(parent, barcode, on_view_receipt):
                 type_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
             elif row["movement_type"] in ("SALE", "WASTAGE", "ADJUSTMENT_OUT", "SHRINKAGE"):
                 type_item.setForeground(QColor(styles.CLR_DANGER))
-            elif row["movement_type"] == "REVALUE":
+            elif row["movement_type"] in ("REVALUE", "PRICE_CHANGE"):
                 type_item.setForeground(QColor(styles.CLR_PURPLE))
             else:
                 type_item.setForeground(QColor("steelblue"))

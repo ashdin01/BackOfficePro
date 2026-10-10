@@ -232,3 +232,37 @@ def test_rename_barcode_raises_if_new_barcode_in_use(test_db, product_barcode, d
     db_conn.commit()
     with pytest.raises(ValueError, match=other_bc):
         product_model.rename_barcode(product_barcode, other_bc)
+
+
+# ── search relevance: exact PLU before substring matches ──────────────────────
+
+def _mk(db_conn, barcode, desc, plu, dept_id):
+    db_conn.execute(
+        "INSERT INTO products (barcode, description, department_id, plu) VALUES (?,?,?,?)",
+        (barcode, desc, dept_id, plu))
+    db_conn.commit()
+
+
+def test_search_ranks_exact_plu_before_longer_plu_matches(db_conn, dept_id):
+    _mk(db_conn, "0214140", "AAA PEARS", "14140", dept_id)
+    _mk(db_conn, "0201400", "AAB MANDARINS", "1400", dept_id)
+    _mk(db_conn, "0200140", "ZZZ WATERMELON", "140", dept_id)
+    _mk(db_conn, "9300000000140", "AAC BARCODE ENDS 140", "", dept_id)
+    rows = product_model.search("140")
+    assert rows[0]['plu'] == '140'
+    assert rows[1]['plu'] == '1400'   # PLU starting with 140 beats mere substrings
+    assert {r['barcode'] for r in rows} >= {"0214140", "0201400", "0200140"}
+
+
+def test_search_text_order_unchanged(db_conn, dept_id):
+    _mk(db_conn, "0200001", "OASIS DIP B", "1", dept_id)
+    _mk(db_conn, "0200002", "OASIS DIP A", "2", dept_id)
+    assert [r['description'] for r in product_model.search("oasis dip")] == ["OASIS DIP A", "OASIS DIP B"]
+
+
+def test_item_lookup_ranks_exact_plu_first(db_conn, dept_id):
+    import models.product_queries as pq
+    _mk(db_conn, "0214140", "AAA PEARS", "14140", dept_id)
+    _mk(db_conn, "0200140", "ZZZ WATERMELON", "140", dept_id)
+    rows = pq.get_items_for_supplier(None, "140")
+    assert rows[0]['barcode'] == "0200140"

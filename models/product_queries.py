@@ -1,5 +1,6 @@
 """Specialised read queries for products — supplier ordering, POS display, and SOH joins."""
 from database.connection import db_conn
+from models.search_rank import rank_order
 
 
 def get_reorder_candidates(supplier_id) -> list:
@@ -69,6 +70,8 @@ def get_items_for_supplier(supplier_id=None, search_term='') -> list:
         )
         params.extend([like, like, like, like, like, like, like])
     search_where = (" AND " + " AND ".join(word_clauses)) if word_clauses else ""
+    rank_sql, rank_params = rank_order(words)
+    params.extend(rank_params)
 
     with db_conn() as conn:
         if supplier_id:
@@ -86,7 +89,7 @@ def get_items_for_supplier(supplier_id=None, search_term='') -> list:
                 JOIN suppliers s ON s.id = ?
                 LEFT JOIN departments d ON d.id = p.department_id
                 WHERE p.active = 1{where}
-                ORDER BY p.description ASC
+                ORDER BY {rank_sql}, p.description ASC
             """, [supplier_id, supplier_id, *params]).fetchall()
         else:
             sku_expr = "COALESCE(p.supplier_sku, '')"
@@ -102,7 +105,7 @@ def get_items_for_supplier(supplier_id=None, search_term='') -> list:
                 LEFT JOIN suppliers s ON p.supplier_id = s.id
                 LEFT JOIN departments d ON d.id = p.department_id
                 WHERE p.active = 1{where}
-                ORDER BY supplier_name ASC, p.description ASC
+                ORDER BY {rank_sql}, supplier_name ASC, p.description ASC
             """, params).fetchall()
 
 

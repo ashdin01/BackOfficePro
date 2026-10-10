@@ -17,6 +17,7 @@ _CARDS = [
     ("🔌", "Stocktake / API", "API key for Stocktake App and RetailPOSPro",                "ApiAccessScreen"),
     ("🧮", "Tax Rates",       "Default store-wide GST rate",                               "TaxRatesScreen"),
     ("🏷️", "Label Printing",  "Shelf label page size for printing product labels",         "LabelPrintingScreen"),
+    ("⚖️", "Scale Labels",    "Read PLU + weight/price from weigh-and-label barcodes",     "ScaleLabelsScreen"),
 ]
 
 _COLS = 3
@@ -78,6 +79,7 @@ def _open_settings_screen(key: str, wins: list):
         "ApiAccessScreen":      ("views.settings.settings_api",             "ApiAccessScreen"),
         "TaxRatesScreen":       ("views.settings.settings_tax",             "TaxRatesScreen"),
         "LabelPrintingScreen":  ("views.settings.settings_labels",          "LabelPrintingScreen"),
+        "ScaleLabelsScreen":    ("views.settings.settings_scale_labels",    "ScaleLabelsScreen"),
     }
 
     mod_path, cls_name = _FACTORIES[key]

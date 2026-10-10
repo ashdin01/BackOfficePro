@@ -46,6 +46,24 @@ def get_for_entity(entity: str, entity_key: str, limit: int = 200) -> list[dict]
         return [dict(r) for r in rows]
 
 
+def get_field_history(entity: str, entity_key: str, field: str) -> list[dict]:
+    """Return audit rows for one field of a record, newest first.
+
+    changed_at is converted to UTC so it sorts alongside stock_movements
+    timestamps (CURRENT_TIMESTAMP, UTC) rather than the local-time default
+    audit_log uses.
+    """
+    with db_conn() as conn:
+        rows = conn.execute("""
+            SELECT old_value, new_value, changed_by,
+                   datetime(changed_at, 'utc') AS changed_at
+            FROM audit_log
+            WHERE entity = ? AND entity_key = ? AND field = ?
+            ORDER BY changed_at DESC, id DESC
+        """, (entity, entity_key, field)).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_recent(limit: int = 200) -> list[dict]:
     """Return the most recent audit rows across all entities."""
     with db_conn() as conn:

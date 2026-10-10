@@ -71,3 +71,52 @@ class TestExtractWeight:
         # weight = digits[7:12]
         barcode = "2000000001230"  # weight digits = '00123' → 0.123 kg
         assert extract_weight(barcode) == pytest.approx(0.123)
+
+
+class TestScaleLabel:
+    @staticmethod
+    def _ean13(body12):
+        total = sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(body12))
+        return body12 + str((10 - total % 10) % 10)
+
+    def test_default_weight_layout(self):
+        from models.barcode import decode_scale_label
+        r = decode_scale_label(self._ean13("210014000625"), {})
+        assert r == {'plu': '140', 'weight_kg': 0.625, 'price': None}
+
+    def test_price_layout(self):
+        from models.barcode import decode_scale_label
+        cfg = {'scale_label_plu_start': '1', 'scale_label_plu_len': '6',
+               'scale_label_value_type': 'price'}
+        r = decode_scale_label(self._ean13("200014000845"), cfg)
+        assert r == {'plu': '140', 'weight_kg': None, 'price': 8.45}
+
+    def test_upca_style_02_prefix_label_decodes_by_default(self):
+        # UPC-A 2PPPPPVVVVVC arrives from the scanner as 13 digits with a leading 0
+        from models.barcode import decode_scale_label
+        from_ = {}
+        code = "0200140006953"
+        r = decode_scale_label(code, from_)
+        assert r == {'plu': '140', 'weight_kg': 0.695, 'price': None}
+
+    def test_rejects_ordinary_barcode_and_bad_config(self):
+        from models.barcode import decode_scale_label
+        assert decode_scale_label("9300675009657", {}) is None
+        assert decode_scale_label(self._ean13("210014000625"), {'scale_label_value_start': '9'}) is None
+        assert decode_scale_label(self._ean13("210014000625"), {'scale_label_enabled': '0'}) is None
+
+
+class TestScaleLabelLookup:
+    def test_controller_resolves_label_to_product_by_plu(self, test_db, product_barcode):
+        import controllers.product_controller as pc
+        pc.set_product_plu(product_barcode, '140')
+        label = TestScaleLabel._ean13("210014000625")
+        found = pc.get_product_by_barcode(label)
+        assert found is not None and found['barcode'] == product_barcode
+        pos = pc.get_product_for_pos(label)
+        assert pos['scale_label'] == {'weight_kg': 0.625, 'price': None}
+
+    def test_unknown_plu_is_not_found(self, test_db):
+        import controllers.product_controller as pc
+        assert pc.get_product_by_barcode(TestScaleLabel._ean13("210099900625")) is None
+        assert pc.get_product_for_pos(TestScaleLabel._ean13("210099900625")) is None
