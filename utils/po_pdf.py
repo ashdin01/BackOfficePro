@@ -225,8 +225,8 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         story.append(Spacer(1, 6))
 
     # ── Line items table ──────────────────────────────────────────────────────
-    col_widths = [W*0.04, W*0.15, W*0.12, W*0.26, W*0.08,
-                  W*0.08, W*0.07, W*0.10, W*0.10]
+    col_widths = [W*0.04, W*0.15, W*0.12, W*0.28, W*0.08,
+                  W*0.08, W*0.07, W*0.08, W*0.10]
 
     tbl_data = [[
         Paragraph("#",            st["hdr_plain"]),
@@ -234,9 +234,9 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         Paragraph("Barcode",      st["hdr_plain"]),
         Paragraph("Description",  st["hdr_plain"]),
         Paragraph("Pack",         st["hdr_plain"]),
-        Paragraph("Cartons",      st["hdr_right"]),   # only bold heading: guards carton vs unit mix-ups
-        Paragraph("Units",        st["hdr_plain_right"]),
-        Paragraph("Unit Cost (ex GST)", st["hdr_plain_right"]),
+        Paragraph("Order",        st["hdr_ctr"]),
+        Paragraph("Total Units",  st["hdr_right"]),
+        Paragraph("Unit Cost<br/>(ex GST)", st["hdr_plain_right"]),
         Paragraph("Line Total",   st["hdr_plain_right"]),
     ]]
     line_no = 0
@@ -287,7 +287,11 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
         pack_str = f"{pack_qty} x {pack_unit}" if pack_qty > 1 else pack_unit
         # Cartons only mean something when the line is ordered in cartons
         by_carton = not unit_mode and pack_qty > 1
-        ctn_str = f"{cartons} ctn" if by_carton else "-"
+        if by_carton:
+            ctn_str = f"{cartons} carton" + ("" if cartons == 1 else "s")
+        else:
+            each_word = "each" if pack_unit.upper() == "EA" else pack_unit.lower()
+            ctn_str = f"{cartons} {each_word}"
         tot_cartons += cartons if by_carton else 0
         tot_units   += total_units
 
@@ -297,36 +301,27 @@ def generate_po_pdf(po_id: int, output_path: str) -> str:
             Paragraph(str(line["barcode"]), st["body"]),
             Paragraph(line["description"],  st["body"]),
             Paragraph(pack_str,       st["body"]),
-            Paragraph(ctn_str,        st["right_bold"]),
+            Paragraph(ctn_str,        st["ctr"]),
             Paragraph(str(total_units), st["right"]),
             Paragraph(cost_str,       st["right"]),
             Paragraph(total_str,      st["right"]),
         ])
 
-    # Group heading over Cartons / Units (cols 5-6)
-    tbl_data.insert(0, ["", "", "", "", "",
-                        Paragraph("ORDER", st["hdr_ctr"]), "", "", ""])
-
-    lines_tbl = Table(tbl_data, colWidths=col_widths, repeatRows=2)
+    lines_tbl = Table(tbl_data, colWidths=col_widths, repeatRows=1)
     lines_tbl.setStyle(TableStyle([
-        ("SPAN",          (5, 0), (6, 0)),
-        ("BOX",           (5, 0), (6, 0), 1.0, C_BLACK),
-        ("TOPPADDING",    (0, 0), (-1, 0), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
         # Header — light grey background
-        ("BACKGROUND",    (0, 1), (-1, 1), C_LGREY),
-        ("TOPPADDING",    (0, 1), (-1, 1), 6),
-        ("BOTTOMPADDING", (0, 1), (-1, 1), 6),
+        ("BACKGROUND",    (0, 0), (-1, 0), C_LGREY),
+        ("TOPPADDING",    (0, 0), (-1, 0), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
         # Data rows
-        ("FONTSIZE",      (0, 2), (-1, -1), 8),
-        ("TOPPADDING",    (0, 2), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 2), (-1, -1), 4),
+        ("FONTSIZE",      (0, 1), (-1, -1), 8),
+        ("TOPPADDING",    (0, 1), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
         ("LEFTPADDING",   (0, 0), (-1, -1), 4),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
         ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID",          (0, 1), (-1, -1), 0.25, C_BORDER),
-        ("BOX",           (5, 1), (5, -1), 1.0, C_BLACK),
-        ("BOX",           (0, 1), (-1, -1), 0.75, C_BLACK),
+        ("GRID",          (0, 0), (-1, -1), 0.25, C_BORDER),
+        ("BOX",           (0, 0), (-1, -1), 0.75, C_BLACK),
     ]))
     story.append(lines_tbl)
     story.append(Spacer(1, 8))
