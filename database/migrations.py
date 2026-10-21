@@ -2864,6 +2864,14 @@ def migrate_v73(conn):
     conn.commit()
 
 
+def migrate_v74(conn):
+    """Add po_lines.counted_units — units counted at the dock by the mobile
+    receive app. Staging only: it changes no stock and no PO status; the
+    desktop Receive dialog prefills from it and receive_atomic clears it."""
+    _add_column(conn, "ALTER TABLE po_lines ADD COLUMN counted_units INTEGER DEFAULT NULL")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2937,4 +2945,5 @@ _MIGRATIONS: dict[int, tuple] = {
     71: (migrate_v71, "carton_sku column on products"),
     72: (migrate_v72, "pos_refunds, pos_refund_lines tables for POS cash refunds"),
     73: (migrate_v73, "backfill product_suppliers link for products with a supplier_id but no link"),
+    74: (migrate_v74, "counted_units on po_lines for mobile receive staging"),
 }

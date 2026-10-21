@@ -583,9 +583,12 @@ def get_purchase_order(po_number):
     lines = []
     for l in raw_lines:
         pack_qty = max(1, int(l['pack_qty'] or 1))
+        product = product_ctrl.get_product_by_barcode(l['barcode'])
         lines.append({
             'id':            l['id'],
             'barcode':       l['barcode'],
+            'carton_sku':    (product['carton_sku'] or '') if product else '',
+            'counted_units': l['counted_units'],
             'description':   l['description'],
             'ordered_qty':   l['ordered_qty'],
             'pack_qty':      pack_qty,
@@ -703,6 +706,59 @@ def receive_purchase_order(po_id):
         'po_number':      po['po_number'],
         'status':         final_status,
         'lines_received': len(line_receipts),
+    }), 200
+
+
+@app.route("/api/v1/purchase-orders/<int:po_id>/counts", methods=["POST"])
+def save_purchase_order_counts(po_id):
+    """
+    Stage the units counted at the dock by the mobile receive app.
+
+    Body:
+        invoice_number  str   optional supplier invoice number
+        lines           list  [{line_id: int, units: int}, ...]
+
+    Replaces the PO's previously staged counts (the list is the full picture;
+    lines omitted or with units=0 are cleared). Never changes stock or PO
+    status: the desktop Receive dialog prefills from these counts, and the
+    user checks costs and the invoice total before confirming there.
+    Over-receiving (units above the ordered quantity) is allowed.
+    """
+    po = po_ctrl.get_po_by_id(po_id)
+    if not po:
+        return _err("NOT_FOUND", "Purchase order not found", 404)
+    if po['status'] not in ('SENT', 'PARTIAL'):
+        return _err("INVALID_STATUS",
+                    f"PO {po['po_number']} cannot be received (status: {po['status']})", 409)
+
+    body = request.get_json(silent=True) or {}
+    invoice_number = str(body.get('invoice_number') or '').strip()[:100]
+    submitted = body.get('lines')
+    if not isinstance(submitted, list):
+        return _err("BAD_REQUEST", "'lines' must be a list", 400)
+
+    valid_ids = {l['id'] for l in po_ctrl.get_po_lines(po_id) if not l['is_note']}
+    counts = {}
+    for item in submitted:
+        line_id = item.get('line_id') if isinstance(item, dict) else None
+        if not isinstance(line_id, int) or isinstance(line_id, bool):
+            return _err("BAD_REQUEST", f"line_id must be an integer, got {line_id!r}", 400)
+        if line_id not in valid_ids:
+            return _err("BAD_REQUEST", f"line_id {line_id} does not belong to PO {po_id}", 400)
+        if line_id in counts:
+            return _err("BAD_REQUEST", f"Duplicate line_id: {line_id}", 400)
+        units = item.get('units')
+        if not isinstance(units, int) or isinstance(units, bool) or units < 0:
+            return _err("BAD_REQUEST",
+                        f"line_id {line_id}: units must be a whole number >= 0", 400)
+        counts[line_id] = units
+
+    po_ctrl.save_mobile_counts(po_id, {k: v for k, v in counts.items() if v > 0},
+                               invoice_number)
+    return jsonify({
+        'po_number':   po['po_number'],
+        'status':      po['status'],
+        'lines_saved': sum(1 for v in counts.values() if v > 0),
     }), 200
 
 

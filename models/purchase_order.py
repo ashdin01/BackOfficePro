@@ -423,6 +423,7 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
                     (r['unit_cost'], r['barcode'])
                 )
 
+        conn.execute("UPDATE po_lines SET counted_units=NULL WHERE po_id=?", (po_id,))
         conn.execute(
             "UPDATE purchase_orders SET status=?, supplier_invoice_number=?,"
             " updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -465,3 +466,14 @@ def cleanup_old_pos():
         count = cursor.rowcount
         conn.commit()
         return count
+
+
+def set_invoice_number(po_id: int, invoice_number: str) -> None:
+    """Record the supplier invoice number without touching status or stock."""
+    with db_conn() as conn:
+        conn.execute(
+            "UPDATE purchase_orders SET supplier_invoice_number=?,"
+            " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (invoice_number, po_id)
+        )
+        conn.commit()

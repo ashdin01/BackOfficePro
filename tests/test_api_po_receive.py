@@ -392,3 +392,74 @@ def test_receive_atomic_failure_returns_500(api_client, sent_po, monkeypatch):
                     headers=_h(key))
     assert r.status_code == 500
     assert r.get_json()["error"] == "RECEIVE_FAILED"
+
+
+# ── Mobile count staging: POST /purchase-orders/<id>/counts ───────────────────
+
+class TestStageCounts:
+    def test_detail_exposes_carton_sku_and_counted_units(self, api_client, sent_po, db_conn):
+        client, key = api_client
+        db_conn.execute("UPDATE products SET carton_sku='CTN-1' WHERE barcode=?",
+                        (sent_po["line"]["barcode"],))
+        db_conn.commit()
+        r = client.get(f"/api/v1/purchase-orders/{sent_po['po_number']}", headers=_h(key))
+        line = r.get_json()["lines"][0]
+        assert line["carton_sku"] == "CTN-1"
+        assert line["counted_units"] is None
+
+    def test_counts_stage_without_touching_stock_or_status(self, api_client, sent_po):
+        client, key = api_client
+        line = sent_po["line"]
+        before = soh_model.get_quantity(line["barcode"]) if hasattr(soh_model, "get_quantity") else None
+        r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts",
+                        json={"invoice_number": "INV9",
+                              "lines": [{"line_id": line["id"], "units": 75}]},
+                        headers=_h(key))
+        assert r.status_code == 200
+        assert r.get_json()["status"] == "SENT"
+        po = po_ctrl.get_po_by_id(sent_po["po_id"])
+        assert po["status"] == "SENT"
+        assert po["supplier_invoice_number"] == "INV9"
+        stored = lines_model.get_by_po(sent_po["po_id"])[0]
+        assert stored["counted_units"] == 75      # over-receive (10 x 6 = 60 ordered) allowed
+        assert stored["received_qty"] == 0
+        if before is not None:
+            assert soh_model.get_quantity(line["barcode"]) == before
+
+    def test_counts_replace_previous(self, api_client, sent_po):
+        client, key = api_client
+        lid = sent_po["line"]["id"]
+        url = f"/api/v1/purchase-orders/{sent_po['po_id']}/counts"
+        client.post(url, json={"lines": [{"line_id": lid, "units": 5}]}, headers=_h(key))
+        client.post(url, json={"lines": []}, headers=_h(key))
+        assert lines_model.get_by_po(sent_po["po_id"])[0]["counted_units"] is None
+
+    @pytest.mark.parametrize("bad", [-1, 1.5, "3", True])
+    def test_rejects_bad_units(self, api_client, sent_po, bad):
+        client, key = api_client
+        r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts",
+                        json={"lines": [{"line_id": sent_po["line"]["id"], "units": bad}]},
+                        headers=_h(key))
+        assert r.status_code == 400
+
+    def test_rejects_foreign_line(self, api_client, sent_po):
+        client, key = api_client
+        r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts",
+                        json={"lines": [{"line_id": 99999, "units": 1}]}, headers=_h(key))
+        assert r.status_code == 400
+
+    def test_receive_atomic_clears_counts(self, api_client, sent_po):
+        client, key = api_client
+        line = sent_po["line"]
+        client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts",
+                    json={"lines": [{"line_id": line["id"], "units": 6}]}, headers=_h(key))
+        client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/receive",
+                    json={"lines": [{"line_id": line["id"], "received_qty": 1}]}, headers=_h(key))
+        assert lines_model.get_by_po(sent_po["po_id"])[0]["counted_units"] is None
+
+    def test_closed_po_rejected(self, api_client, sent_po):
+        client, key = api_client
+        po_ctrl.update_po_status(sent_po["po_id"], "CLOSED")
+        r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts",
+                        json={"lines": []}, headers=_h(key))
+        assert r.status_code == 409

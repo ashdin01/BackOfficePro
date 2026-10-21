@@ -240,3 +240,19 @@ def get_on_order_detail(barcode) -> list:
             (barcode,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def set_counted_units(po_id: int, counts: dict) -> None:
+    """Replace the mobile-counted units for a PO's product lines.
+
+    counts is {line_id: units}. Lines not in `counts` are reset to NULL so the
+    submitted list is the complete picture. Staging only — no stock or status change.
+    """
+    with db_conn() as conn:
+        conn.execute("UPDATE po_lines SET counted_units=NULL WHERE po_id=?", (po_id,))
+        for line_id, units in counts.items():
+            conn.execute(
+                "UPDATE po_lines SET counted_units=? WHERE id=? AND po_id=?",
+                (int(units), line_id, po_id)
+            )
+        conn.commit()

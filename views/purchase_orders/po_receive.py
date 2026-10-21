@@ -578,8 +578,10 @@ class POReceive(BaseView):
         qty_input.setMinimum(0)
         qty_input.setMaximum(999999)
         qty_input.setSingleStep(pack_qty)
-        qty_input.setValue(0)
-        qty_input.setToolTip("Units received now")
+        counted = line['counted_units']
+        qty_input.setValue(int(counted) if counted else 0)
+        qty_input.setToolTip("Units received now"
+                             + (" (prefilled from mobile count)" if counted else ""))
         self.table.setCellWidget(r, 5, qty_input)
 
         # ── Col 6: Weight (kg) — weighed items only ──────────────
