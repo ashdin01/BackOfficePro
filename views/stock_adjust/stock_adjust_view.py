@@ -313,7 +313,15 @@ class StockAdjustView(QWidget):
         title = QLabel("Stock Adjust")
         title.setStyleSheet("font-size: 22px; font-weight: bold;")
         layout.addWidget(title)
-        layout.addWidget(QLabel("Manually adjust stock on hand for any product"))
+        header_row = QHBoxLayout()
+        header_row.addWidget(QLabel("Manually adjust stock on hand for any product"))
+        header_row.addStretch()
+        self.kits_btn = QPushButton("Kits / Hampers…")
+        self.kits_btn.setFixedHeight(30)
+        self.kits_btn.setToolTip("Define hamper recipes and build batches from component stock")
+        self.kits_btn.clicked.connect(self._open_kits)
+        header_row.addWidget(self.kits_btn)
+        layout.addLayout(header_row)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search by barcode, PLU, description, brand, supplier or department…")
@@ -445,6 +453,11 @@ class StockAdjustView(QWidget):
         self.adj_type.installEventFilter(self._reason_filter)
 
         self._load_history()
+
+    def _open_kits(self):
+        from views.kits.kit_window import KitWindow
+        self._kit_win = KitWindow()
+        self._kit_win.show()
 
     def showEvent(self, event):
         """Auto-focus search bar when Stock Adjust screen becomes visible."""

@@ -2872,6 +2872,44 @@ def migrate_v74(conn):
     conn.commit()
 
 
+def migrate_v75(conn):
+    """Add kit_components / kit_builds for pre-assembled kits (e.g. Xmas hampers).
+
+    A kit is an ordinary product (own barcode/PLU/stock_on_hand) with a recipe of
+    component products. Building a batch consumes the components and adds the
+    finished kits in one transaction, so a sale only ever reduces the kit's own
+    stock. kit_builds is the history; its id is the movement reference (ASM-<id>).
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kit_components (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_barcode    TEXT NOT NULL,
+            component_barcode TEXT NOT NULL,
+            qty               REAL NOT NULL DEFAULT 1 CHECK (qty > 0),
+            FOREIGN KEY (parent_barcode)    REFERENCES products(barcode) ON DELETE CASCADE,
+            FOREIGN KEY (component_barcode) REFERENCES products(barcode) ON DELETE RESTRICT,
+            UNIQUE (parent_barcode, component_barcode),
+            CHECK (parent_barcode != component_barcode)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kit_components_parent    ON kit_components(parent_barcode)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kit_components_component ON kit_components(component_barcode)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kit_builds (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_barcode TEXT NOT NULL,
+            qty            REAL NOT NULL CHECK (qty != 0),
+            unit_cost      REAL,
+            notes          TEXT DEFAULT '',
+            created_by     TEXT DEFAULT '',
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (parent_barcode) REFERENCES products(barcode) ON DELETE RESTRICT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kit_builds_parent ON kit_builds(parent_barcode)")
+    conn.commit()
+
+
 _MIGRATIONS: dict[int, tuple] = {
     2:  (migrate_v2,  "barcode_aliases"),
     3:  (migrate_v3,  "brand column"),
@@ -2946,4 +2984,5 @@ _MIGRATIONS: dict[int, tuple] = {
     72: (migrate_v72, "pos_refunds, pos_refund_lines tables for POS cash refunds"),
     73: (migrate_v73, "backfill product_suppliers link for products with a supplier_id but no link"),
     74: (migrate_v74, "counted_units on po_lines for mobile receive staging"),
+    75: (migrate_v75, "kit_components, kit_builds for pre-assembled kits (Xmas hampers)"),
 }

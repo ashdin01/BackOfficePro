@@ -605,6 +605,34 @@ CREATE TABLE IF NOT EXISTS atria_import_log (
     unmatched_count INTEGER NOT NULL DEFAULT 0
 );
 
+-- Kit / hamper recipes (parent = the finished hamper product) and the log of
+-- assembly runs. A build consumes components and produces parent stock in one
+-- transaction; sales then only ever touch the parent's own stock_on_hand.
+CREATE TABLE IF NOT EXISTS kit_components (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_barcode    TEXT NOT NULL,
+    component_barcode TEXT NOT NULL,
+    qty               REAL NOT NULL DEFAULT 1 CHECK (qty > 0),
+    FOREIGN KEY (parent_barcode)    REFERENCES products(barcode) ON DELETE CASCADE,
+    FOREIGN KEY (component_barcode) REFERENCES products(barcode) ON DELETE RESTRICT,
+    UNIQUE (parent_barcode, component_barcode),
+    CHECK (parent_barcode != component_barcode)
+);
+CREATE INDEX IF NOT EXISTS idx_kit_components_parent    ON kit_components(parent_barcode);
+CREATE INDEX IF NOT EXISTS idx_kit_components_component ON kit_components(component_barcode);
+
+CREATE TABLE IF NOT EXISTS kit_builds (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_barcode TEXT NOT NULL,
+    qty            REAL NOT NULL CHECK (qty != 0),
+    unit_cost      REAL,
+    notes          TEXT DEFAULT '',
+    created_by     TEXT DEFAULT '',
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parent_barcode) REFERENCES products(barcode) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_kit_builds_parent ON kit_builds(parent_barcode);
+
 CREATE TABLE IF NOT EXISTS migration_log (
     version     INTEGER PRIMARY KEY,
     applied_at  TEXT    NOT NULL,

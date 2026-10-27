@@ -112,3 +112,7 @@ than a silent data-corruption bug where values land in the wrong DB column.
 ## View base classes
 
 All views inherit from `views.base_view.BaseView` (QWidget subclass) or `BaseDialog` (QDialog subclass). Override `_load()` for data-fetch logic; call `self.load()` (not `self._load()`) from `__init__`, `showEvent`, and action handlers so failures are caught and shown via `show_error`.
+
+## Adding a report or settings screen
+
+The Reports and Settings hubs load their screens with `importlib.import_module`, which PyInstaller cannot see. `BackOfficePro.spec` therefore uses `collect_submodules` on `views.reports` and `views.settings`, so any new module placed in those packages is bundled into the Windows build automatically. Put new screens in those packages. A hub screen placed anywhere else (e.g. `views.ar.aged_debtors`) must be added to `hiddenimports` in the spec by hand, or the frozen exe will crash with `ModuleNotFoundError` when it is opened. This only fails in the Windows build, not when running from source.

@@ -1,5 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
+# Every module in these packages is bundled automatically. The hubs load their
+# screens via importlib.import_module (invisible to PyInstaller's static
+# analysis), so a new report/settings screen needs no spec edit.
+_DYNAMIC_PACKAGES = ['views.reports', 'views.settings']
+_auto_hidden = [m for pkg in _DYNAMIC_PACKAGES for m in collect_submodules(pkg)]
+
 a = Analysis(
     ['main.py'],
     pathex=['.'],
@@ -9,7 +17,7 @@ a = Analysis(
         ('version.py', '.'),
         ('scripts',    'scripts'),
     ],
-    hiddenimports=[
+    hiddenimports=_auto_hidden + [
         # Flask API server — loaded in a daemon thread, not directly imported
         'api_server',
         'flask',
@@ -99,7 +107,6 @@ a = Analysis(
         'PyQt6.Qt3DRender',
         'PyQt6.QtBluetooth',
         'PyQt6.QtLocation',
-        'PyQt6.QtMultimedia',
         'PyQt6.QtNfc',
         'PyQt6.QtSensors',
         'PyQt6.QtSerialPort',

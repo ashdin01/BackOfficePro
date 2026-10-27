@@ -31,7 +31,7 @@ def show_movement_history_dialog(parent, barcode, on_view_receipt):
     type_cb = QComboBox()
     type_cb.addItems(["ALL", "RECEIPT", "SALE", "ADJUSTMENT", "ADJUSTMENT_IN",
                       "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE",
-                      "REVALUE", "PRICE_CHANGE"])
+                      "REVALUE", "PRICE_CHANGE", "ASSEMBLY_IN", "ASSEMBLY_OUT"])
     filter_row.addWidget(type_cb)
     filter_row.addStretch()
     hint_lbl = QLabel("Double-click a SALE or RETURN row to view the full receipt")
@@ -87,9 +87,9 @@ def show_movement_history_dialog(parent, barcode, on_view_receipt):
             type_item = QTableWidgetItem(row["movement_type"])
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             qty = row["quantity"]
-            if row["movement_type"] in ("RECEIPT", "ADJUSTMENT_IN", "RETURN"):
+            if row["movement_type"] in ("RECEIPT", "ADJUSTMENT_IN", "RETURN", "ASSEMBLY_IN"):
                 type_item.setForeground(QColor(styles.CLR_SUCCESS_ALT))
-            elif row["movement_type"] in ("SALE", "WASTAGE", "ADJUSTMENT_OUT", "SHRINKAGE"):
+            elif row["movement_type"] in ("SALE", "WASTAGE", "ADJUSTMENT_OUT", "SHRINKAGE", "ASSEMBLY_OUT"):
                 type_item.setForeground(QColor(styles.CLR_DANGER))
             elif row["movement_type"] in ("REVALUE", "PRICE_CHANGE"):
                 type_item.setForeground(QColor(styles.CLR_PURPLE))

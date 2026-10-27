@@ -18,6 +18,7 @@ _CARDS = [
     ("🧮", "Tax Rates",       "Default store-wide GST rate",                               "TaxRatesScreen"),
     ("🏷️", "Label Printing",  "Shelf label page size for printing product labels",         "LabelPrintingScreen"),
     ("⚖️", "Scale Labels",    "Read PLU + weight/price from weigh-and-label barcodes",     "ScaleLabelsScreen"),
+    ("🎵", "Music",           "Time-of-day music slots and audio output for the shop",    "MusicScreen"),
 ]
 
 _COLS = 3
@@ -80,6 +81,7 @@ def _open_settings_screen(key: str, wins: list):
         "TaxRatesScreen":       ("views.settings.settings_tax",             "TaxRatesScreen"),
         "LabelPrintingScreen":  ("views.settings.settings_labels",          "LabelPrintingScreen"),
         "ScaleLabelsScreen":    ("views.settings.settings_scale_labels",    "ScaleLabelsScreen"),
+        "MusicScreen":          ("views.settings.settings_music",           "MusicScreen"),
     }
 
     mod_path, cls_name = _FACTORIES[key]

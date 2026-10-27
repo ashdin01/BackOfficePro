@@ -135,6 +135,12 @@ class MainWindow(QMainWindow):
         nav_scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollBar:vertical { width: 4px; }")
         sidebar_layout.addWidget(nav_scroll, 1)
 
+        # ── Shop music (hidden unless enabled in Settings → Music) ────
+        from views.widgets.music_player import MusicPanel
+        self.music_panel = MusicPanel()
+        sidebar_layout.addWidget(self.music_panel)
+        sidebar_layout.addSpacing(4)
+
         # ── Settings button (admin only) ──────────────────────────────
         if _role == "ADMIN":
             settings_btn = QPushButton("⚙  Settings")

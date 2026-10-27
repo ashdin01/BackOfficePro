@@ -45,7 +45,8 @@ class MovementHistoryReport(BaseView):
         self.type_filter = QComboBox()
         self.type_filter.addItems([
             "ALL", "RECEIPT", "SALE", "ADJUSTMENT_IN",
-            "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE", "REVALUE"
+            "ADJUSTMENT_OUT", "WASTAGE", "SHRINKAGE", "RETURN", "STOCKTAKE", "REVALUE",
+            "ASSEMBLY_IN", "ASSEMBLY_OUT"
         ])
         filter_row.addWidget(self.type_filter)
 
@@ -116,9 +117,9 @@ class MovementHistoryReport(BaseView):
 
             type_item = QTableWidgetItem(row['movement_type'])
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if row['movement_type'] in ('RECEIPT', 'ADJUSTMENT_IN', 'RETURN'):
+            if row['movement_type'] in ('RECEIPT', 'ADJUSTMENT_IN', 'RETURN', 'ASSEMBLY_IN'):
                 type_item.setForeground(QColor("green"))
-            elif row['movement_type'] in ('SALE', 'WASTAGE', 'ADJUSTMENT_OUT', 'SHRINKAGE'):
+            elif row['movement_type'] in ('SALE', 'WASTAGE', 'ADJUSTMENT_OUT', 'SHRINKAGE', 'ASSEMBLY_OUT'):
                 type_item.setForeground(QColor("red"))
             elif row['movement_type'] == 'REVALUE':
                 type_item.setForeground(QColor(styles.CLR_PURPLE))

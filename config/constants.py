@@ -70,6 +70,8 @@ MOVE_SHRINKAGE      = 'SHRINKAGE'
 MOVE_REVERSAL  = 'REVERSAL'
 MOVE_STOCKTAKE = 'STOCKTAKE'
 MOVE_REVALUE   = 'REVALUE'
+MOVE_ASSEMBLY_IN  = 'ASSEMBLY_IN'    # kit built (or component returned by a break-down)
+MOVE_ASSEMBLY_OUT = 'ASSEMBLY_OUT'   # components consumed by a build (or kit broken down)
 
 # Dropdown list for stock adjustment screens — must stay in sync with MOVE_* constants above
 MOVE_TYPES = [
