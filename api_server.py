@@ -594,6 +594,7 @@ def get_purchase_order(po_number):
             'pack_qty':      pack_qty,
             'ordered_units': int((l['ordered_qty'] or 0) * pack_qty),
             'received_qty':  l['received_qty'] or 0,
+            'received_units': int(l['received_units'] or 0),
             'unit_cost':     l['unit_cost'] or 0,
         })
 
@@ -678,7 +679,7 @@ def receive_purchase_order(po_id):
             'actual_cost':      None,   # preserve existing cost; adjust on desktop if needed
             'unit_cost':        None,
             'is_promo':         False,
-            'qty_units':        received_qty * pack_qty,
+            'qty_units':        int(round(received_qty * pack_qty)),
         })
 
     if not line_receipts:
@@ -686,7 +687,7 @@ def receive_purchase_order(po_id):
 
     # RECEIVED when every product line is covered after this call
     already_received = {lid for lid, l in all_lines.items()
-                        if (l['received_qty'] or 0) > 0}
+                        if (l['received_units'] or 0) > 0}
     now_received     = {r['line_id'] for r in line_receipts}
     final_status = 'RECEIVED' if (already_received | now_received) >= set(all_lines) \
                    else 'PARTIAL'

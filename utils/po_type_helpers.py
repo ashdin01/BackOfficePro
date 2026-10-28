@@ -5,6 +5,10 @@ Canonical helpers for purchase-order type display logic.
   carton_mode (PO, CN) — ordered_qty / received_qty stored as cartons; multiply by pack_qty
   is_return (RO only)  — display values shown as negative (stock leaves store)
 
+po_lines.received_units is the exact unit count received on a line for every PO
+type; read it (not received_qty, a carton-rounded count) for received quantities,
+values, GST and reversals.
+
 Import these three functions anywhere PO quantities or money need displaying.
 Previously this logic was duplicated across seven call-sites; any future change
 to PO-type semantics only needs to be made here.

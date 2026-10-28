@@ -553,8 +553,7 @@ class POReceive(BaseView):
 
         ordered_cartons  = int(line['ordered_qty'])
         ordered_units    = ordered_cartons * pack_qty
-        received_cartons = int(line['received_qty'])
-        received_units   = received_cartons * pack_qty
+        received_units   = int(line['received_units'] or 0)
         remaining_units  = ordered_units - received_units
 
         # ── Static cells ─────────────────────────────────────────
@@ -907,38 +906,6 @@ class POReceive(BaseView):
         )
         return reply == QMessageBox.StandardButton.Yes
 
-    def _confirm_partial_cartons(self) -> bool:
-        """Warn (with an opt-out) if any line's qty isn't a whole number of cartons."""
-        partial_carton_lines = []
-        for entry in self._inputs:
-            line, pack_qty, qty_input, cost_input, promo_cb, \
-                lt_item, remaining_units, is_vw, weight_input, tax_rate, lt_inc_item, \
-                use_by_cb, use_by_date_edit = entry
-            qty = qty_input.value()
-            if qty > 0 and pack_qty > 1 and qty % pack_qty != 0:
-                cartons = max(1, math.ceil(qty / pack_qty))
-                partial_carton_lines.append((line['description'], qty, pack_qty, cartons))
-
-        if not partial_carton_lines:
-            return True
-
-        detail = "\n".join(
-            f"  •  {desc}: {qty} units (pack of {pk}) — will be recorded "
-            f"as {cartons} carton(s) received"
-            for desc, qty, pk, cartons in partial_carton_lines
-        )
-        reply = QMessageBox.question(
-            self, "Partial Carton Quantity",
-            "These line(s) aren't a whole number of cartons:\n\n"
-            f"{detail}\n\n"
-            "Stock on hand will be credited exactly what you entered, but "
-            "the PO's recorded carton count will round up — if this "
-            "wasn't intentional (e.g. a mis-typed quantity), go back and "
-            "fix it now.\n\nContinue anyway?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        return reply == QMessageBox.StandardButton.Yes
-
     def _confirm_receipt_dialog(self) -> bool:
         promo_count = sum(
             1 for entry in self._inputs
@@ -967,16 +934,17 @@ class POReceive(BaseView):
             weight   = weight_input.value() if is_vw else 0.0
             is_promo = promo_cb.isChecked()
 
-            cartons = max(1, math.ceil(qty / pack_qty)) if qty > 0 else 0
-            total_received_cartons = line['received_qty'] + cartons
-            if total_received_cartons < line['ordered_qty']:
+            total_received_units = (line['received_units'] or 0) + qty
+            if total_received_units < line['ordered_qty'] * pack_qty:
                 all_received = False
 
             if qty > 0:
+                # received_qty stays a carton count (rounded up); the exact
+                # units are added to received_units by receive_atomic.
                 line_receipts.append({
                     'line_id':             line['id'],
                     'barcode':             line['barcode'],
-                    'new_received_qty':    line['received_qty'] + cartons,
+                    'new_received_qty':    math.ceil(total_received_units / pack_qty),
                     'new_received_weight': (line['received_weight'] or 0) + weight,
                     'actual_cost':         cost if cost > 0 else None,
                     'unit_cost':           cost if cost > 0 else None,
@@ -1027,8 +995,6 @@ class POReceive(BaseView):
         if not self._check_po_receivable(po, po_number):
             return
         if not self._confirm_over_received():
-            return
-        if not self._confirm_partial_cartons():
             return
         if not self._confirm_receipt_dialog():
             return

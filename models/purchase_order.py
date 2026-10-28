@@ -148,10 +148,13 @@ def cancel(po_id):
 
 def reverse(po_id, reversed_by=''):
     """
-    Reverse a RECEIVED or PARTIAL PO atomically.
+    Reverse a RECEIVED or PARTIAL PO atomically and reopen it as an active order.
     - Reduces SOH for each received line
-    - Records REVERSAL stock movements
-    - Sets PO status to REVERSED
+    - Records REVERSAL stock movements (the original RECEIPT rows stay in the ledger)
+    - Clears everything the receipt put on the PO: line received quantities and
+      weights, mobile counts, NOT SUPPLIED notes, supplier invoice number,
+      charges, received date and use-by batches
+    - Sets PO status back to SENT so it can be received again or cancelled
 
     All writes share one connection and commit together.  If any step fails
     the entire reversal rolls back, leaving stock and PO status unchanged.
@@ -178,11 +181,10 @@ def reverse(po_id, reversed_by=''):
 
         src = get_source()
         for line in lines:
-            received = int(line['received_qty'] or 0)
-            if received <= 0:
+            received_units = int(line['received_units'] or 0)
+            if received_units <= 0:
                 continue
-            pack_qty = int(line['pack_qty']) if line['pack_qty'] else 1
-            qty = -(received * pack_qty)
+            qty = -received_units
             conn.execute("""
                 INSERT INTO stock_on_hand (barcode, quantity)
                 VALUES (?, ?)
@@ -204,11 +206,23 @@ def reverse(po_id, reversed_by=''):
                 conn, line['barcode'], reference=po['po_number'], created_by=reversed_by)
 
         conn.execute(
-            "UPDATE purchase_orders SET status='REVERSED', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            "DELETE FROM product_batches WHERE po_line_id IN "
+            "(SELECT id FROM po_lines WHERE po_id = ?)", (po_id,)
+        )
+        conn.execute(
+            "UPDATE po_lines SET received_qty=0, received_units=0, received_weight=0, "
+            "counted_units=NULL, "
+            "notes=CASE WHEN notes LIKE 'NOT SUPPLIED:%' THEN NULL ELSE notes END "
+            "WHERE po_id = ?", (po_id,)
+        )
+        conn.execute("DELETE FROM po_charges WHERE po_id = ?", (po_id,))
+        conn.execute(
+            "UPDATE purchase_orders SET status='SENT', received_at=NULL, "
+            "supplier_invoice_number='', updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (po_id,)
         )
         record_changes(conn, 'purchase_order', po['po_number'],
-                       {'status': po['status']}, {'status': 'REVERSED'},
+                       {'status': po['status']}, {'status': 'SENT'},
                        reversed_by or get_user())
         conn.commit()
 
@@ -284,8 +298,8 @@ def close_credit_atomic(po_id, po_number, line_receipts):
     with db_conn() as conn:
         for r in line_receipts:
             conn.execute(
-                "UPDATE po_lines SET received_qty=? WHERE id=?",
-                (r['return_cartons'], r['line_id'])
+                "UPDATE po_lines SET received_qty=?, received_units=? WHERE id=?",
+                (r['return_cartons'], int(round(r['qty_units'])), r['line_id'])
             )
             conn.execute("""
                 INSERT INTO stock_on_hand (barcode, quantity)
@@ -317,6 +331,8 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
         line_id, barcode, new_received_qty, new_received_weight,
         actual_cost, unit_cost, is_promo,
         qty_units   (number of individual units being received, for SOH)
+    new_received_qty is the carton-rounded running count; received_units is
+    increased by qty_units inside the transaction, so it stays exact.
 
     charges is an optional list of dicts:
         description (non-empty str), tax_rate (0–100), amount_inc_tax,
@@ -357,6 +373,8 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
         for r in line_receipts:
             fields = ["received_qty=?", "received_weight=?"]
             params = [r['new_received_qty'], r.get('new_received_weight', 0)]
+            fields.append("received_units=received_units+?")
+            params.append(int(round(r['qty_units'])))
             if r['actual_cost'] is not None:
                 fields.append("actual_cost=?")
                 params.append(r['actual_cost'])

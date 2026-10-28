@@ -463,3 +463,17 @@ class TestStageCounts:
         r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts",
                         json={"lines": []}, headers=_h(key))
         assert r.status_code == 409
+
+
+class TestReceivedUnits:
+    def test_receive_records_exact_units_and_get_exposes_them(self, api_client, sent_po):
+        client, key = api_client
+        line_id = sent_po["line"]["id"]
+        resp = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/receive",
+                           json={"lines": [{"line_id": line_id, "received_qty": 2}]},
+                           headers=_h(key))
+        assert resp.status_code == 200
+        assert lines_model.get_by_po(sent_po["po_id"])[0]["received_units"] == 12  # 2 cartons x 6
+
+        got = client.get(f"/api/v1/purchase-orders/{sent_po['po_number']}", headers=_h(key))
+        assert got.get_json()["lines"][0]["received_units"] == 12

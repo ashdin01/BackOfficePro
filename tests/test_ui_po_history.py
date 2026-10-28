@@ -159,7 +159,7 @@ class TestReverse:
 
         assert po_ctrl.get_po_by_id(pid)['status'] == 'RECEIVED'
 
-    def test_confirmed_reversal_marks_po_reversed_and_removes_stock(
+    def test_confirmed_reversal_reopens_po_and_removes_stock(
         self, qtbot, test_db, supplier_id, product_barcode, monkeypatch
     ):
         product_ctrl.adjust_soh(product_barcode, 6, "SEED")
@@ -174,7 +174,7 @@ class TestReverse:
 
         w._reverse()
 
-        assert po_ctrl.get_po_by_id(pid)['status'] == 'REVERSED'
+        assert po_ctrl.get_po_by_id(pid)['status'] == 'SENT'
         after = product_ctrl.get_soh_by_barcode(product_barcode)['quantity']
         assert after == before - 6
 

@@ -20,7 +20,7 @@ class LineData:
     pack_str: str
     tax_rate: float
     cost: float
-    recv_raw: int       # raw DB received_qty — needed for CSV carton column
+    recv_raw: int       # raw DB received_qty (carton-rounded) — CSV carton column
     recv_units: int     # signed display units (negative for RO)
     ordered_qty_raw: int  # raw DB ordered_qty — needed for CSV carton column
     ordered_disp: int   # signed display value (negative for RO)
@@ -85,7 +85,8 @@ def compute_po_history_data(po_id: int, po=None) -> POHistoryData:
 
         cost         = float(line['actual_cost'] or line['unit_cost'] or 0)
         recv_raw     = int(line['received_qty'] or 0)
-        recv_units   = po_display_qty(_po_type, recv_raw, pack_qty)
+        recv_units   = -int(line['received_units'] or 0) if is_return \
+                       else int(line['received_units'] or 0)
         ordered_disp = po_display_qty(_po_type, int(line['ordered_qty']), 1)
         is_vw        = bool(product['variable_weight']) if product else False
         recv_weight  = float(line['received_weight'] or 0) if is_vw else 0.0

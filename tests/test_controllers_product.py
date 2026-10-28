@@ -26,8 +26,8 @@ def two_open_pos(db_conn, product_barcode, supplier_id):
     """, (supplier_id,))
     po2_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     db_conn.execute("""
-        INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, unit_cost)
-        VALUES (?, ?, 'Test Product', 3, 1, 2.00)
+        INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, received_units, unit_cost)
+        VALUES (?, ?, 'Test Product', 3, 1, 1, 2.00)
     """, (po2_id, bc))
 
     db_conn.commit()
@@ -97,8 +97,8 @@ class TestGetStockOnOrderDetail:
         """, (supplier_id,))
         po_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         db_conn.execute("""
-            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, unit_cost)
-            VALUES (?, ?, 'Test Product', 5, 5, 2.00)
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, received_units, unit_cost)
+            VALUES (?, ?, 'Test Product', 5, 5, 5, 2.00)
         """, (po_id, product_barcode))
         db_conn.commit()
         rows = get_stock_on_order_detail(product_barcode)
@@ -172,8 +172,8 @@ class TestGetStockOnOrderDetail:
         """, (supplier_id,))
         po_id = db_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         db_conn.execute("""
-            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, unit_cost)
-            VALUES (?, ?, 'IO Product', 7, 2, 3.00)
+            INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty, received_units, unit_cost)
+            VALUES (?, ?, 'IO Product', 7, 2, 2, 3.00)
         """, (po_id, bc))
         db_conn.commit()
         rows = get_stock_on_order_detail(bc)

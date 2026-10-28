@@ -1,5 +1,12 @@
 from database.connection import db_conn
 
+# Units ordered / still outstanding on a line, for queries that join
+# purchase_orders as `po` and po_lines as `pl`. IO/RO store ordered_qty in
+# units; PO/CN store cartons. received_units is always exact units.
+_ORDERED_UNITS = ("(CASE WHEN po.po_type IN ('IO','RO') THEN pl.ordered_qty "
+                  "ELSE pl.ordered_qty * COALESCE(pl.pack_qty, 1) END)")
+_OUTSTANDING_UNITS = f"({_ORDERED_UNITS} - pl.received_units)"
+
 
 def get_by_po(po_id):
     with db_conn() as conn:
@@ -55,10 +62,17 @@ def update(line_id, ordered_qty, unit_cost, notes):
         conn.commit()
 
 
+# received_qty -> exact units for a line, by PO type (IO/RO already hold units).
+_UNITS_FROM_QTY_SQL = (
+    "CAST(ROUND(CASE WHEN (SELECT po_type FROM purchase_orders WHERE id = po_lines.po_id)"
+    " IN ('IO','RO') THEN ? ELSE ? * COALESCE(pack_qty, 1) END) AS INTEGER)"
+)
+
+
 def receive(line_id, received_qty, actual_cost=None, unit_cost=None, is_promo=None):
     with db_conn() as conn:
-        fields = ["received_qty=?"]
-        params = [received_qty]
+        fields = ["received_qty=?", f"received_units={_UNITS_FROM_QTY_SQL}"]
+        params = [received_qty, received_qty, received_qty]
         if actual_cost is not None:
             fields.append("actual_cost=?")
             params.append(actual_cost)
@@ -74,11 +88,15 @@ def receive(line_id, received_qty, actual_cost=None, unit_cost=None, is_promo=No
 
 
 def correct_received(line_id, new_received_qty):
-    """Correct the received_qty on a line — used for partial PO corrections."""
+    """Correct the received quantity on a line — used for partial PO corrections.
+
+    new_received_qty is in the PO's ordering unit (cartons, or units for IO/RO);
+    received_units is recomputed from it.
+    """
     with db_conn() as conn:
         conn.execute(
-            "UPDATE po_lines SET received_qty=? WHERE id=?",
-            (new_received_qty, line_id)
+            f"UPDATE po_lines SET received_qty=?, received_units={_UNITS_FROM_QTY_SQL} WHERE id=?",
+            (new_received_qty, new_received_qty, new_received_qty, line_id)
         )
         conn.commit()
 
@@ -93,18 +111,24 @@ def get_received_count(po_id) -> int:
     """Number of po_lines with at least one unit received."""
     with db_conn() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_qty > 0",
+            "SELECT COUNT(*) FROM po_lines WHERE po_id=? AND received_units > 0",
             (po_id,)
         ).fetchone()
         return int(row[0]) if row else 0
 
 
 def get_unreceived(po_id) -> list:
-    """Lines where received_qty < ordered_qty. Returns list of dicts."""
+    """Lines with fewer units received than ordered. Returns list of dicts.
+
+    ordered_qty / received_qty are in the PO's ordering unit; received_units is
+    the exact unit count and ordered_units the unit equivalent of ordered_qty.
+    """
     with db_conn() as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT id, description, ordered_qty, received_qty "
-            "FROM po_lines WHERE po_id=? AND received_qty < ordered_qty",
+            f"SELECT pl.id, pl.description, pl.ordered_qty, pl.received_qty, "
+            f"pl.received_units, {_ORDERED_UNITS} AS ordered_units "
+            f"FROM po_lines pl JOIN purchase_orders po ON po.id = pl.po_id "
+            f"WHERE pl.po_id=? AND pl.is_note=0 AND pl.received_units < {_ORDERED_UNITS}",
             (po_id,)
         ).fetchall()]
 
@@ -177,13 +201,7 @@ def get_on_order_units(barcodes) -> dict:
         ph = ','.join('?' * len(barcodes))
         rows = conn.execute(f"""
             SELECT pl.barcode,
-                   COALESCE(SUM(
-                       CASE WHEN po.po_type IN ('IO', 'RO')
-                            THEN MAX(0.0, pl.ordered_qty - pl.received_qty)
-                            ELSE MAX(0.0, pl.ordered_qty - pl.received_qty)
-                                 * COALESCE(pl.pack_qty, 1)
-                       END
-                   ), 0.0) AS on_order_units
+                   COALESCE(SUM(MAX(0.0, {_OUTSTANDING_UNITS})), 0.0) AS on_order_units
             FROM po_lines pl
             JOIN purchase_orders po ON pl.po_id = po.id
             WHERE po.status IN ('DRAFT', 'SENT')
@@ -200,16 +218,11 @@ def get_on_order_total(barcode) -> int:
     """Returns total outstanding units across open POs for a single barcode."""
     with db_conn() as conn:
         row = conn.execute(
-            "SELECT COALESCE(SUM("
-            "  CASE WHEN po.po_type IN ('RO','IO')"
-            "       THEN (pl.ordered_qty - pl.received_qty)"
-            "       ELSE (pl.ordered_qty - pl.received_qty) * COALESCE(pl.pack_qty, 1)"
-            "  END"
-            "), 0) "
+            f"SELECT COALESCE(SUM({_OUTSTANDING_UNITS}), 0) "
             "FROM po_lines pl "
             "JOIN purchase_orders po ON po.id = pl.po_id "
             "WHERE pl.barcode=? AND po.status IN ('DRAFT','SENT','PARTIAL') "
-            "AND (pl.ordered_qty - pl.received_qty) > 0",
+            f"AND {_OUTSTANDING_UNITS} > 0",
             (barcode,)
         ).fetchone()
         return int(row[0]) if row else 0
@@ -225,17 +238,12 @@ def get_on_order_detail(barcode) -> list:
         rows = conn.execute(
             "SELECT po.po_number, po.po_type, po.status, "
             "COALESCE(s.name, '—') AS supplier_name, "
-            "CAST("
-            "  CASE WHEN po.po_type IN ('RO','IO')"
-            "       THEN (pl.ordered_qty - pl.received_qty)"
-            "       ELSE (pl.ordered_qty - pl.received_qty) * COALESCE(pl.pack_qty, 1)"
-            "  END"
-            " AS INTEGER) AS qty_units "
+            f"CAST({_OUTSTANDING_UNITS} AS INTEGER) AS qty_units "
             "FROM po_lines pl "
             "JOIN purchase_orders po ON po.id = pl.po_id "
             "LEFT JOIN suppliers s ON s.id = po.supplier_id "
             "WHERE pl.barcode=? AND po.status IN ('DRAFT','SENT','PARTIAL') "
-            "AND (pl.ordered_qty - pl.received_qty) > 0 "
+            f"AND {_OUTSTANDING_UNITS} > 0 "
             "ORDER BY po.po_number",
             (barcode,)
         ).fetchall()

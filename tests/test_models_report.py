@@ -223,10 +223,10 @@ class TestGstPaid:
         ).fetchone()["id"]
         db_conn.execute("""
             INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty,
-                                   received_weight, pack_qty, unit_cost, actual_cost)
-            VALUES (?, ?, 'Test Line', ?, ?, ?, ?, ?, ?)
-        """, (po_id, barcode, received_qty, received_qty, received_weight,
-              pack_qty, unit_cost, actual_cost))
+                                   received_units, received_weight, pack_qty, unit_cost, actual_cost)
+            VALUES (?, ?, 'Test Line', ?, ?, ?, ?, ?, ?, ?)
+        """, (po_id, barcode, received_qty, received_qty, received_qty * pack_qty,
+              received_weight, pack_qty, unit_cost, actual_cost))
         db_conn.commit()
         return po_id
 
@@ -449,8 +449,8 @@ class TestWeightVariance:
         ).fetchone()["id"]
         db_conn.execute("""
             INSERT INTO po_lines (po_id, barcode, description, ordered_qty, received_qty,
-                                   received_weight, pack_qty, unit_cost)
-            VALUES (?, ?, 'Test Line', 1, 1, ?, 1, ?)
+                                   received_units, received_weight, pack_qty, unit_cost)
+            VALUES (?, ?, 'Test Line', 1, 1, 1, ?, 1, ?)
         """, (po_id, barcode, received_weight, unit_cost))
         db_conn.commit()
 

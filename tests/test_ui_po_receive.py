@@ -248,55 +248,45 @@ class TestConfirm:
 
         mock_mb.warning.assert_called_once()
 
-    def test_partial_carton_qty_prompts_extra_confirmation(
-        self, qtbot, monkeypatch, sent_po_multi_pack
+    def test_partial_carton_records_exact_units(
+        self, qtbot, monkeypatch, db_conn, sent_po_multi_pack
     ):
-        """Entering a qty that isn't a whole number of cartons (pack_qty=6,
-        qty=5) must prompt an extra confirmation before receiving."""
+        """Receiving 5 units of a 6-pack records exactly 5 units (not a full
+        carton) and needs only the ordinary receipt confirmation."""
         from views.purchase_orders.po_receive import POReceive
         w = POReceive(sent_po_multi_pack)
         qtbot.addWidget(w)
         mock_mb = _yes(monkeypatch)
         w.supplier_invoice_input.setText("INV-001")
-        qty_input = w.table.cellWidget(0, 5)
-        qty_input.setValue(5)  # pack_qty=6 — not a whole carton
+        w.table.cellWidget(0, 5).setValue(5)  # pack_qty=6 — not a whole carton
 
         w._confirm()
 
-        # One dialog for the partial-carton warning, one for the receipt confirm
-        assert mock_mb.question.call_count == 2
-        assert po_ctrl.get_po_by_id(sent_po_multi_pack)["status"] == "PARTIAL"
-
-    def test_declining_partial_carton_warning_blocks_receipt(
-        self, qtbot, monkeypatch, sent_po_multi_pack
-    ):
-        from views.purchase_orders.po_receive import POReceive
-        w = POReceive(sent_po_multi_pack)
-        qtbot.addWidget(w)
-        _no(monkeypatch)
-        w.supplier_invoice_input.setText("INV-001")
-        qty_input = w.table.cellWidget(0, 5)
-        qty_input.setValue(5)  # pack_qty=6 — not a whole carton
-
-        w._confirm()
-
-        assert po_ctrl.get_po_by_id(sent_po_multi_pack)["status"] == "SENT"
-
-    def test_whole_carton_qty_skips_partial_carton_warning(
-        self, qtbot, monkeypatch, sent_po_multi_pack
-    ):
-        from views.purchase_orders.po_receive import POReceive
-        w = POReceive(sent_po_multi_pack)
-        qtbot.addWidget(w)
-        mock_mb = _yes(monkeypatch)
-        w.supplier_invoice_input.setText("INV-001")
-        qty_input = w.table.cellWidget(0, 5)
-        qty_input.setValue(6)  # exactly one carton
-
-        w._confirm()
-
-        # Only the ordinary receipt-confirm dialog, no partial-carton warning
         assert mock_mb.question.call_count == 1
+        assert po_ctrl.get_po_by_id(sent_po_multi_pack)["status"] == "PARTIAL"
+        line = db_conn.execute(
+            "SELECT received_qty, received_units FROM po_lines WHERE po_id=?",
+            (sent_po_multi_pack,)).fetchone()
+        assert line["received_units"] == 5
+        assert line["received_qty"] == 1   # carton count still rounds up
+
+    def test_second_partial_receive_completes_line(
+        self, qtbot, monkeypatch, db_conn, sent_po_multi_pack
+    ):
+        from views.purchase_orders.po_receive import POReceive
+        _yes(monkeypatch)
+        for qty in (5, 7):  # 2 cartons of 6 = 12 units
+            w = POReceive(sent_po_multi_pack)
+            qtbot.addWidget(w)
+            w.supplier_invoice_input.setText("INV-001")
+            w.table.cellWidget(0, 5).setValue(qty)
+            w._confirm()
+
+        line = db_conn.execute(
+            "SELECT received_units FROM po_lines WHERE po_id=?",
+            (sent_po_multi_pack,)).fetchone()
+        assert line["received_units"] == 12
+        assert po_ctrl.get_po_by_id(sent_po_multi_pack)["status"] == "RECEIVED"
 
     def test_receive_failure_shows_error_not_crash(self, po_receive_view, monkeypatch, sent_po):
         _yes(monkeypatch)

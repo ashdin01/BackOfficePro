@@ -542,7 +542,7 @@ class TestModelWrapperDelegation:
             final_status='RECEIVED',
         )
         reverse_po(po_id, reversed_by='admin')
-        assert get_po_by_id(po_id)['status'] == 'REVERSED'
+        assert get_po_by_id(po_id)['status'] == 'SENT'
 
     def test_get_setting_delegates(self, test_db):
         from controllers.purchase_order_controller import get_setting

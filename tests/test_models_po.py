@@ -130,10 +130,10 @@ class TestPoReverse:
         po_model.update_status(po_id, "RECEIVED")
         return po_id
 
-    def test_reverse_sets_status_to_reversed(self, test_db, supplier_id, product_barcode):
+    def test_reverse_reopens_po_as_sent(self, test_db, supplier_id, product_barcode):
         po_id = self._setup_received_po(supplier_id, product_barcode)
         po_model.reverse(po_id, "admin")
-        assert po_model.get_by_id(po_id)["status"] == "REVERSED"
+        assert po_model.get_by_id(po_id)["status"] == "SENT"
 
     def test_reverse_reduces_stock_by_received_qty(self, test_db, supplier_id, product_barcode):
         po_id = self._setup_received_po(supplier_id, product_barcode)
@@ -181,7 +181,7 @@ class TestPoReverse:
         ).fetchall()
         conn.close()
         assert rows == []
-        assert po_model.get_by_id(po_id)["status"] == "REVERSED"
+        assert po_model.get_by_id(po_id)["status"] == "SENT"
 
 
 # ── po_lines.receive() optional params ────────────────────────────────────────

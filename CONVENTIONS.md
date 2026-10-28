@@ -116,3 +116,7 @@ All views inherit from `views.base_view.BaseView` (QWidget subclass) or `BaseDia
 ## Adding a report or settings screen
 
 The Reports and Settings hubs load their screens with `importlib.import_module`, which PyInstaller cannot see. `BackOfficePro.spec` therefore uses `collect_submodules` on `views.reports` and `views.settings`, so any new module placed in those packages is bundled into the Windows build automatically. Put new screens in those packages. A hub screen placed anywhere else (e.g. `views.ar.aged_debtors`) must be added to `hiddenimports` in the spec by hand, or the frozen exe will crash with `ModuleNotFoundError` when it is opened. This only fails in the Windows build, not when running from source.
+
+## PO received quantities
+
+`po_lines.received_units` is the exact number of units received on a line, for every PO type. `received_qty` is only a carton-rounded count (a partial carton rounds up) kept for ordering-unit comparisons and the mobile API — never use it to value, report on, or reverse a receipt. `receive_atomic` increases `received_units` by each receipt's `qty_units` inside its transaction.

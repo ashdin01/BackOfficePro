@@ -500,10 +500,8 @@ class POHistory(QWidget):
 
         summary_lines = []
         for line in lines:
-            received = int(line['received_qty'] or 0)
-            if received > 0:
-                pack_qty = int(line['pack_qty']) if line['pack_qty'] else 1
-                units    = received * pack_qty
+            units = int(line['received_units'] or 0)
+            if units > 0:
                 summary_lines.append(f"  • {line['description']}: -{units} units")
 
         if not summary_lines:
@@ -520,7 +518,10 @@ class POHistory(QWidget):
             f"This will REVERSE {po['po_number']} — {po['supplier_name']}.\n\n"
             f"The following stock will be REMOVED from inventory:\n\n"
             f"{summary}\n\n"
-            f"This action cannot be undone. The PO will be marked REVERSED.\n\n"
+            f"The PO will go back to Active Orders as SENT, with its received "
+            f"quantities, invoice number and charges cleared, so it can be "
+            f"received again or cancelled. Cost price changes made when it was "
+            f"received are not undone.\n\n"
             f"Are you sure?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -532,7 +533,7 @@ class POHistory(QWidget):
             po_ctrl.reverse_po(self.po_id)
             QMessageBox.information(
                 self, "PO Reversed",
-                f"{po['po_number']} has been reversed.\n"
+                f"{po['po_number']} has been reversed and returned to Active Orders.\n"
                 f"Stock on hand has been reduced accordingly.\n"
                 f"Movement history has been updated."
             )

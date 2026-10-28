@@ -35,9 +35,9 @@ class TestCheckIntegrity:
         db_path = self._fresh_db(tmp_path, monkeypatch)
         mig.apply_migrations()
 
-        # Corrupt checksum for v2 (first real migration)
+        # Corrupt checksum for v55 (first migration still in the registry)
         c = sqlite3.connect(db_path)
-        c.execute("UPDATE migration_log SET checksum='deadbeef' WHERE version=2")
+        c.execute("UPDATE migration_log SET checksum='deadbeef' WHERE version=55")
         c.commit()
         c.close()
 
@@ -58,7 +58,7 @@ class TestCheckIntegrity:
         mig.apply_migrations()
 
         c = sqlite3.connect(db_path)
-        c.execute("DELETE FROM migration_log WHERE version=2")
+        c.execute("DELETE FROM migration_log WHERE version=55")
         c.commit()
         c.close()
 
@@ -89,7 +89,7 @@ class TestCheckIntegrity:
         mig.apply_migrations()
 
         c = sqlite3.connect(db_path)
-        c.execute("UPDATE migration_log SET checksum='deadbeef' WHERE version=2")
+        c.execute("UPDATE migration_log SET checksum='deadbeef' WHERE version=55")
         c.commit()
         c.close()
         conn_mod.invalidate_all_connections()
@@ -198,16 +198,16 @@ class TestFullMigrationChain:
         db_path = str(tmp_path / "partial.db")
         monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
 
-        # Start from the full current schema but pretend we're at v50.
+        # Start from the full current schema but pretend we're at v60.
         c = sqlite3.connect(db_path)
         c.executescript(SCHEMA)
-        # Walk db_meta back to 50 and remove log entries for v51+
-        c.execute("UPDATE db_meta SET version=50")
+        # Walk db_meta back to 60 and leave log entries only for v60 and below
+        c.execute("UPDATE db_meta SET version=60")
         c.execute("CREATE TABLE IF NOT EXISTS migration_log "
                   "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, "
                   "description TEXT NOT NULL DEFAULT '', checksum TEXT NOT NULL DEFAULT '')")
         for v in mig._MIGRATIONS:
-            if v <= 50:
+            if v <= 60:
                 fn, desc = mig._MIGRATIONS[v]
                 c.execute(
                     "INSERT OR IGNORE INTO migration_log (version, applied_at, description, checksum) "
@@ -244,246 +244,41 @@ class TestFullMigrationChain:
             assert v in logged, f"migration_log missing entry for v{v}"
 
 
-# ── End-to-end migration chain ─────────────────────────────────────────────────
+# ── Minimum supported version ─────────────────────────────────────────────────
 
-# Minimal schema representing the v1 state of the application.
-# It contains ONLY tables and columns that existed before any migration ran.
-# Columns added by migrations (even via _add_column) are deliberately absent
-# so that every migration in the chain has something real to do.
-#
-# Key intentional omissions (added by later migrations):
-#   products: brand(v3), sku/supplier_sku(v4), group_id(v6), pack_qty/pack_unit/
-#             reorder_max/base_sku(v7), auto_reorder(v10), created_at/updated_at
-#   suppliers: abn/rep_name/rep_phone/order_minimum(v5), email_orders/etc(v9),
-#              address(v13), order_days(v23), bank_account_*(v32), …
-#   purchase_orders: updated_at(v11), is_promo(v12 — on po_lines),
-#                    po_type(v22), delivery_date/notes(missing at v1)
-#   po_lines: actual_cost(v7), is_promo(v12), pack_qty(v21), is_note/sort_order(v31)
-#   stock_movements: source(v33)
-#   settings: schema_version seeded so early migrations can UPDATE it
-#
-# Tables NOT present at v1 (created by migrations):
-#   barcode_aliases(v2), product_groups(v6), plu_barcode_map(v7), sales_daily(v7),
-#   product_selling_units, bundles, bundle_eligible, customers, ar_invoices,
-#   ar_invoice_lines, ar_payments, ar_credit_notes, bank_csv_profiles,
-#   bank_transactions, po_charges, product_suppliers, stocktake_sessions,
-#   stocktake_counts, audit_log, pos_sale_refs, migration_log, db_meta
+class TestMinSupportedVersion:
+    """v2-v54 were removed; a database older than MIN_SUPPORTED_VERSION must be
+    refused with a clear message rather than half-migrated."""
 
-_MINIMAL_SCHEMA_V1 = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE departments (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    code   TEXT    NOT NULL UNIQUE,
-    name   TEXT    NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
-);
-INSERT INTO departments (code, name) VALUES
-    ('GROC', 'Grocery'), ('FRESH', 'Fresh'), ('DAIRY', 'Dairy'),
-    ('MEAT', 'Meat'), ('LIQ', 'Liquor'), ('GM', 'General Merchandise'),
-    ('BAKERY', 'Bakery'), ('FROZEN', 'Frozen'), ('DELI', 'Deli'),
-    ('SEAFOOD', 'Seafood');
-
-CREATE TABLE suppliers (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    code            TEXT    NOT NULL UNIQUE,
-    name            TEXT    NOT NULL,
-    contact_name    TEXT,
-    phone           TEXT,
-    email           TEXT    DEFAULT '',
-    account_number  TEXT,
-    payment_terms   TEXT,
-    notes           TEXT,
-    active          INTEGER NOT NULL DEFAULT 1,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE products (
-    barcode         TEXT PRIMARY KEY,
-    plu             TEXT,
-    description     TEXT NOT NULL,
-    department_id   INTEGER NOT NULL REFERENCES departments(id),
-    supplier_id     INTEGER REFERENCES suppliers(id),
-    unit            TEXT    DEFAULT 'EA',
-    sell_price      REAL    DEFAULT 0,
-    cost_price      REAL    DEFAULT 0,
-    tax_rate        REAL    DEFAULT 0,
-    reorder_point   REAL    DEFAULT 0,
-    reorder_qty     REAL    DEFAULT 0,
-    variable_weight INTEGER NOT NULL DEFAULT 0,
-    expected        INTEGER NOT NULL DEFAULT 1,
-    active          INTEGER NOT NULL DEFAULT 1,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE purchase_orders (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    po_number     TEXT    NOT NULL UNIQUE,
-    supplier_id   INTEGER NOT NULL REFERENCES suppliers(id),
-    status        TEXT    NOT NULL DEFAULT 'DRAFT',
-    delivery_date DATE,
-    notes         TEXT,
-    sent_at       DATETIME,
-    received_at   DATETIME,
-    created_by    TEXT,
-    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE po_lines (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    po_id        INTEGER NOT NULL REFERENCES purchase_orders(id),
-    barcode      TEXT    NOT NULL REFERENCES products(barcode),
-    description  TEXT,
-    ordered_qty  INTEGER DEFAULT 0,
-    unit_cost    REAL    DEFAULT 0,
-    received_qty INTEGER DEFAULT 0,
-    notes        TEXT
-);
-
-CREATE TABLE stock_on_hand (
-    barcode      TEXT PRIMARY KEY,
-    quantity     REAL    DEFAULT 0,
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE stock_movements (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    barcode       TEXT NOT NULL,
-    movement_type TEXT NOT NULL,
-    quantity      REAL    DEFAULT 0,
-    reference     TEXT    DEFAULT '',
-    notes         TEXT    DEFAULT '',
-    created_by    TEXT    DEFAULT '',
-    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE stocktake_sessions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    label         TEXT    NOT NULL,
-    department_id INTEGER,
-    status        TEXT    NOT NULL DEFAULT 'OPEN',
-    started_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-    closed_at     DATETIME,
-    created_by    TEXT,
-    notes         TEXT,
-    FOREIGN KEY (department_id) REFERENCES departments(id)
-);
-
-CREATE TABLE stocktake_counts (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id  INTEGER NOT NULL REFERENCES stocktake_sessions(id),
-    barcode     TEXT    NOT NULL REFERENCES products(barcode),
-    counted_qty REAL    NOT NULL DEFAULT 0,
-    scanned_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT NOT NULL UNIQUE,
-    full_name     TEXT,
-    pin           TEXT,
-    password_hash TEXT,
-    role          TEXT NOT NULL DEFAULT 'STAFF',
-    active        INTEGER NOT NULL DEFAULT 1,
-    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-INSERT INTO users (username, full_name, role) VALUES ('admin', 'Administrator', 'ADMIN');
-
-CREATE TABLE settings (
-    key         TEXT PRIMARY KEY,
-    value       TEXT,
-    description TEXT
-);
-INSERT INTO settings (key, value) VALUES
-    ('po_prefix',       'PO'),
-    ('po_next_number',  '1'),
-    ('schema_version',  '1');
-"""
-
-
-class TestEndToEndMigrationChain:
-    """Run apply_migrations() from a low version number to verify the full chain."""
-
-    def _make_minimal_db(self, tmp_path, monkeypatch, name="chain.db"):
-        """Create a DB from the minimal v1 schema with no db_meta table."""
-        db_path = str(tmp_path / name)
-        monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
-        c = sqlite3.connect(db_path)
-        c.executescript(_MINIMAL_SCHEMA_V1)
-        c.close()
-        conn_mod.invalidate_all_connections()
-        return db_path
-
-    def _make_db_at_version(self, tmp_path, monkeypatch, start_version, name=None):
-        """Create a DB with the current SCHEMA but pretend it's at start_version.
-
-        Only works for start_version >= the highest raw-ADD-COLUMN migration (v46),
-        because the current SCHEMA already contains all those columns.
-        """
-        name = name or f"chain_v{start_version}.db"
-        db_path = str(tmp_path / name)
+    def _db_at(self, tmp_path, monkeypatch, version):
+        db_path = str(tmp_path / f"v{version}.db")
         monkeypatch.setattr(conn_mod, "DATABASE_PATH", db_path)
         c = sqlite3.connect(db_path)
         c.executescript(SCHEMA)
-        c.execute("CREATE TABLE IF NOT EXISTS db_meta (version INTEGER NOT NULL DEFAULT 1)")
-        c.execute("DELETE FROM db_meta")
-        c.execute("INSERT INTO db_meta (version) VALUES (?)", (start_version,))
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS migration_log (
-                version INTEGER PRIMARY KEY,
-                applied_at TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                checksum TEXT NOT NULL DEFAULT ''
-            )
-        """)
-        for v, (fn, desc) in mig._MIGRATIONS.items():
-            if v <= start_version:
-                c.execute(
-                    "INSERT OR IGNORE INTO migration_log"
-                    " (version, applied_at, description, checksum)"
-                    " VALUES (?, 'pre-log', ?, ?)",
-                    (v, desc, mig._fn_checksum(fn))
-                )
+        c.execute("UPDATE db_meta SET version=?", (version,))
         c.commit()
         c.close()
         conn_mod.invalidate_all_connections()
         return db_path
 
-    def test_chain_from_v1_reaches_current(self, tmp_path, monkeypatch):
-        """apply_migrations() from a true v1 minimal schema must reach current version."""
-        db_path = self._make_minimal_db(tmp_path, monkeypatch, "chain_v1.db")
-        mig.apply_migrations()
+    def test_min_supported_version_is_below_every_registered_migration(self):
+        assert mig.MIN_SUPPORTED_VERSION < min(mig._MIGRATIONS)
+
+    def test_database_older_than_minimum_is_refused(self, tmp_path, monkeypatch):
+        db_path = self._db_at(tmp_path, monkeypatch, mig.MIN_SUPPORTED_VERSION - 1)
+        with pytest.raises(RuntimeError, match="v2.23.0"):
+            mig.apply_migrations()
         c = sqlite3.connect(db_path)
-        v = c.execute("SELECT version FROM db_meta").fetchone()[0]
-        c.close()
-        assert int(v) == max(mig._MIGRATIONS)
-
-    def test_chain_from_v1_logs_all_migrations(self, tmp_path, monkeypatch):
-        """Every migration must have a log entry after apply_migrations() from v1."""
-        self._make_minimal_db(tmp_path, monkeypatch, "chain_v1_log.db")
-        mig.apply_migrations()
-        conn = conn_mod.get_connection()
-        logged = {r[0] for r in conn.execute("SELECT version FROM migration_log").fetchall()}
-        conn.release()
-        for v in mig._MIGRATIONS:
-            assert v in logged, f"migration_log missing entry for v{v} after full chain"
-
-    def test_chain_v40_sequence_included(self, tmp_path, monkeypatch):
-        """The v40 FK repair sequence (CHECK constraints + legacy_alter_table) must
-        be part of the full chain run and the DB must reach the current version.
-
-        v40 runs inside test_chain_from_v1_reaches_current, but this test
-        specifically asserts that v40 is in the migration log after the chain.
-        """
-        db_path = self._make_minimal_db(tmp_path, monkeypatch, "chain_v40seq.db")
-        mig.apply_migrations()
-        c = sqlite3.connect(db_path)
-        logged = {r[0] for r in c.execute("SELECT version FROM migration_log").fetchall()}
         v = int(c.execute("SELECT version FROM db_meta").fetchone()[0])
         c.close()
-        assert 40 in logged, "v40 must be in migration_log"
-        assert 42 in logged, "v42 (no-op after v40 legacy_alter_table fix) must be logged"
+        assert v == mig.MIN_SUPPORTED_VERSION - 1   # nothing was changed
+
+    def test_database_at_minimum_is_upgraded_to_current(self, tmp_path, monkeypatch):
+        db_path = self._db_at(tmp_path, monkeypatch, mig.MIN_SUPPORTED_VERSION)
+        mig.apply_migrations()
+        c = sqlite3.connect(db_path)
+        v = int(c.execute("SELECT version FROM db_meta").fetchone()[0])
+        c.close()
         assert v == max(mig._MIGRATIONS)
 
     def test_idempotent_when_already_current(self, tmp_path, monkeypatch):
@@ -520,15 +315,15 @@ class TestCheckIntegrityFunctionDrift:
         conn_mod.invalidate_all_connections()
         mig.apply_migrations()
 
-        # Swap out migrate_v2 with a function that has different source code
+        # Swap out migrate_v55 with a function that has different source code
         original_migrations = dict(mig._MIGRATIONS)
 
-        def _altered_migrate_v2(conn):
+        def _altered_migrate_v55(conn):
             # This line makes the source different from the stored checksum
             conn.execute("SELECT 1")
             conn.commit()
 
-        mig._MIGRATIONS[2] = (_altered_migrate_v2, original_migrations[2][1])
+        mig._MIGRATIONS[55] = (_altered_migrate_v55, original_migrations[55][1])
 
         try:
             conn_mod.invalidate_all_connections()
@@ -538,7 +333,7 @@ class TestCheckIntegrityFunctionDrift:
                 conn.release()
             assert any("drift" in r.message.lower() for r in caplog.records)
         finally:
-            mig._MIGRATIONS[2] = original_migrations[2]
+            mig._MIGRATIONS[55] = original_migrations[55]
 
 
 # ── v73: backfill product_suppliers ───────────────────────────────────────────

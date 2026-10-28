@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS po_lines (
     is_note         INTEGER NOT NULL DEFAULT 0,
     sort_order      INTEGER,
     counted_units   INTEGER DEFAULT NULL,
+    received_units  INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (po_id)   REFERENCES purchase_orders(id) ON DELETE CASCADE,
     FOREIGN KEY (barcode) REFERENCES products(barcode)   ON DELETE RESTRICT
 );
