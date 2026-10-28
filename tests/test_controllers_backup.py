@@ -12,7 +12,7 @@ def test_get_backup_dir_returns_string():
 
 
 def test_get_backup_dir_is_in_home():
-    assert os.path.expanduser("~") in backup_ctrl.get_backup_dir()
+    assert os.path.expanduser("~") in backup_ctrl._DEFAULT_BACKUP_DIR
 
 
 # ── do_backup ─────────────────────────────────────────────────────────────────
@@ -196,19 +196,21 @@ class TestSilentAutoBackup:
         result = backup_ctrl.silent_auto_backup()
         assert os.path.exists(result)
 
-    def test_prunes_old_backups_beyond_keep_count(self, tmp_path, monkeypatch):
+    def test_prunes_old_backups_per_retention_policy(self, tmp_path, monkeypatch):
         src = self._make_src_db(tmp_path)
         backup_dir = str(tmp_path / "backups")
         os.makedirs(backup_dir)
         monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", src)
         monkeypatch.setattr(backup_ctrl, "_BACKUP_DIR", backup_dir)
-        monkeypatch.setattr(backup_ctrl, "_KEEP_COUNT", 2)
-        # Pre-create 3 old backup files
-        for i in range(3):
-            (tmp_path / "backups" / f"supermarket_2025010{i}_000000.db").write_text("")
+        # Four backups from one long-ago day: beyond the newest few, only the
+        # newest of that day/month is worth keeping.
+        for h in (8, 9, 10, 11):
+            (tmp_path / "backups" / f"supermarket_20200101_{h:02d}0000.db").write_text("")
         backup_ctrl.silent_auto_backup()
-        remaining = [f for f in os.listdir(backup_dir) if f.endswith(".db")]
-        assert len(remaining) <= 2
+        remaining = set(os.listdir(backup_dir))
+        assert "supermarket_20200101_080000.db" not in remaining
+        assert "supermarket_20200101_090000.db" not in remaining
+        assert "supermarket_20200101_110000.db" in remaining
 
     def test_returns_none_on_bad_source(self, tmp_path, monkeypatch):
         monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", "/nonexistent/source.db")
@@ -224,15 +226,14 @@ class TestSilentAutoBackup:
         os.makedirs(backup_dir)
         monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", src)
         monkeypatch.setattr(backup_ctrl, "_BACKUP_DIR", backup_dir)
+        for h in (8, 9, 10, 11):
+            (tmp_path / "backups" / f"supermarket_20200101_{h:02d}0000.db").write_text("")
+        real_remove = os.remove
         monkeypatch.setattr(
             os, "remove",
-            lambda *a, **kw: (_ for _ in ()).throw(OSError("disk error")),
+            lambda p, *a, **kw: (_ for _ in ()).throw(OSError("disk error"))
+            if "20200101" in str(p) else real_remove(p, *a, **kw),
         )
-        # _KEEP_COUNT=0 would slice as files[:-0] == files[:0] == [] (Python's
-        # -0 == 0 quirk), never attempting a removal — use 1 so pruning
-        # actually tries to remove the pre-existing file below.
-        monkeypatch.setattr(backup_ctrl, "_KEEP_COUNT", 1)
-        (tmp_path / "backups" / "supermarket_20250101_000000.db").write_text("")
 
         result = backup_ctrl.silent_auto_backup()
 
@@ -330,21 +331,25 @@ class TestBackupToLocalPath:
         c.close()
         assert "products" in tables
 
-    def test_prune_keeps_recent_and_ignores_unrelated_files(self, test_db, tmp_path, monkeypatch):
+    def test_prune_applies_policy_and_ignores_unrelated_files(self, test_db, tmp_path, monkeypatch):
         monkeypatch.setattr(backup_ctrl, "DATABASE_PATH", test_db)
         folder = tmp_path / "usb"
         folder.mkdir()
         self._set_path(str(folder))
-        # Seed more than _KEEP_COUNT old backups plus unrelated files
-        for i in range(backup_ctrl._KEEP_COUNT + 5):
+        # Many old backups all from one month in 2020, plus unrelated files
+        for i in range(1, 20):
             (folder / f"supermarket_202001{i:02d}_000000.db").write_bytes(b"old")
         (folder / "holiday_photos.db").write_bytes(b"keep me")
         (folder / "notes.txt").write_text("keep me too")
 
         ok, _ = backup_ctrl.backup_to_local_path()
         assert ok is True
-        ours = list(folder.glob("supermarket_*.db"))
-        assert len(ours) == backup_ctrl._KEEP_COUNT
+        ours = sorted(p.name for p in folder.glob("supermarket_*.db"))
+        # Newest 3 old ones are kept by the "newest" rule; that month's other
+        # copies are pruned except the newest of the month (already among them).
+        assert len(ours) < 20
+        assert "supermarket_20200119_000000.db" in ours
+        assert "supermarket_20200101_000000.db" not in ours
         # Unrelated files untouched even though one ends in .db
         assert (folder / "holiday_photos.db").exists()
         assert (folder / "notes.txt").exists()
@@ -368,13 +373,13 @@ class TestBackupToLocalPath:
         folder = tmp_path / "usb"
         folder.mkdir()
         self._set_path(str(folder))
-        # _KEEP_COUNT=0 would slice as ours[:-0] == ours[:0] == [] (Python's
-        # -0 == 0 quirk), never attempting a removal — use 1 instead.
-        monkeypatch.setattr(backup_ctrl, "_KEEP_COUNT", 1)
-        (folder / "supermarket_20250101_000000.db").write_bytes(b"old")
+        for i in (1, 2, 3, 4, 5):
+            (folder / f"supermarket_2020010{i}_000000.db").write_bytes(b"old")
+        real_remove = os.remove
         monkeypatch.setattr(
             os, "remove",
-            lambda *a, **kw: (_ for _ in ()).throw(OSError("disk error")),
+            lambda p, *a, **kw: (_ for _ in ()).throw(OSError("disk error"))
+            if "2020" in str(p) else real_remove(p, *a, **kw),
         )
 
         ok, msg = backup_ctrl.backup_to_local_path()

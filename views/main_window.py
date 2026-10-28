@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         if api_thread is not None:
             self._start_api_watchdog()
         self._run_auto_plu_map()
+        self._start_backup_scheduler()
 
     def _start_api_watchdog(self):
         """Poll the API server thread every 15 s and update the sidebar badge."""
@@ -370,9 +371,50 @@ class MainWindow(QMainWindow):
     def _refresh_last_backup_label(self):
         dt = backup_ctrl.get_last_backup_time()
         if dt:
-            self.last_backup_label.setText(f"Last backup:\n{dt.strftime('%d/%m %H:%M')}")
+            text = f"Last backup:\n{dt.strftime('%d/%m %H:%M')}"
         else:
-            self.last_backup_label.setText("No backups yet")
+            text = "No backups yet"
+        if backup_ctrl.is_backup_stale():
+            text += "\nOVERDUE — over 24h"
+            colour = styles.CLR_DANGER
+        else:
+            colour = "grey"
+        self.last_backup_label.setText(text)
+        self.last_backup_label.setStyleSheet(f"color: {colour}; font-size: 9px;")
+
+    def _start_backup_scheduler(self):
+        """While the app stays open, take a backup whenever the newest one is more
+        than 24h old (first check a minute after startup, then hourly). Backups
+        otherwise only happen on close, so a PC left running would go unprotected."""
+        self._backup_worker = None
+        self._backup_timer = QTimer(self)
+        self._backup_timer.timeout.connect(self._scheduled_backup_check)
+        self._backup_timer.start(3_600_000)
+        QTimer.singleShot(60_000, self._scheduled_backup_check)
+
+    def _scheduled_backup_check(self):
+        self._refresh_last_backup_label()
+        if not backup_ctrl.is_backup_stale():
+            return
+        if self._backup_worker is not None and self._backup_worker.is_alive():
+            return
+
+        def _work():
+            try:
+                self._silent_auto_backup()
+            except Exception:
+                logging.exception("Scheduled backup failed")
+
+        self._backup_worker = threading.Thread(target=_work, daemon=True)
+        self._backup_worker.start()
+        self._backup_poll = QTimer(self)
+        self._backup_poll.timeout.connect(self._on_backup_poll)
+        self._backup_poll.start(500)
+
+    def _on_backup_poll(self):
+        if not self._backup_worker.is_alive():
+            self._backup_poll.stop()
+            self._refresh_last_backup_label()
 
     def _silent_auto_backup(self):
         dest = backup_ctrl.silent_auto_backup()
@@ -477,6 +519,8 @@ class MainWindow(QMainWindow):
             f"supermarket_PRE_RESTORE_{ts}.db"
         )
         ok, msg = backup_ctrl.do_backup(safety_dest)
+        if ok:
+            backup_ctrl.prune_safety_backups()
         if not ok:
             reply2 = QMessageBox.warning(
                 self, "Safety Backup Failed",

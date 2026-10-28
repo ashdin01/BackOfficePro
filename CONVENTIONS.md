@@ -120,3 +120,7 @@ The Reports and Settings hubs load their screens with `importlib.import_module`,
 ## PO received quantities
 
 `po_lines.received_units` is the exact number of units received on a line, for every PO type. `received_qty` is only a carton-rounded count (a partial carton rounds up) kept for ordering-unit comparisons and the mobile API — never use it to value, report on, or reverse a receipt. `receive_atomic` increases `received_units` by each receipt's `qty_units` inside its transaction.
+
+## Backups
+
+Every backup goes through `backup_controller.do_backup`, which copies with SQLite's online backup API and then runs `PRAGMA integrity_check` on the copy (a copy that fails is deleted). Standard `supermarket_<timestamp>.db` files are pruned by age (newest 3, one per day for 7 days, one per week for 4 weeks, one per month for 12) — never by count. `PRE_RESTORE` and `PRE_MIGRATION` safety copies keep only the newest 5 each. `apply_migrations` takes a verified `PRE_MIGRATION` backup before any pending migration runs on a database that holds products, and aborts if it cannot. Tests must not write to `~/BackOfficeBackups`; `tests/conftest.py` redirects `_BACKUP_DIR` for every test.

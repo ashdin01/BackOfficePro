@@ -80,6 +80,15 @@ def _ensure_db_meta(conn):
     conn.commit()
 
 
+def _has_user_data(conn) -> bool:
+    """True once the database holds any products — a brand-new install has
+    nothing worth backing up before its first migrations."""
+    try:
+        return conn.execute("SELECT 1 FROM products LIMIT 1").fetchone() is not None
+    except sqlite3.OperationalError:
+        return False
+
+
 def _log_migration(conn, version: int, description: str, fn):
     """Record a freshly-applied migration in migration_log."""
     conn.execute("""
@@ -175,6 +184,14 @@ def apply_migrations():
                 f"once with BackOfficePro v2.23.0 (which still contains the full "
                 f"migration chain), then upgrade."
             )
+
+        if any(current < v for v in _MIGRATIONS) and _has_user_data(conn):
+            # Never change a database that holds real data without a verified
+            # copy to go back to.  Raises (aborting startup) if it can't be made.
+            from controllers.backup_controller import pre_migration_backup
+            db_file = conn.execute("PRAGMA database_list").fetchone()['file']
+            saved = pre_migration_backup(db_file, current)
+            logging.info(f"Pre-migration backup written: {saved}")
 
         for v in sorted(_MIGRATIONS):
             fn, description = _MIGRATIONS[v]

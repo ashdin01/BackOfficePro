@@ -12,6 +12,13 @@ from database.schema import SCHEMA
 
 # ── Core DB fixture ───────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _isolated_backup_dir(tmp_path_factory, monkeypatch):
+    """Safety/pre-migration/auto backups must never land in the real ~/BackOfficeBackups."""
+    import controllers.backup_controller as backup_ctrl
+    monkeypatch.setattr(backup_ctrl, "_BACKUP_DIR", str(tmp_path_factory.mktemp("backups")))
+
+
 @pytest.fixture()
 def test_db(tmp_path, monkeypatch):
     """Create a temp database with the full schema and patch get_connection to use it."""
