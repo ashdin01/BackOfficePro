@@ -293,6 +293,20 @@ def migrate_v56(conn):
     conn.commit()
 
 
+def migrate_v77(conn):
+    """Use-by tracking flag on product groups + mobile-staged use-by date on PO lines.
+
+    product_groups.track_use_by marks groups (Fresh Meat, Fresh Dinner, Milk,
+    Cheese...) whose receipts need a use-by/best-before date; the mobile receive
+    app prompts for one and the desktop Receive dialog pre-ticks Track.
+    po_lines.counted_use_by stages the date the phone captured (like
+    counted_units: staging only, cleared when the receipt is confirmed).
+    """
+    _add_column(conn, "ALTER TABLE product_groups ADD COLUMN track_use_by INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "ALTER TABLE po_lines ADD COLUMN counted_use_by DATE DEFAULT NULL")
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
@@ -759,4 +773,5 @@ _MIGRATIONS: dict[int, tuple] = {
     74: (migrate_v74, "counted_units on po_lines for mobile receive staging"),
     75: (migrate_v75, "kit_components, kit_builds for pre-assembled kits (Xmas hampers)"),
     76: (migrate_v76, "received_units on po_lines (exact units received; backfilled from stock movements)"),
+    77: (migrate_v77, "track_use_by on product_groups, counted_use_by on po_lines for mobile use-by capture"),
 }

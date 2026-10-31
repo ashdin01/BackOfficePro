@@ -47,6 +47,12 @@ class GroupEdit(QWidget):
         form.addRow("Code *", self.code)
         form.addRow("Name *", self.name)
         form.addRow("", self.active)
+
+        self.track_use_by = QCheckBox("Track use-by / best-before dates on receipt")
+        self.track_use_by.setToolTip(
+            "Receiving products in this group prompts for a use-by date on the phone\n"
+            "and ticks Track in the desktop Receive dialog (feeds the Home expiry alerts).")
+        form.addRow("", self.track_use_by)
         layout.addLayout(form)
 
         layout.addSpacing(10)
@@ -75,6 +81,7 @@ class GroupEdit(QWidget):
             self.code.setText(g['code'])
             self.name.setText(g['name'])
             self.active.setChecked(bool(g['active']))
+            self.track_use_by.setChecked(bool(g['track_use_by']))
 
     def _save(self):
         dept_id = self.dept.currentData()
@@ -86,9 +93,11 @@ class GroupEdit(QWidget):
         try:
             if self.group_id:
                 dept_ctrl.update_group(self.group_id, dept_id, code, name,
-                                       int(self.active.isChecked()))
+                                       int(self.active.isChecked()),
+                                       track_use_by=self.track_use_by.isChecked())
             else:
-                dept_ctrl.create_group(dept_id, code, name)
+                dept_ctrl.create_group(dept_id, code, name,
+                                       track_use_by=self.track_use_by.isChecked())
             if self.on_save:
                 self.on_save()
             self.close()

@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS product_groups (
     code          TEXT    NOT NULL,
     name          TEXT    NOT NULL,
     active        INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    track_use_by  INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE RESTRICT,
     UNIQUE(department_id, code)
 );
@@ -191,6 +192,7 @@ CREATE TABLE IF NOT EXISTS po_lines (
     is_note         INTEGER NOT NULL DEFAULT 0,
     sort_order      INTEGER,
     counted_units   INTEGER DEFAULT NULL,
+    counted_use_by  DATE    DEFAULT NULL,
     received_units  INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (po_id)   REFERENCES purchase_orders(id) ON DELETE CASCADE,
     FOREIGN KEY (barcode) REFERENCES products(barcode)   ON DELETE RESTRICT

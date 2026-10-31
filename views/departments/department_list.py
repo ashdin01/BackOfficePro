@@ -102,9 +102,9 @@ class DepartmentList(KeyboardMixin, QWidget):
         layout.addLayout(top)
 
         self.group_table = QTableWidget()
-        self.group_table.setColumnCount(4)
+        self.group_table.setColumnCount(5)
         self.group_table.setHorizontalHeaderLabels([
-            "Code", "Name", "Department", "Active"
+            "Code", "Name", "Department", "Active", "Use-by"
         ])
         self.group_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.group_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -134,6 +134,9 @@ class DepartmentList(KeyboardMixin, QWidget):
             active = QTableWidgetItem("Yes" if row['active'] else "No")
             active.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.group_table.setItem(r, 3, active)
+            use_by = QTableWidgetItem("Tracked" if row['track_use_by'] else "")
+            use_by.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.group_table.setItem(r, 4, use_by)
             self.group_table.item(r, 0).setData(Qt.ItemDataRole.UserRole, row['id'])
         self.group_status.setText(f"{self.group_table.rowCount()} groups")
 

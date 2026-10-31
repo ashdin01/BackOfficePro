@@ -451,6 +451,41 @@ def adjust_soh(barcode, quantity, movement_type, reference='', notes='', created
                      reference=reference, notes=notes, created_by=created_by)
 
 
+def set_soh(barcode, new_qty, expected_qty=None, reference='', notes='', created_by=''):
+    """Set SOH to an absolute quantity; returns (old, new, delta). May raise
+    soh_model.StockChanged when expected_qty is stale."""
+    return soh_model.set_soh(barcode, new_qty, expected_qty=expected_qty,
+                             reference=reference, notes=notes, created_by=created_by)
+
+
+def get_stock_info(barcode) -> dict | None:
+    """Mobile stock-check view of a product: SOH, on-order, default supplier,
+    cost inc GST, sell price. Resolves aliases and scale labels; None if unknown
+    or inactive."""
+    from models.barcode_alias import resolve as _resolve
+    from utils.calculations import amount_inc_from_ex
+    product = get_product_by_barcode(_resolve(barcode))
+    if not product or not product['active']:
+        return None
+    bc = product['barcode']
+    soh = soh_model.get_by_barcode(bc)
+    links = ps_model.get_by_barcode(bc)
+    default = next((l for l in links if l['is_default']), None) or (links[0] if links else None)
+    tax = product['tax_rate'] or 0
+    return {
+        'barcode':         bc,
+        'description':     product['description'],
+        'unit':            product['unit'],
+        'soh_qty':         soh['quantity'] if soh else 0,
+        'on_order_qty':    po_lines_model.get_on_order_total(bc),
+        'default_supplier': default['supplier_name'] if default else None,
+        'cost_ex_gst':     product['cost_price'] or 0,
+        'cost_inc_gst':    round(amount_inc_from_ex(product['cost_price'] or 0, tax), 4),
+        'sell_price':      product['sell_price'] or 0,
+        'tax_rate':        tax,
+    }
+
+
 # ── Barcode alias wrappers ────────────────────────────────────────────────────
 
 def get_aliases(master_barcode) -> list[dict]:

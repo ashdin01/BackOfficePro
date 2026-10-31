@@ -110,6 +110,54 @@ def adjust(barcode, quantity, movement_type, reference='', notes='', created_by=
         conn.commit()
 
 
+class StockChanged(Exception):
+    """SOH moved since the caller read it (expected_qty no longer matches)."""
+    def __init__(self, current_qty):
+        super().__init__(f"SOH is now {current_qty}")
+        self.current_qty = current_qty
+
+
+def set_soh(barcode, new_qty, expected_qty=None, movement_type='ADJUSTMENT',
+            reference='', notes='', created_by=''):
+    """Set SOH to an absolute quantity and record the difference as a movement.
+
+    The delta is computed inside the write transaction, so a sale landing
+    between the caller's read and this write can't be overwritten silently:
+    pass expected_qty (the SOH the user saw) and StockChanged is raised if it
+    no longer matches. Returns (old_qty, new_qty, delta). A no-op (delta 0)
+    records nothing.
+    """
+    from database.audit_context import get_user, get_source
+    who = created_by or get_user()
+    src = get_source()
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT quantity FROM stock_on_hand WHERE barcode = ?", (barcode,)
+        ).fetchone()
+        current = row['quantity'] if row else 0.0
+        if expected_qty is not None and abs(current - expected_qty) > 0.0005:
+            raise StockChanged(current)
+        delta = new_qty - current
+        if abs(delta) < 0.0005:
+            return current, current, 0.0
+        conn.execute("""
+            INSERT INTO stock_on_hand (barcode, quantity)
+            VALUES (?, ?)
+            ON CONFLICT(barcode) DO UPDATE SET
+                quantity = excluded.quantity,
+                last_updated = CURRENT_TIMESTAMP
+        """, (barcode, new_qty))
+        conn.execute("""
+            INSERT INTO stock_movements
+                (barcode, movement_type, quantity, reference, notes, created_by, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (barcode, movement_type, delta, reference,
+              f"{notes}: {current:g} -> {new_qty:g}" if notes else f"{current:g} -> {new_qty:g}",
+              who, src))
+        conn.commit()
+        return current, new_qty, delta
+
+
 def get_sale_header(reference: str):
     """Return the pos_sales ledger row for a receipt reference, or None."""
     with db_conn() as conn:

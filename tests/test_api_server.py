@@ -1096,3 +1096,81 @@ def test_concurrent_api_key_resolution_only_resolves_once(test_db, monkeypatch):
 
     assert results == ["resolved-key-123", "resolved-key-123"]
     assert call_count["n"] == 1, "resolve_api_key should only run once for concurrent callers"
+
+
+# ── Mobile stock check / set-SOH ──────────────────────────────────────────────
+
+class TestMobileStock:
+    @pytest.fixture()
+    def stock_client(self, test_db):
+        import api_server
+        api_server._read_clients.clear()
+        api_server._api_key_cache = ""
+        api_server.app.config["TESTING"] = True
+        key = api_server._get_api_key()
+        with api_server.app.test_client() as client:
+            yield client, {"X-API-Key": key}
+
+    def test_stock_info_fields(self, stock_client, product_barcode):
+        client, h = stock_client
+        r = client.get(f"/api/v1/stock/{product_barcode}", headers=h)
+        assert r.status_code == 200
+        d = r.get_json()
+        assert d["description"] == "Test Product"
+        assert d["soh_qty"] == 0
+        assert d["on_order_qty"] == 0
+        assert d["cost_inc_gst"] == pytest.approx(2.20)   # 2.00 + 10% GST
+        assert d["sell_price"] == 3.50
+        assert "default_supplier" in d
+
+    def test_stock_info_unknown(self, stock_client):
+        client, h = stock_client
+        assert client.get("/api/v1/stock/0000", headers=h).status_code == 404
+
+    def test_set_soh_records_delta(self, stock_client, product_barcode, db_conn):
+        import models.stock_on_hand as soh
+        soh.adjust(product_barcode, 3, "RECEIPT")
+        client, h = stock_client
+        r = client.post(f"/api/v1/stock/{product_barcode}/set", headers=h,
+                        json={"new_qty": 6, "expected_qty": 3, "operator": "Sam"})
+        assert r.status_code == 200
+        assert r.get_json()["delta"] == 3
+        assert soh.get_by_barcode(product_barcode)["quantity"] == 6
+        mv = db_conn.execute(
+            "SELECT * FROM stock_movements WHERE barcode=? ORDER BY id DESC LIMIT 1",
+            (product_barcode,)).fetchone()
+        assert (mv["movement_type"], mv["quantity"], mv["reference"]) == ("ADJUSTMENT", 3, "MOBILE")
+        assert "3 -> 6" in mv["notes"]
+
+    def test_set_soh_down(self, stock_client, product_barcode, db_conn):
+        import models.stock_on_hand as soh
+        soh.adjust(product_barcode, 10, "RECEIPT")
+        client, h = stock_client
+        r = client.post(f"/api/v1/stock/{product_barcode}/set", headers=h, json={"new_qty": 4})
+        assert r.get_json()["delta"] == -6
+        assert soh.get_by_barcode(product_barcode)["quantity"] == 4
+
+    def test_set_soh_stale_expected_rejected(self, stock_client, product_barcode):
+        import models.stock_on_hand as soh
+        soh.adjust(product_barcode, 5, "RECEIPT")
+        client, h = stock_client
+        r = client.post(f"/api/v1/stock/{product_barcode}/set", headers=h,
+                        json={"new_qty": 9, "expected_qty": 3})
+        assert r.status_code == 409
+        assert r.get_json()["current_qty"] == 5
+        assert soh.get_by_barcode(product_barcode)["quantity"] == 5
+
+    def test_set_soh_same_value_records_nothing(self, stock_client, product_barcode, db_conn):
+        import models.stock_on_hand as soh
+        soh.adjust(product_barcode, 5, "RECEIPT")
+        client, h = stock_client
+        before = db_conn.execute("SELECT COUNT(*) FROM stock_movements").fetchone()[0]
+        r = client.post(f"/api/v1/stock/{product_barcode}/set", headers=h, json={"new_qty": 5})
+        assert r.get_json()["delta"] == 0
+        assert db_conn.execute("SELECT COUNT(*) FROM stock_movements").fetchone()[0] == before
+
+    @pytest.mark.parametrize("bad", [-1, "abc", None, 100000])
+    def test_set_soh_invalid(self, stock_client, product_barcode, bad):
+        client, h = stock_client
+        r = client.post(f"/api/v1/stock/{product_barcode}/set", headers=h, json={"new_qty": bad})
+        assert r.status_code == 400

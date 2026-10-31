@@ -14,7 +14,7 @@ import os
 import threading
 import time
 from collections import deque
-from datetime import datetime
+from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -271,6 +271,50 @@ def get_product(barcode):
     if not result:
         return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
     return jsonify(result)
+
+
+@app.route("/api/v1/stock/<barcode>")
+def get_stock_info(barcode):
+    """Stock-check view for the mobile app: SOH, on order, default supplier, cost, price."""
+    info = product_ctrl.get_stock_info(barcode)
+    if not info:
+        return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
+    return jsonify(info)
+
+
+@app.route("/api/v1/stock/<barcode>/set", methods=["POST"])
+def set_stock_on_hand(barcode):
+    """Set SOH to an absolute quantity; the difference is logged as an ADJUSTMENT movement.
+
+    Body: {"new_qty": 6, "expected_qty": 3 (optional), "operator": "name" (optional)}
+    expected_qty is the SOH the user saw; 409 STOCK_CHANGED if it has moved since.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        new_qty = float(data.get("new_qty"))
+        expected = data.get("expected_qty")
+        expected = None if expected is None else float(expected)
+    except (TypeError, ValueError):
+        return _err("INVALID_PARAM", "new_qty must be a number", 400)
+    if not (0 <= new_qty <= 99_999):
+        return _err("INVALID_PARAM", "new_qty must be between 0 and 99999", 400)
+
+    info = product_ctrl.get_stock_info(barcode)
+    if not info:
+        return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
+
+    operator = str(data.get("operator", "")).strip()[:50]
+    notes = "Set from mobile" + (f" by {operator}" if operator else "")
+    try:
+        old, new, delta = product_ctrl.set_soh(
+            info["barcode"], new_qty, expected_qty=expected,
+            reference="MOBILE", notes=notes, created_by=operator)
+    except product_ctrl.soh_model.StockChanged as e:
+        return jsonify({"error": "STOCK_CHANGED",
+                        "message": "Stock on hand changed since you scanned it",
+                        "current_qty": e.current_qty}), 409
+    return jsonify({"ok": True, "barcode": info["barcode"],
+                    "old_qty": old, "new_qty": new, "delta": delta})
 
 
 @app.route("/api/v1/sessions", methods=["GET"])
@@ -589,6 +633,8 @@ def get_purchase_order(po_number):
             'barcode':       l['barcode'],
             'carton_sku':    (product['carton_sku'] or '') if product else '',
             'counted_units': l['counted_units'],
+            'counted_use_by': l['counted_use_by'],
+            'track_use_by':  bool(product and department_ctrl.group_tracks_use_by(product['group_id'])),
             'description':   l['description'],
             'ordered_qty':   l['ordered_qty'],
             'pack_qty':      pack_qty,
@@ -717,7 +763,7 @@ def save_purchase_order_counts(po_id):
 
     Body:
         invoice_number  str   optional supplier invoice number
-        lines           list  [{line_id: int, units: int}, ...]
+        lines           list  [{line_id: int, units: int, use_by_date?: 'YYYY-MM-DD'}, ...]
 
     Replaces the PO's previously staged counts (the list is the full picture;
     lines omitted or with units=0 are cleared). Never changes stock or PO
@@ -740,6 +786,7 @@ def save_purchase_order_counts(po_id):
 
     valid_ids = {l['id'] for l in po_ctrl.get_po_lines(po_id) if not l['is_note']}
     counts = {}
+    use_by = {}
     for item in submitted:
         line_id = item.get('line_id') if isinstance(item, dict) else None
         if not isinstance(line_id, int) or isinstance(line_id, bool):
@@ -753,9 +800,16 @@ def save_purchase_order_counts(po_id):
             return _err("BAD_REQUEST",
                         f"line_id {line_id}: units must be a whole number >= 0", 400)
         counts[line_id] = units
+        raw_date = item.get('use_by_date')
+        if raw_date:
+            try:
+                use_by[line_id] = date.fromisoformat(str(raw_date)).isoformat()
+            except ValueError:
+                return _err("BAD_REQUEST",
+                            f"line_id {line_id}: use_by_date must be YYYY-MM-DD", 400)
 
     po_ctrl.save_mobile_counts(po_id, {k: v for k, v in counts.items() if v > 0},
-                               invoice_number)
+                               invoice_number, use_by=use_by)
     return jsonify({
         'po_number':   po['po_number'],
         'status':      po['status'],

@@ -196,12 +196,12 @@ def get_po_lines(po_id) -> list[dict]:
     return lines_model.get_by_po(po_id)
 
 
-def save_mobile_counts(po_id, counts, invoice_number='') -> None:
+def save_mobile_counts(po_id, counts, invoice_number='', use_by=None) -> None:
     """Stage units counted by the mobile receive app: no stock or status change.
 
     counts: {line_id: units}. The desktop Receive dialog prefills from these.
     """
-    lines_model.set_counted_units(po_id, counts)
+    lines_model.set_counted_units(po_id, counts, use_by)
     if invoice_number:
         po_model.set_invoice_number(po_id, invoice_number)
 

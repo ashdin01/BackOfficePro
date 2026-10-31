@@ -477,3 +477,51 @@ class TestReceivedUnits:
 
         got = client.get(f"/api/v1/purchase-orders/{sent_po['po_number']}", headers=_h(key))
         assert got.get_json()["lines"][0]["received_units"] == 12
+
+
+# ── Use-by capture (group flag + staged date) ────────────────────────────────
+
+class TestUseByStaging:
+    def test_po_lines_report_group_flag_and_staged_date(self, api_client, sent_po, db_conn, product_barcode):
+        client, key = api_client
+        db_conn.execute("INSERT INTO product_groups (department_id, code, name, track_use_by) "
+                        "SELECT department_id, 'FM', 'Fresh Meat', 1 FROM products WHERE barcode=?",
+                        (product_barcode,))
+        gid = db_conn.execute("SELECT id FROM product_groups WHERE code='FM'").fetchone()["id"]
+        db_conn.execute("UPDATE products SET group_id=? WHERE barcode=?", (gid, product_barcode))
+        db_conn.commit()
+        line_id = sent_po["line"]["id"]
+
+        r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts", headers=_h(key),
+                        json={"lines": [{"line_id": line_id, "units": 12, "use_by_date": "2026-11-20"}]})
+        assert r.status_code == 200
+
+        line = client.get(f"/api/v1/purchase-orders/{sent_po['po_number']}",
+                          headers=_h(key)).get_json()["lines"][0]
+        assert line["track_use_by"] is True
+        assert line["counted_use_by"] == "2026-11-20"
+        assert line["counted_units"] == 12
+
+    def test_ungrouped_product_not_flagged(self, api_client, sent_po):
+        client, key = api_client
+        line = client.get(f"/api/v1/purchase-orders/{sent_po['po_number']}",
+                          headers=_h(key)).get_json()["lines"][0]
+        assert line["track_use_by"] is False
+        assert line["counted_use_by"] is None
+
+    def test_bad_date_rejected(self, api_client, sent_po):
+        client, key = api_client
+        r = client.post(f"/api/v1/purchase-orders/{sent_po['po_id']}/counts", headers=_h(key),
+                        json={"lines": [{"line_id": sent_po["line"]["id"], "units": 1,
+                                         "use_by_date": "20/11/2026"}]})
+        assert r.status_code == 400
+
+    def test_resubmit_clears_old_date(self, api_client, sent_po):
+        client, key = api_client
+        lid = sent_po["line"]["id"]
+        url = f"/api/v1/purchase-orders/{sent_po['po_id']}/counts"
+        client.post(url, headers=_h(key), json={"lines": [{"line_id": lid, "units": 2, "use_by_date": "2026-11-20"}]})
+        client.post(url, headers=_h(key), json={"lines": [{"line_id": lid, "units": 2}]})
+        line = client.get(f"/api/v1/purchase-orders/{sent_po['po_number']}",
+                          headers=_h(key)).get_json()["lines"][0]
+        assert line["counted_use_by"] is None

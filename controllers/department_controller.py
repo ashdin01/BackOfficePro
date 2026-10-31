@@ -36,9 +36,13 @@ def get_group_by_id(group_id) -> dict | None:
     return group_model.get_by_id(group_id)
 
 
-def create_group(department_id, code, name) -> None:
-    group_model.create(department_id, code, name)
+def create_group(department_id, code, name, track_use_by=False) -> None:
+    group_model.create(department_id, code, name, track_use_by=track_use_by)
 
 
-def update_group(group_id, department_id, code, name, active) -> None:
-    group_model.update(group_id, department_id, code, name, active)
+def update_group(group_id, department_id, code, name, active, track_use_by=None) -> None:
+    group_model.update(group_id, department_id, code, name, active, track_use_by=track_use_by)
+
+
+def group_tracks_use_by(group_id) -> bool:
+    return group_model.tracks_use_by(group_id)

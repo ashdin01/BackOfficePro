@@ -250,17 +250,19 @@ def get_on_order_detail(barcode) -> list:
         return [dict(r) for r in rows]
 
 
-def set_counted_units(po_id: int, counts: dict) -> None:
+def set_counted_units(po_id: int, counts: dict, use_by: dict = None) -> None:
     """Replace the mobile-counted units for a PO's product lines.
 
     counts is {line_id: units}. Lines not in `counts` are reset to NULL so the
     submitted list is the complete picture. Staging only — no stock or status change.
+    use is an optional {line_id: 'YYYY-MM-DD'} of use-by dates captured on the phone.
     """
+    use_by = use_by or {}
     with db_conn() as conn:
-        conn.execute("UPDATE po_lines SET counted_units=NULL WHERE po_id=?", (po_id,))
+        conn.execute("UPDATE po_lines SET counted_units=NULL, counted_use_by=NULL WHERE po_id=?", (po_id,))
         for line_id, units in counts.items():
             conn.execute(
-                "UPDATE po_lines SET counted_units=? WHERE id=? AND po_id=?",
-                (int(units), line_id, po_id)
+                "UPDATE po_lines SET counted_units=?, counted_use_by=? WHERE id=? AND po_id=?",
+                (int(units), use_by.get(line_id), line_id, po_id)
             )
         conn.commit()

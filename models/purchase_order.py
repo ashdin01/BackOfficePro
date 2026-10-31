@@ -211,7 +211,7 @@ def reverse(po_id, reversed_by=''):
         )
         conn.execute(
             "UPDATE po_lines SET received_qty=0, received_units=0, received_weight=0, "
-            "counted_units=NULL, "
+            "counted_units=NULL, counted_use_by=NULL, "
             "notes=CASE WHEN notes LIKE 'NOT SUPPLIED:%' THEN NULL ELSE notes END "
             "WHERE po_id = ?", (po_id,)
         )
@@ -441,7 +441,7 @@ def receive_atomic(po_id, po_number, line_receipts, final_status,
                     (r['unit_cost'], r['barcode'])
                 )
 
-        conn.execute("UPDATE po_lines SET counted_units=NULL WHERE po_id=?", (po_id,))
+        conn.execute("UPDATE po_lines SET counted_units=NULL, counted_use_by=NULL WHERE po_id=?", (po_id,))
         conn.execute(
             "UPDATE purchase_orders SET status=?, supplier_invoice_number=?,"
             " updated_at=CURRENT_TIMESTAMP WHERE id=?",

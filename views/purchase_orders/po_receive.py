@@ -10,6 +10,7 @@ import math
 from utils.calculations import round_half_up, amount_inc_from_ex, gst_from_inclusive, gst_on_ex
 import controllers.product_controller as product_ctrl
 import controllers.purchase_order_controller as po_ctrl
+import controllers.department_controller as dept_ctrl
 from config.constants import (
     PO_STATUS_RECEIVED, PO_STATUS_PARTIAL, MOVE_RECEIPT,
     PO_CHARGE_TYPES, PO_CHARGE_TYPE_OTHER, PO_CHARGE_TYPE_ROUNDING,
@@ -508,6 +509,8 @@ class POReceive(BaseView):
         #  remaining_units, is_variable_weight, weight_input, tax_rate,
         #  lt_inc_item, use_by_checkbox, use_by_date_edit)
         self._inputs = []
+        # line ids whose product group requires a use-by date on receipt
+        self._use_by_flagged = set()
         # row -> (line_total_ex, line_total_inc) as canonical floats, kept in
         # sync by _refresh_line — avoids re-parsing formatted "$1,234.00"
         # display text back into a number every time totals are recalculated.
@@ -645,6 +648,15 @@ class POReceive(BaseView):
         use_by_date_edit.setDate(QDate.currentDate())
         use_by_date_edit.setEnabled(False)
         use_by_cb.toggled.connect(use_by_date_edit.setEnabled)
+        staged_use_by = line['counted_use_by']
+        product = product_ctrl.get_product_by_barcode(line['barcode']) if line['barcode'] else None
+        if product and dept_ctrl.group_tracks_use_by(product['group_id']):
+            self._use_by_flagged.add(line['id'])
+            use_by_cb.setToolTip("This product's group requires a use-by / best-before date.")
+        if staged_use_by:
+            use_by_date_edit.setDate(QDate.fromString(staged_use_by, "yyyy-MM-dd"))
+            use_by_cb.setChecked(True)
+            use_by_cb.setToolTip("Use-by date prefilled from the mobile receive count.")
         use_by_container = QWidget()
         use_by_lay = QHBoxLayout(use_by_container)
         use_by_lay.addWidget(use_by_cb)
@@ -916,6 +928,16 @@ class POReceive(BaseView):
             msg = (f"Receive stock?\n\n"
                    f"⚠  {promo_count} promo line(s) — stock will be received "
                    f"but cost price will NOT be updated for those items.")
+        missing = [
+            entry[0]['description'] for entry in self._inputs
+            if entry[0]['id'] in self._use_by_flagged
+            and entry[2].value() > 0 and not entry[11].isChecked()
+        ]
+        if missing:
+            shown = "\n".join(f"   • {d}" for d in missing[:8])
+            more = f"\n   …and {len(missing) - 8} more" if len(missing) > 8 else ""
+            msg += (f"\n\n⚠  {len(missing)} line(s) need a use-by date but have none "
+                    f"(tick Track to add one):\n{shown}{more}")
         reply = QMessageBox.question(self, "Confirm Receipt", msg)
         return reply == QMessageBox.StandardButton.Yes
 
