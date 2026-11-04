@@ -100,3 +100,14 @@ UPCOMING_TASKS_WINDOW_DAYS = 30
 # heads-up would flag half the fresh department constantly and bury the
 # genuinely urgent ones.
 BATCH_EXPIRY_WARNING_DAYS = 5
+
+
+# What happened to a use-by batch when it was handled (product_batches.outcome).
+# REVERSED is set automatically when the receipt it came from is undone.
+BATCH_OUTCOMES = [
+    ("SOLD_THROUGH", "Sold through"),
+    ("MARKED_DOWN",  "Marked down"),
+    ("WRITTEN_OFF",  "Written off"),
+    ("OTHER",        "Other"),
+]
+BATCH_OUTCOME_REVERSED = "REVERSED"

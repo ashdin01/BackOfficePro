@@ -62,3 +62,50 @@ class TestMarkResolved:
         assert len(batches_model.get_expiring_batches(days=5)) == 1
         batches_model.mark_resolved(bid)
         assert batches_model.get_expiring_batches(days=5) == []
+
+
+class TestOutcomeCapture:
+    def _row(self, db_conn, bid):
+        return db_conn.execute("SELECT * FROM product_batches WHERE id=?", (bid,)).fetchone()
+
+    def test_mark_resolved_records_outcome_and_qty(self, test_db, product_barcode, db_conn):
+        bid = batches_model.add_batch(product_barcode, _iso(1), 24)
+        batches_model.mark_resolved(bid, "WRITTEN_OFF", 5)
+        r = self._row(db_conn, bid)
+        assert (r["resolved"], r["outcome"], r["qty_remaining"]) == (1, "WRITTEN_OFF", 5)
+        assert r["resolved_at"] is not None
+
+    def test_mark_resolved_without_outcome_still_works(self, test_db, product_barcode, db_conn):
+        bid = batches_model.add_batch(product_barcode, _iso(1), 24)
+        batches_model.mark_resolved(bid)
+        r = self._row(db_conn, bid)
+        assert r["resolved"] == 1 and r["outcome"] is None
+
+
+class TestReversalKeepsBatches:
+    def test_reverse_marks_open_batches_reversed_and_keeps_handled_ones(
+        self, test_db, supplier_id, product_barcode, db_conn
+    ):
+        import models.purchase_order as po_model
+        import controllers.purchase_order_controller as po_ctrl
+        import models.po_lines as lines_model
+        po_id = po_ctrl.create_po(supplier_id, delivery_date="2026-07-01")
+        po_ctrl.update_po_status(po_id, "SENT")
+        lines_model.add(po_id, product_barcode, "Test Product", 10, 2.50, "", 6)
+        line = lines_model.get_by_po(po_id)[0]
+        po = po_model.get_by_id(po_id)
+        po_ctrl.receive_po_atomic(po_id, po["po_number"], [{
+            "line_id": line["id"], "barcode": product_barcode, "new_received_qty": 10,
+            "new_received_weight": 0, "actual_cost": None, "unit_cost": None,
+            "is_promo": False, "qty_units": 60, "use_by_date": _iso(3)}], "RECEIVED")
+        handled = batches_model.add_batch(product_barcode, _iso(2), 6, po_line_id=line["id"])
+        batches_model.mark_resolved(handled, "SOLD_THROUGH", 0)
+
+        po_ctrl.reverse_po(po_id)
+
+        rows = {r["id"]: r for r in db_conn.execute("SELECT * FROM product_batches").fetchall()}
+        assert len(rows) == 2                                  # nothing deleted
+        assert rows[handled]["outcome"] == "SOLD_THROUGH"      # earlier outcome untouched
+        reversed_row = next(r for i, r in rows.items() if i != handled)
+        assert reversed_row["outcome"] == "REVERSED" and reversed_row["resolved"] == 1
+        assert batches_model.get_expiring_batches(days=9999) == []

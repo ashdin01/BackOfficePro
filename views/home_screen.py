@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QPushButton, QFileDialog, QMessageBox, QScrollArea
+    QPushButton, QFileDialog, QMessageBox, QScrollArea,
+    QDialog, QFormLayout, QComboBox, QDoubleSpinBox, QDialogButtonBox
 )
 from PyQt6.QtCore import Qt, QTimer, QDateTime
 from PyQt6.QtGui import QFont
@@ -422,7 +423,28 @@ class HomeScreen(QWidget):
 
     def _mark_batch_handled(self, batch_id):
         import models.product_batches as batches_model
-        batches_model.mark_resolved(batch_id)
+        from config.constants import BATCH_OUTCOMES
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Batch handled")
+        form = QFormLayout(dlg)
+        outcome = QComboBox()
+        for code, label in BATCH_OUTCOMES:
+            outcome.addItem(label, code)
+        remaining = QDoubleSpinBox()
+        remaining.setRange(0, 999999)
+        remaining.setDecimals(2)
+        remaining.setToolTip("Units still on hand when this batch was dealt with "
+                             "(0 if it all sold). Used to see how much was wasted.")
+        form.addRow("What happened?", outcome)
+        form.addRow("Units left over", remaining)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                   QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        batches_model.mark_resolved(batch_id, outcome.currentData(), remaining.value())
         self._refresh_upcoming_tasks()
 
     def _refresh(self):

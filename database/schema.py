@@ -210,6 +210,9 @@ CREATE TABLE IF NOT EXISTS product_batches (
     qty_received    REAL    NOT NULL,
     resolved        INTEGER NOT NULL DEFAULT 0 CHECK (resolved IN (0,1)),
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at     DATETIME DEFAULT NULL,
+    outcome         TEXT    DEFAULT NULL,
+    qty_remaining   REAL    DEFAULT NULL,
     FOREIGN KEY (barcode)    REFERENCES products(barcode)  ON DELETE CASCADE,
     FOREIGN KEY (po_line_id) REFERENCES po_lines(id)       ON DELETE SET NULL
 );

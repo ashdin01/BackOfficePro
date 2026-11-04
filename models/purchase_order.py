@@ -205,8 +205,11 @@ def reverse(po_id, reversed_by=''):
             stock_on_hand.clamp_negative_soh(
                 conn, line['barcode'], reference=po['po_number'], created_by=reversed_by)
 
+        # Keep the batch history: mark still-open batches REVERSED (drops them from
+        # the expiry alerts) rather than deleting, and leave already-handled ones alone.
         conn.execute(
-            "DELETE FROM product_batches WHERE po_line_id IN "
+            "UPDATE product_batches SET resolved = 1, resolved_at = CURRENT_TIMESTAMP,"
+            " outcome = 'REVERSED' WHERE resolved = 0 AND po_line_id IN "
             "(SELECT id FROM po_lines WHERE po_id = ?)", (po_id,)
         )
         conn.execute(

@@ -307,6 +307,22 @@ def migrate_v77(conn):
     conn.commit()
 
 
+def migrate_v78(conn):
+    """Record what happened to each use-by batch, for future order-quantity analysis.
+
+    resolved_at / outcome / qty_remaining are filled in when a batch is handled
+    from the Home screen: outcome is one of SOLD_THROUGH, WRITTEN_OFF,
+    MARKED_DOWN, OTHER (or REVERSED when the receipt was undone), and
+    qty_remaining is how many units were left when it was dealt with (the
+    waste/markdown quantity). Batches already resolved before this migration
+    keep NULL outcome — the outcome simply wasn't captured then.
+    """
+    _add_column(conn, "ALTER TABLE product_batches ADD COLUMN resolved_at DATETIME DEFAULT NULL")
+    _add_column(conn, "ALTER TABLE product_batches ADD COLUMN outcome TEXT DEFAULT NULL")
+    _add_column(conn, "ALTER TABLE product_batches ADD COLUMN qty_remaining REAL DEFAULT NULL")
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
@@ -774,4 +790,5 @@ _MIGRATIONS: dict[int, tuple] = {
     75: (migrate_v75, "kit_components, kit_builds for pre-assembled kits (Xmas hampers)"),
     76: (migrate_v76, "received_units on po_lines (exact units received; backfilled from stock movements)"),
     77: (migrate_v77, "track_use_by on product_groups, counted_use_by on po_lines for mobile use-by capture"),
+    78: (migrate_v78, "resolved_at/outcome/qty_remaining on product_batches for waste & order-quantity analysis"),
 }
