@@ -20,6 +20,16 @@ def add_batch(barcode, use_by_date, qty_received, po_line_id=None, received_date
         return cur.lastrowid
 
 
+def get_open_batches(barcode) -> list[dict]:
+    """Unresolved batches for one product, soonest use-by first."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, use_by_date, qty_received FROM product_batches"
+            " WHERE barcode = ? AND resolved = 0 ORDER BY use_by_date ASC, id ASC",
+            (barcode,)).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_expiring_batches(days: int = None) -> list[dict]:
     """Return unresolved batches whose use_by_date is within `days` (defaults
     to BATCH_EXPIRY_WARNING_DAYS), including any already past due.
@@ -40,7 +50,15 @@ def get_expiring_batches(days: int = None) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def mark_resolved(batch_id):
+def mark_resolved(batch_id, outcome=None, qty_remaining=None):
+    """Dismiss a batch, optionally recording what happened to it.
+
+    outcome: one of config.constants.BATCH_OUTCOMES codes (None = not captured).
+    qty_remaining: units still on hand when it was handled (the waste/markdown qty).
+    """
     with db_conn() as conn:
-        conn.execute("UPDATE product_batches SET resolved = 1 WHERE id = ?", (batch_id,))
+        conn.execute(
+            "UPDATE product_batches SET resolved = 1, resolved_at = CURRENT_TIMESTAMP,"
+            " outcome = ?, qty_remaining = ? WHERE id = ?",
+            (outcome, qty_remaining, batch_id))
         conn.commit()

@@ -1174,3 +1174,64 @@ class TestMobileStock:
         client, h = stock_client
         r = client.post(f"/api/v1/stock/{product_barcode}/set", headers=h, json={"new_qty": bad})
         assert r.status_code == 400
+
+
+class TestMobileStockBatchesAndLabel:
+    @pytest.fixture()
+    def stock_client(self, test_db):
+        import api_server
+        api_server._read_clients.clear()
+        api_server._api_key_cache = ""
+        api_server.app.config["TESTING"] = True
+        key = api_server._get_api_key()
+        with api_server.app.test_client() as client:
+            yield client, {"X-API-Key": key}
+
+    def test_add_batch_does_not_change_soh_and_is_listed(self, stock_client, product_barcode, db_conn):
+        import models.stock_on_hand as soh
+        soh.adjust(product_barcode, 4, "RECEIPT")
+        client, h = stock_client
+        r = client.post(f"/api/v1/stock/{product_barcode}/batches", headers=h,
+                        json={"use_by_date": "2030-01-05", "qty": 3})
+        assert r.status_code == 200
+        assert soh.get_by_barcode(product_barcode)["quantity"] == 4
+        d = client.get(f"/api/v1/stock/{product_barcode}", headers=h).get_json()
+        assert d["use_by_batches"] == [{"id": r.get_json()["id"], "use_by_date": "2030-01-05", "qty": 3}]
+        assert d["track_use_by"] is False
+
+    @pytest.mark.parametrize("body", [{}, {"use_by_date": "05/01/2030", "qty": 1},
+                                      {"use_by_date": "2030-01-05", "qty": 0},
+                                      {"use_by_date": "2030-01-05", "qty": "x"}])
+    def test_add_batch_invalid(self, stock_client, product_barcode, body):
+        client, h = stock_client
+        assert client.post(f"/api/v1/stock/{product_barcode}/batches", headers=h, json=body).status_code == 400
+
+    def test_add_batch_unknown_product(self, stock_client):
+        client, h = stock_client
+        assert client.post("/api/v1/stock/0000/batches", headers=h,
+                           json={"use_by_date": "2030-01-05", "qty": 1}).status_code == 404
+
+    def test_label_prints_with_copies(self, stock_client, product_barcode, monkeypatch):
+        import utils.label_print as lp
+        calls = []
+        monkeypatch.setattr(lp, "ensure_qt_app", lambda: None)
+        monkeypatch.setattr(lp, "print_label_direct", lambda **kw: (calls.append(kw) or (True, "Printed")))
+        client, h = stock_client
+        r = client.post(f"/api/v1/stock/{product_barcode}/label", headers=h, json={"copies": 3})
+        assert r.status_code == 200
+        assert calls[0]["copies"] == 3 and calls[0]["price_inc_gst"] == 3.50
+        assert calls[0]["barcode"] == product_barcode
+
+    def test_label_printer_failure_surfaces(self, stock_client, product_barcode, monkeypatch):
+        import utils.label_print as lp
+        monkeypatch.setattr(lp, "ensure_qt_app", lambda: None)
+        monkeypatch.setattr(lp, "print_label_direct", lambda **kw: (False, "No printer configured"))
+        client, h = stock_client
+        r = client.post(f"/api/v1/stock/{product_barcode}/label", headers=h, json={})
+        assert r.status_code == 502 and "No printer" in r.get_json()["message"]
+
+    @pytest.mark.parametrize("copies", [0, 51, "x"])
+    def test_label_invalid_copies(self, stock_client, product_barcode, copies):
+        client, h = stock_client
+        assert client.post(f"/api/v1/stock/{product_barcode}/label", headers=h,
+                           json={"copies": copies}).status_code == 400

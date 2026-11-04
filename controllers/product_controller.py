@@ -10,6 +10,8 @@ import models.plu_barcode_map as plu_map_model
 import models.product_selling_units as selling_units_model
 import models.stock_movements as movements_model
 import models.po_lines as po_lines_model
+import models.group as group_model
+import models.product_batches as product_batches_model
 import models.sales_daily as sales_daily_model
 
 
@@ -483,6 +485,11 @@ def get_stock_info(barcode) -> dict | None:
         'cost_inc_gst':    round(amount_inc_from_ex(product['cost_price'] or 0, tax), 4),
         'sell_price':      product['sell_price'] or 0,
         'tax_rate':        tax,
+        'plu':             product['plu'] if 'plu' in product.keys() else None,
+        'track_use_by':    bool(product['group_id'] and group_model.tracks_use_by(product['group_id'])),
+        'use_by_batches':  [
+            {'id': b['id'], 'use_by_date': b['use_by_date'], 'qty': b['qty_received']}
+            for b in product_batches_model.get_open_batches(bc)],
     }
 
 

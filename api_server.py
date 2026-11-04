@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, g, request, jsonify, send_file
 import controllers.settings_controller as settings_ctrl
+import models.product_batches as product_batches_model
 import controllers.department_controller as department_ctrl
 import controllers.product_controller as product_ctrl
 import controllers.stocktake_controller as stocktake_ctrl
@@ -29,6 +30,7 @@ import controllers.sales_report_controller as sales_ctrl
 import controllers.purchase_order_controller as po_ctrl
 import controllers.held_sale_controller as held_sale_ctrl
 
+_label_print_lock = threading.Lock()
 app = Flask(__name__)
 
 # Routes that do not require authentication (liveness check only)
@@ -315,6 +317,55 @@ def set_stock_on_hand(barcode):
                         "current_qty": e.current_qty}), 409
     return jsonify({"ok": True, "barcode": info["barcode"],
                     "old_qty": old, "new_qty": new, "delta": delta})
+
+
+@app.route("/api/v1/stock/<barcode>/batches", methods=["POST"])
+def add_stock_batch(barcode):
+    """Record a use-by batch seen on the shelf/backroom (alerting only: stock on
+    hand is NOT changed). Body: {"use_by_date": "YYYY-MM-DD", "qty": 6}"""
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        use_by = date.fromisoformat(str(data.get("use_by_date"))).isoformat()
+        qty = float(data.get("qty"))
+    except (TypeError, ValueError):
+        return _err("INVALID_PARAM", "use_by_date (YYYY-MM-DD) and qty are required", 400)
+    if not (0 < qty <= 99_999):
+        return _err("INVALID_PARAM", "qty must be between 1 and 99999", 400)
+    info = product_ctrl.get_stock_info(barcode)
+    if not info:
+        return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
+    batch_id = product_batches_model.add_batch(info["barcode"], use_by, qty)
+    return jsonify({"ok": True, "id": batch_id})
+
+
+@app.route("/api/v1/stock/<barcode>/label", methods=["POST"])
+def print_shelf_label(barcode):
+    """Print a shelf-edge label on the printer set in Settings > Label Printing.
+    Body: {"copies": 1, "large": false}"""
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        copies = int(data.get("copies", 1))
+    except (TypeError, ValueError):
+        return _err("INVALID_PARAM", "copies must be a whole number", 400)
+    if not (1 <= copies <= 50):
+        return _err("INVALID_PARAM", "copies must be between 1 and 50", 400)
+    info = product_ctrl.get_stock_info(barcode)
+    if not info:
+        return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
+    import utils.label_print as label_print
+    with _label_print_lock:
+        try:
+            label_print.ensure_qt_app()
+            ok, msg = label_print.print_label_direct(
+                barcode=info["barcode"], description=info["description"],
+                price_inc_gst=info["sell_price"], plu=info.get("plu") or None,
+                copies=copies, large=bool(data.get("large", False)))
+        except Exception as e:
+            logging.exception("Label print failed")
+            return _err("PRINT_FAILED", str(e), 500)
+    if not ok:
+        return _err("PRINT_FAILED", msg, 502)
+    return jsonify({"ok": True, "copies": copies})
 
 
 @app.route("/api/v1/sessions", methods=["GET"])

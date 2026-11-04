@@ -27,6 +27,18 @@ from utils.label_pdf import (
 _RENDER_DPI = 300
 
 
+def ensure_qt_app():
+    """Return a QGuiApplication, creating a headless (offscreen) one if none
+    exists. The REST API runs as a GUI-less child process, so label printing
+    triggered from the mobile app needs this before touching QPrinter/QPdf."""
+    from PyQt6.QtGui import QGuiApplication
+    app = QGuiApplication.instance()
+    if app is None:
+        os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+        app = QGuiApplication([])
+    return app
+
+
 def get_printer_names() -> list[str]:
     from PyQt6.QtPrintSupport import QPrinterInfo
     return QPrinterInfo.availablePrinterNames()
