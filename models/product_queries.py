@@ -180,9 +180,11 @@ def get_with_soh(barcode) -> dict | None:
         row = conn.execute("""
             SELECT p.barcode, p.plu, p.description, p.sell_price, p.cost_price,
                    p.tax_rate, p.unit, p.brand, d.name AS dept_name,
+                   p.group_id, g.name AS group_name,
                    COALESCE(soh.quantity, 0) AS soh_qty
             FROM products p
             LEFT JOIN departments d     ON p.department_id = d.id
+            LEFT JOIN product_groups g  ON p.group_id = g.id
             LEFT JOIN stock_on_hand soh ON soh.barcode = p.barcode
             WHERE p.barcode = ? AND p.active = 1
         """, (barcode,)).fetchone()

@@ -425,6 +425,11 @@ def add_count(session_id):
     if not product or not product['active']:
         return _err("PRODUCT_NOT_FOUND", "Product not found", 404)
 
+    # A session limited to a group only accepts that group's products (no group = outside it).
+    session = stocktake_ctrl.get_session(session_id)
+    if session and session['group_id'] and product['group_id'] != session['group_id']:
+        return _err("OUT_OF_GROUP", "Product is not in this session's group", 409)
+
     stocktake_ctrl.upsert_count(session_id, product['barcode'], qty)
     return jsonify({"ok": True, "barcode": product['barcode']}), 200
 

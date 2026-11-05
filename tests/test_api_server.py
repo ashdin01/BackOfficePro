@@ -408,6 +408,24 @@ def test_add_count_and_retrieve(api_client, product_barcode):
     assert r2.get_json()["counted_qty"] == 12.0
 
 
+def test_add_count_group_session_rejects_out_of_group_product(api_client, db_conn, dept_id, product_barcode):
+    client, key = api_client
+    db_conn.execute("INSERT INTO product_groups (department_id, code, name) VALUES (?, 'GA', 'Group A')", (dept_id,))
+    gid = db_conn.execute("SELECT id FROM product_groups WHERE code='GA'").fetchone()["id"]
+    db_conn.commit()
+    sid = client.post("/api/v1/sessions", json={"label": "G", "department_id": dept_id, "group_id": gid},
+                      headers=_h(key)).get_json()["id"]
+    # product has no group -> outside the session's group
+    r = client.post(f"/api/v1/sessions/{sid}/counts", json={"barcode": product_barcode, "qty": 1}, headers=_h(key))
+    assert r.status_code == 409
+    assert r.get_json()["error"] == "OUT_OF_GROUP"
+    # put the product in the group -> accepted
+    db_conn.execute("UPDATE products SET group_id=? WHERE barcode=?", (gid, product_barcode))
+    db_conn.commit()
+    r = client.post(f"/api/v1/sessions/{sid}/counts", json={"barcode": product_barcode, "qty": 1}, headers=_h(key))
+    assert r.status_code == 200
+
+
 def test_delete_count(api_client, product_barcode):
     client, key = api_client
     sid = client.post("/api/v1/sessions", json={"label": "Del Test"}, headers=_h(key)).get_json()["id"]
