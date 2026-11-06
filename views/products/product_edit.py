@@ -412,6 +412,12 @@ class ProductEdit(KeyboardMixin, QWidget):
         btn_print_edikio.clicked.connect(self._print_edikio_label)
         act_row.addWidget(btn_print_edikio)
 
+        if not self._read_only:
+            btn_merge = QPushButton("Merge into…")
+            btn_merge.setFixedHeight(30)
+            btn_merge.clicked.connect(self._merge_product)
+            act_row.addWidget(btn_merge)
+
         act_row.addStretch()
         if not self._read_only:
             save_btn = QPushButton("Save  [Ctrl+S]")
@@ -441,6 +447,17 @@ class ProductEdit(KeyboardMixin, QWidget):
             QMessageBox.warning(self, "Barcode Exists", str(e))
         except Exception as e:
             show_error(self, "Could not update barcode.", e)
+
+    def _merge_product(self):
+        from views.products.product_merge_dialog import MergeProductDialog
+        dlg = MergeProductDialog(self.barcode, self.product['description'], self)
+        if dlg.exec():
+            QMessageBox.information(
+                self, "Merged",
+                f"Merged into {dlg.merged_into}. This product no longer exists.")
+            if self.on_save:
+                self.on_save()
+            self.close()
 
     def _edit_description(self):
         if self._selling_unit_guard(): return

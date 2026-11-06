@@ -526,6 +526,27 @@ def add_alias(alias_barcode, master_barcode, description='') -> None:
     alias_model.add(alias_barcode, master_barcode, description)
 
 
+def find_merge_target(text):
+    """Resolve a barcode, alias or PLU typed by the user to a product row (or None)."""
+    from models import product_merge
+    return product_merge.resolve_target(text)
+
+
+def preview_merge(dup_barcode, keeper_barcode) -> dict:
+    from models import product_merge
+    return product_merge.preview(dup_barcode, keeper_barcode)
+
+
+def merge_products(dup_barcode, keeper_barcode) -> None:
+    """Merge a duplicate product into the keeper after a verified backup.
+    The keeper's price and description are kept. Raises ValueError if refused."""
+    from controllers import backup_controller
+    from models import product_merge
+    product_merge.preview(dup_barcode, keeper_barcode)   # refuse before backing up
+    backup_controller.pre_merge_backup()
+    product_merge.merge(dup_barcode, keeper_barcode)
+
+
 def delete_alias(alias_id) -> None:
     alias_model.delete(alias_id)
 

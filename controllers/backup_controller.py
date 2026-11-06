@@ -22,7 +22,7 @@ _KEEP_MONTHLY = 12      # newest backup of each of the last 12 months
 
 # Safety copies taken before a restore or migration. Not part of the rolling
 # history above (get_last_backup_time ignores them); only the newest few are kept.
-_SAFETY_PREFIXES = ("supermarket_PRE_RESTORE_", "supermarket_PRE_MIGRATION_")
+_SAFETY_PREFIXES = ("supermarket_PRE_RESTORE_", "supermarket_PRE_MIGRATION_", "supermarket_PRE_MERGE_")
 _KEEP_SAFETY = 5
 # A backup older than this is flagged as stale in the sidebar and triggers a
 # scheduled backup while the app is open.
@@ -155,6 +155,18 @@ def pre_migration_backup(db_path, from_version) -> str:
     ok, msg = do_backup(dest, src_path=db_path)
     if not ok:
         raise RuntimeError(f"Could not back up the database before upgrading it: {msg}")
+    prune_safety_backups()
+    return dest
+
+
+def pre_merge_backup() -> str:
+    """Verified snapshot of the live DB before a product merge. Raises RuntimeError
+    if it cannot be made, so a merge never runs unprotected."""
+    ts   = datetime.now().strftime(_STAMP_FMT)
+    dest = os.path.join(_BACKUP_DIR, f"supermarket_PRE_MERGE_{ts}.db")
+    ok, msg = do_backup(dest)
+    if not ok:
+        raise RuntimeError(f"Could not back up the database before merging: {msg}")
     prune_safety_backups()
     return dest
 
