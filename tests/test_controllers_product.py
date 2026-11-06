@@ -644,3 +644,12 @@ class TestPriceChangeHistory:
         assert f"${old + 1.5:.2f}" in pc[0]['notes']
         only = product_ctrl.get_movement_history(product_barcode, 'PRICE_CHANGE')
         assert len(only) == 1
+
+
+def test_add_alias_duplicate_reports_owner(test_db, product_barcode):
+    import pytest
+    product_ctrl.add_alias('9300000000098', product_barcode, 'a')
+    with pytest.raises(ValueError, match="already an alternate barcode"):
+        product_ctrl.add_alias('9300000000098', product_barcode, 'b')
+    with pytest.raises(ValueError, match="already a product"):
+        product_ctrl.add_alias(product_barcode, product_barcode, 'c')

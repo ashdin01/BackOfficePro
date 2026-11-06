@@ -500,6 +500,29 @@ def get_aliases(master_barcode) -> list[dict]:
 
 
 def add_alias(alias_barcode, master_barcode, description='') -> None:
+    """Add an alternate barcode. Raises ValueError naming the conflict if the
+    barcode is already in use (as a product, alias or selling-unit barcode)."""
+    from database.connection import db_conn
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT p.barcode, p.description FROM products p WHERE p.barcode = ?",
+            (alias_barcode,)).fetchone()
+        if row:
+            raise ValueError(f"{alias_barcode} is already a product: {row['description']}.")
+        row = conn.execute(
+            "SELECT a.master_barcode, p.description FROM barcode_aliases a "
+            "LEFT JOIN products p ON p.barcode = a.master_barcode "
+            "WHERE a.alias_barcode = ?", (alias_barcode,)).fetchone()
+        if row:
+            raise ValueError(
+                f"{alias_barcode} is already an alternate barcode of "
+                f"{row['master_barcode']} ({row['description'] or 'unknown product'}).")
+        row = conn.execute(
+            "SELECT master_barcode FROM product_selling_units WHERE barcode = ?",
+            (alias_barcode,)).fetchone()
+        if row:
+            raise ValueError(
+                f"{alias_barcode} is already a selling-unit barcode of {row['master_barcode']}.")
     alias_model.add(alias_barcode, master_barcode, description)
 
 

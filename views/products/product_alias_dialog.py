@@ -49,5 +49,7 @@ class AddAliasDialog(QDialog):
         try:
             product_controller.add_alias(barcode, self.master_barcode, self.desc.text().strip())
             self.accept()
+        except ValueError as e:
+            QMessageBox.warning(self, "Barcode In Use", str(e))
         except Exception as e:
             show_error(self, "Could not add barcode alias.", e)
