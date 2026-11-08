@@ -205,3 +205,24 @@ class TestSalesReportImportButtonUsesSharedHelper(object):
         sales_report_view._import_sales()
 
         run_import_spy.assert_not_called()
+
+
+# ── Whole-row red highlight ───────────────────────────────────────────────────
+
+class TestUnmatchedRowHighlight:
+    def test_unmatched_row_is_red_in_every_cell(self, qtbot, test_db, db_conn):
+        _insert_sale(db_conn, SALE_DATE, 999, "Mystery Item")
+        db_conn.commit()
+
+        from views.reports.sales_report_view import SalesReportView
+        import config.styles as styles
+        w = SalesReportView()
+        qtbot.addWidget(w)
+        w.date_from.setDate(w.date_from.date().addDays(-30))
+        w._load()
+
+        t = w.product_table
+        assert t.rowCount() == 1
+        assert t.item(0, 0).text() == "UNMATCHED"
+        for c in range(t.columnCount()):
+            assert t.item(0, c).foreground().color().name() == styles.CLR_DANGER

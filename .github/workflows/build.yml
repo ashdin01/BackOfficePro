@@ -65,6 +65,9 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller BackOfficePro.spec --clean
 
+      - name: Verify dynamically-loaded screens are bundled
+        run: python ci/verify_bundle.py dist/BackOfficePro/BackOfficePro.exe
+
       - name: Zip release folder
         shell: pwsh
         run: |

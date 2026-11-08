@@ -1,12 +1,33 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_submodules
+import os
 
 # Every module in these packages is bundled automatically. The hubs load their
 # screens via importlib.import_module (invisible to PyInstaller's static
 # analysis), so a new report/settings screen needs no spec edit.
+#
+# The list is built by scanning the source tree rather than with
+# PyInstaller's collect_submodules(): that helper imports the package at
+# spec-evaluation time and, if the import fails (cwd/sys.path differences on
+# the CI runner), only prints a warning and returns [] -- silently dropping
+# every dynamically-loaded screen (Settings > Music / Labels crashed in the
+# Windows build this way). A filesystem scan cannot fail silently.
 _DYNAMIC_PACKAGES = ['views.reports', 'views.settings']
-_auto_hidden = [m for pkg in _DYNAMIC_PACKAGES for m in collect_submodules(pkg)]
+
+
+def _scan_package(pkg):
+    root = os.path.join(SPECPATH, *pkg.split('.'))
+    mods = [pkg]
+    for name in sorted(os.listdir(root)):
+        base, ext = os.path.splitext(name)
+        if ext == '.py' and base != '__init__':
+            mods.append(pkg + '.' + base)
+    if len(mods) < 2:
+        raise SystemExit('spec: no modules found in ' + root)
+    return mods
+
+
+_auto_hidden = [m for pkg in _DYNAMIC_PACKAGES for m in _scan_package(pkg)]
 
 a = Analysis(
     ['main.py'],

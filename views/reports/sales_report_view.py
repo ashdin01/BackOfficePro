@@ -322,9 +322,9 @@ class SalesReportView(BaseView):
             r = self.product_table.rowCount()
             self.product_table.insertRow(r)
 
-            bc_item = _item(barcode, CENTER)
-            if not barcode:
-                bc_item.setForeground(QColor(styles.CLR_DANGER))   # red = unmatched
+            # Unmatched rows get a visible marker: the barcode is empty, so a
+            # red foreground on that cell alone would colour nothing.
+            bc_item = _item(barcode or "UNMATCHED", CENTER)
 
             desc_item = _item(description)
             desc_item.setData(Qt.ItemDataRole.UserRole, {
@@ -357,6 +357,14 @@ class SalesReportView(BaseView):
             self.product_table.setItem(r, 6, _item(f"${sales:.2f}", RIGHT, numeric=True))
             self.product_table.setItem(r, 7, _item(f"${avg_day:.2f}", RIGHT, numeric=True))
             self.product_table.setItem(r, 8, pct_item)
+
+            if not barcode:
+                # Highlight the whole line red (text + tinted background).
+                for c in range(self.product_table.columnCount()):
+                    it = self.product_table.item(r, c)
+                    if it:
+                        it.setForeground(QColor(styles.CLR_DANGER))
+                        it.setBackground(QColor(90, 28, 28))
 
         self.product_table.setSortingEnabled(True)
 
