@@ -55,6 +55,7 @@ REASON_CODES = [
     ("DG", "Damaged Goods"),
     ("CI", "Consumed Instore (Staff feeding/meals)"),
     ("SA", "Stock Adjust Error"),
+    ("MV", "Manufacturing variances"),
 ]
 REASON_MAP = {code: desc for code, desc in REASON_CODES}
 

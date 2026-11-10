@@ -86,6 +86,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._online_available  = bool(p['online_available'] if 'online_available' in p.keys() else 0)
         self._online_notes      = (p['online_notes'] if 'online_notes' in p.keys() and p['online_notes'] else '')
         self._order_prep_include = bool(p['order_prep_include'] if 'order_prep_include' in p.keys() else 0)
+        self._warehouse_order_include = bool(p['warehouse_order_include'] if 'warehouse_order_include' in p.keys() else 0)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -308,6 +309,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         third_col.addLayout(r)
 
         r, self.lbl_order_prep = self._ro_row("Order Prep App", "Yes" if self._order_prep_include else "No", self._edit_order_prep_include)
+        third_col.addLayout(r)
+
+        r, self.lbl_warehouse_order = self._ro_row("Warehouse Order", "Yes" if self._warehouse_order_include else "No", self._edit_warehouse_order_include)
         third_col.addLayout(r)
 
         third_col.addStretch()
@@ -634,6 +638,18 @@ class ProductEdit(KeyboardMixin, QWidget):
             self._order_prep_include = (val == "Yes")
             self.lbl_order_prep.setText(val)
 
+    def _edit_warehouse_order_include(self):
+        val = choice_popup(
+            "Warehouse Order",
+            "Include this product on the mobile Warehouse Order list (warehouse to shop transfer)?",
+            ["No", "Yes"],
+            "Yes" if self._warehouse_order_include else "No",
+            self,
+        )
+        if val is not None:
+            self._warehouse_order_include = (val == "Yes")
+            self.lbl_warehouse_order.setText(val)
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     def _dept_name(self):
@@ -875,6 +891,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 online_available=int(self._online_available),
                 online_notes=self._txt_notes.toPlainText().strip(),
                 order_prep_include=int(self._order_prep_include),
+                warehouse_order_include=int(self._warehouse_order_include),
                 product_suppliers=self._product_suppliers,
                 carton_sku=self._carton_sku,
             )

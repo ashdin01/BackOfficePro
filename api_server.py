@@ -29,6 +29,7 @@ import controllers.bundle_controller as bundle_ctrl
 import controllers.sales_report_controller as sales_ctrl
 import controllers.purchase_order_controller as po_ctrl
 import controllers.held_sale_controller as held_sale_ctrl
+import controllers.warehouse_order_controller as warehouse_order_ctrl
 
 _label_print_lock = threading.Lock()
 app = Flask(__name__)
@@ -1029,6 +1030,49 @@ def create_order_prep_draft():
         return _err("DRAFT_FAILED", "Could not create draft PO", 500)
 
     return jsonify(result), 201
+
+
+# ── Warehouse Order (warehouse -> shop transfer; nothing stored) ──────────────
+
+@app.route("/api/v1/warehouse-order/items", methods=["GET"])
+def get_warehouse_order_items():
+    """Products flagged 'Warehouse Order' in Product Detail."""
+    return jsonify([{
+        'barcode':     i['barcode'],
+        'description': i['description'],
+        'unit':        i['unit'],
+        'on_hand':     i['on_hand'],
+    } for i in warehouse_order_ctrl.get_items()])
+
+
+@app.route("/api/v1/warehouse-order/submit", methods=["POST"])
+def submit_warehouse_order():
+    """
+    Write a Warehouse Order as CSV + PDF on the PC running the API. No PO or
+    database record is created.
+
+    Body:
+        notes  str   optional
+        lines  list  [{barcode: str, qty: number}, ...]
+    """
+    data = request.get_json(force=True) or {}
+    notes = str(data.get("notes", ""))[:500]
+    try:
+        lines = warehouse_order_ctrl.validate_lines(data.get("lines"))
+    except ValueError as e:
+        return _err("BAD_REQUEST", str(e), 400)
+    try:
+        files = warehouse_order_ctrl.write_order_files(lines, notes=notes)
+    except Exception:
+        logging.exception("Warehouse order file write failed")
+        return _err("WRITE_FAILED", "Could not write the order files on the PC", 500)
+    return jsonify({
+        "ok": True,
+        "line_count": len(lines),
+        "total_units": sum(l["qty"] for l in lines),
+        "csv": os.path.basename(files["csv"]),
+        "pdf": os.path.basename(files["pdf"]),
+    }), 201
 
 
 if __name__ == "__main__":

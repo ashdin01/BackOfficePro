@@ -323,6 +323,33 @@ def migrate_v78(conn):
     conn.commit()
 
 
+_WAREHOUSE_ORDER_SEED_BARCODES = (
+    "9338957010010", "9338957010195", "9338957010034", "9318253000380",
+    "93001106", "9318253000219", "9318253000953", "9318253000847",
+    "9318253000748", "9318253000786",
+)
+
+
+def migrate_v79(conn):
+    """Add warehouse_order_include flag to products for the mobile Warehouse Order app.
+
+    Products with warehouse_order_include = 1 appear on the phone's Warehouse
+    Order list (warehouse -> shop transfer; no PO is created). The initial set
+    of barcodes is pre-flagged; any others can be ticked in Product Detail.
+    """
+    _add_column(conn, """
+        ALTER TABLE products ADD COLUMN warehouse_order_include
+            INTEGER NOT NULL DEFAULT 0 CHECK (warehouse_order_include IN (0,1))
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_products_warehouse_order ON products(warehouse_order_include)")
+    marks = ",".join("?" * len(_WAREHOUSE_ORDER_SEED_BARCODES))
+    conn.execute(
+        f"UPDATE products SET warehouse_order_include = 1 WHERE barcode IN ({marks})",
+        _WAREHOUSE_ORDER_SEED_BARCODES,
+    )
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
@@ -791,4 +818,5 @@ _MIGRATIONS: dict[int, tuple] = {
     76: (migrate_v76, "received_units on po_lines (exact units received; backfilled from stock movements)"),
     77: (migrate_v77, "track_use_by on product_groups, counted_use_by on po_lines for mobile use-by capture"),
     78: (migrate_v78, "resolved_at/outcome/qty_remaining on product_batches for waste & order-quantity analysis"),
+    79: (migrate_v79, "warehouse_order_include flag on products for the mobile Warehouse Order app"),
 }

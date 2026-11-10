@@ -289,8 +289,24 @@ Use Stock Adjust to manually correct individual product stock levels outside of 
 | OD | Out of Date |
 | IE | Invoice Error |
 | SE | Stocktake Error |
+| DG | Damaged Goods |
+| CI | Consumed Instore (Staff feeding/meals) |
+| SA | Stock Adjust Error |
+| MV | Manufacturing variances |
 
 5. Confirm the adjustment. The change is recorded in the movement history.
+
+---
+
+## Warehouse Order (mobile)
+
+A warehouse-to-shop transfer order prepared on the phone. It is **not** a purchase order and nothing is stored in BackOfficePro.
+
+1. In **Product Detail**, set **Warehouse Order** to *Yes* for each product that can be transferred.
+2. On the phone, open **Warehouse Order**, tap **Scan**, and scan items. Rescanning an item (e.g. from the second shop location) adds to its quantity; tap a row to correct the total.
+3. Tap **Confirm order & send**. A CSV and a print-friendly PDF (Barcode, Product Description, Order Qty) are saved to the **Downloads** folder of the PC running the API.
+
+To save them somewhere else, set the `warehouse_order_output_dir` setting.
 
 ---
 
