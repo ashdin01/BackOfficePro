@@ -28,7 +28,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         self.setWindowTitle("Product Detail  [Read Only]" if read_only else "Product Detail")
         self.setMinimumWidth(1200)
         self.setMinimumHeight(700)
-        self.resize(1280, 860)
+        self.resize(1400, 900)
         self.barcode = barcode
         self.on_save = on_save
         self._depts = dept_ctrl.get_all()
@@ -143,6 +143,27 @@ class ProductEdit(KeyboardMixin, QWidget):
         row.addStretch()
         return row, lbl
 
+    def _check_row(self, field_label, chk_name, attr):
+        chk = QCheckBox()
+        chk.setChecked(bool(getattr(self, attr)))
+        chk.setEnabled(not self._read_only)
+        chk.toggled.connect(lambda checked, a=attr: setattr(self, a, bool(checked)))
+        setattr(self, chk_name, chk)
+        return self._info_row(field_label, chk)
+
+    def _style_active_chk(self):
+        if self._active:
+            self.chk_active.setText("Active")
+            clr = styles.CLR_SUCCESS
+        else:
+            self.chk_active.setText("Inactive")
+            clr = styles.CLR_DANGER
+        self.chk_active.setStyleSheet(f"QCheckBox {{ color: {clr}; font-weight: bold; }}")
+
+    def _on_active_toggled(self, checked):
+        self._active = bool(checked)
+        self._style_active_chk()
+
     def _info_row(self, field_label, widget):
         row = QHBoxLayout()
         stub = QPushButton()
@@ -246,22 +267,12 @@ class ProductEdit(KeyboardMixin, QWidget):
         r, self.lbl_reorder_max = self._ro_row("Reorder Max", int(self._reorder_max), self._edit_reorder_max)
         right_col.addLayout(r)
 
-        right_col.addStretch()
-        return right_col
-
-    def _build_status_column(self):
-        third_col = QVBoxLayout()
-        third_col.setSpacing(5)
-
-        r, self.lbl_active = self._ro_row("Active", "Yes" if self._active else "No", self._edit_active)
-        third_col.addLayout(r)
-
         soh = product_controller.get_soh_by_barcode(self.barcode)
         soh_qty = int(soh["quantity"]) if soh else 0
         soh_color = styles.CLR_SUCCESS_ALT if soh_qty > 0 else styles.CLR_ORANGE if soh_qty == 0 else styles.CLR_DANGER_ALT
         self.lbl_soh = QLabel(f'<span style="color:{soh_color};font-weight:bold;">{soh_qty}</span>')
         self.lbl_soh.setTextFormat(Qt.TextFormat.RichText)
-        third_col.addLayout(self._info_row("Stock on Hand", self.lbl_soh))
+        right_col.addLayout(self._info_row("Stock on Hand", self.lbl_soh))
 
         on_order = product_controller.get_stock_on_order(self.barcode)
         on_order_color = styles.CLR_BLUE if on_order > 0 else styles.CLR_MUTED
@@ -279,7 +290,7 @@ class ProductEdit(KeyboardMixin, QWidget):
         oo_row.addWidget(oo_key)
         oo_row.addWidget(self.lbl_on_order)
         oo_row.addStretch()
-        third_col.addLayout(oo_row)
+        right_col.addLayout(oo_row)
 
         if self._variable_wt:
             vol = product_controller.get_volume_sold(self.barcode)
@@ -294,25 +305,33 @@ class ProductEdit(KeyboardMixin, QWidget):
                 )
             else:
                 self.lbl_vol_sold.setToolTip("No PLU mapping — weight sold cannot be calculated")
-            third_col.addLayout(self._info_row("Volume Sold (This Month)", self.lbl_vol_sold))
+            right_col.addLayout(self._info_row("Volume Sold (This Month)", self.lbl_vol_sold))
 
-        r, self.lbl_vw = self._ro_row("Variable Weight", "Yes" if self._variable_wt else "No", self._edit_variable_wt)
-        third_col.addLayout(r)
+        right_col.addStretch()
+        return right_col
 
-        r, self.lbl_stocktake = self._ro_row("In Stocktake", "Yes" if self._in_stocktake else "No", self._edit_stocktake)
-        third_col.addLayout(r)
+    def _build_status_column(self):
+        third_col = QVBoxLayout()
+        third_col.setSpacing(5)
 
-        r, self.lbl_auto_reorder = self._ro_row("On Reorder", "Yes" if self._auto_reorder else "No", self._edit_auto_reorder)
-        third_col.addLayout(r)
+        self.chk_active = QCheckBox()
+        self.chk_active.setChecked(self._active)
+        self.chk_active.setEnabled(not self._read_only)
+        self.chk_active.toggled.connect(self._on_active_toggled)
+        self._style_active_chk()
+        third_col.addLayout(self._info_row("Status", self.chk_active))
 
-        r, self.lbl_online = self._ro_row("Online Shop", "Yes" if self._online_available else "No", self._edit_online_available)
-        third_col.addLayout(r)
+        third_col.addLayout(self._check_row("Variable Weight", "chk_vw", "_variable_wt"))
 
-        r, self.lbl_order_prep = self._ro_row("Order Prep App", "Yes" if self._order_prep_include else "No", self._edit_order_prep_include)
-        third_col.addLayout(r)
+        third_col.addLayout(self._check_row("In Stocktake", "chk_stocktake", "_in_stocktake"))
 
-        r, self.lbl_warehouse_order = self._ro_row("Warehouse Order", "Yes" if self._warehouse_order_include else "No", self._edit_warehouse_order_include)
-        third_col.addLayout(r)
+        third_col.addLayout(self._check_row("On Reorder", "chk_auto_reorder", "_auto_reorder"))
+
+        third_col.addLayout(self._check_row("Online Shop", "chk_online", "_online_available"))
+
+        third_col.addLayout(self._check_row("Order Prep App", "chk_order_prep", "_order_prep_include"))
+
+        third_col.addLayout(self._check_row("Warehouse Order", "chk_warehouse_order", "_warehouse_order_include"))
 
         third_col.addStretch()
         return third_col
@@ -584,71 +603,6 @@ class ProductEdit(KeyboardMixin, QWidget):
         if val is not None:
             self._reorder_max = val
             self.lbl_reorder_max.setText(str(int(val)))
-
-    def _edit_variable_wt(self):
-        val = choice_popup("Variable Weight", "Variable weight item?", ["No", "Yes"],
-                            "Yes" if self._variable_wt else "No", self)
-        if val is not None:
-            self._variable_wt = (val == "Yes")
-            self.lbl_vw.setText(val)
-
-    def _edit_stocktake(self):
-        val = choice_popup("Include in Stocktake", "Include in stocktake?", ["Yes", "No"],
-                            "Yes" if self._in_stocktake else "No", self)
-        if val is not None:
-            self._in_stocktake = (val == "Yes")
-            self.lbl_stocktake.setText(val)
-
-    def _edit_active(self):
-        val = choice_popup("Active Status", "Active?", ["Yes", "No"],
-                            "Yes" if self._active else "No", self)
-        if val is not None:
-            self._active = (val == "Yes")
-            self.lbl_active.setText(val)
-
-    def _edit_auto_reorder(self):
-        val = choice_popup("On Reorder", "Always include on next PO for this supplier?",
-                            ["No", "Yes"],
-                            "Yes" if self._auto_reorder else "No", self)
-        if val is not None:
-            self._auto_reorder = (val == "Yes")
-            self.lbl_auto_reorder.setText(val)
-
-    def _edit_online_available(self):
-        val = choice_popup(
-            "Online Shop",
-            "Show this product on shop.littleredapple.com.au?",
-            ["No", "Yes"],
-            "Yes" if self._online_available else "No",
-            self,
-        )
-        if val is not None:
-            self._online_available = (val == "Yes")
-            self.lbl_online.setText(val)
-
-    def _edit_order_prep_include(self):
-        val = choice_popup(
-            "Order Prep App",
-            "Show this product on the mobile Order Prep list for its supplier?",
-            ["No", "Yes"],
-            "Yes" if self._order_prep_include else "No",
-            self,
-        )
-        if val is not None:
-            self._order_prep_include = (val == "Yes")
-            self.lbl_order_prep.setText(val)
-
-    def _edit_warehouse_order_include(self):
-        val = choice_popup(
-            "Warehouse Order",
-            "Include this product on the mobile Warehouse Order list (warehouse to shop transfer)?",
-            ["No", "Yes"],
-            "Yes" if self._warehouse_order_include else "No",
-            self,
-        )
-        if val is not None:
-            self._warehouse_order_include = (val == "Yes")
-            self.lbl_warehouse_order.setText(val)
 
     # ── Helpers ───────────────────────────────────────────────────────
 
