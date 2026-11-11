@@ -18,7 +18,7 @@ def get_items() -> list:
     """Active products flagged warehouse_order_include, with shop SOH."""
     with db_conn() as conn:
         rows = conn.execute("""
-            SELECT p.barcode, p.description, p.unit,
+            SELECT p.barcode, p.description, p.unit, p.pack_qty, p.pack_unit,
                    COALESCE(soh.quantity, 0) AS on_hand
             FROM products p
             LEFT JOIN stock_on_hand soh ON p.barcode = soh.barcode
@@ -53,7 +53,8 @@ def validate_lines(lines) -> list:
         if barcode not in allowed:
             raise ValueError(f"{barcode} is not on the Warehouse Order list")
         merged[barcode] = merged.get(barcode, 0.0) + qty
-    return [{"barcode": b, "description": allowed[b]["description"], "qty": q}
+    return [{"barcode": b, "description": allowed[b]["description"], "qty": q,
+             "pack_qty": allowed[b]["pack_qty"], "pack_unit": allowed[b]["pack_unit"]}
             for b, q in merged.items()]
 
 
@@ -79,5 +80,11 @@ def write_order_files(lines: list, notes: str = "", now=None, out_dir: str = Non
             q = ln["qty"]
             w.writerow([ln["barcode"], ln["description"], int(q) if q == int(q) else q])
     store = settings_ctrl.get_setting("store_name", '')
-    build_warehouse_order_pdf(pdf_path, lines, now, store_name=store, notes=notes)
+    details = []
+    for key, fmt in (("store_address", "{}"), ("store_phone", "Ph: {}"), ("store_abn", "ABN: {}")):
+        val = settings_ctrl.get_setting(key, '')
+        if val:
+            details.append(fmt.format(val))
+    build_warehouse_order_pdf(pdf_path, lines, now, store_name=store, notes=notes,
+                              store_details=" | ".join(details))
     return {"csv": csv_path, "pdf": pdf_path}
