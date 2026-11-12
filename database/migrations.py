@@ -350,6 +350,21 @@ def migrate_v79(conn):
     conn.commit()
 
 
+def migrate_v80(conn):
+    """Add tare_g to products: the tare (container/packaging) weight in GRAMS.
+
+    Stored only for now (edited on Product Detail); nothing consumes it yet.
+    Long-term it is the tare the back-room weigh-and-label scale subtracts
+    from gross weight before printing a weight barcode, and the same value
+    RetailPOSPro's POS scale should apply. 0 = no tare.
+    """
+    _add_column(conn, """
+        ALTER TABLE products ADD COLUMN tare_g
+            INTEGER NOT NULL DEFAULT 0 CHECK (tare_g >= 0)
+    """)
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
@@ -819,4 +834,5 @@ _MIGRATIONS: dict[int, tuple] = {
     77: (migrate_v77, "track_use_by on product_groups, counted_use_by on po_lines for mobile use-by capture"),
     78: (migrate_v78, "resolved_at/outcome/qty_remaining on product_batches for waste & order-quantity analysis"),
     79: (migrate_v79, "warehouse_order_include flag on products for the mobile Warehouse Order app"),
+    80: (migrate_v80, "tare_g (grams) on products: container/packaging weight for future scale + label printing"),
 }

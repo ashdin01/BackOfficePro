@@ -699,3 +699,33 @@ class TestPrintEdikioLabel:
         assert len(opened) == 1
         assert os.path.exists(opened[0])
         os.remove(opened[0])
+
+
+# ── Tare (g) ─────────────────────────────────────────────────────────────────
+
+class TestTare:
+    def test_sits_directly_below_variable_weight(self, product_edit_view):
+        from PyQt6.QtWidgets import QLabel
+        texts = [lbl.text() for lbl in product_edit_view.findChildren(QLabel)]
+        assert texts.index("Tare (g)") == texts.index("Variable Weight") + 1 or \
+            texts.index("Variable Weight") < texts.index("Tare (g)") < texts.index("In Stocktake")
+
+    def test_inactive_when_variable_weight_unchecked(self, product_edit_view):
+        v = product_edit_view
+        assert not v.chk_vw.isChecked()
+        assert not v._btn_tare.isEnabled()
+        assert not v.lbl_tare.isEnabled()
+
+    def test_active_when_variable_weight_checked_and_follows_toggle(self, product_edit_view):
+        v = product_edit_view
+        v.chk_vw.setChecked(True)
+        assert v._btn_tare.isEnabled() and v.lbl_tare.isEnabled()
+        v.chk_vw.setChecked(False)
+        assert not v._btn_tare.isEnabled()
+
+    def test_value_kept_when_variable_weight_unchecked(self, product_edit_view):
+        v = product_edit_view
+        v.chk_vw.setChecked(True)
+        v._tare_g = 125
+        v.chk_vw.setChecked(False)
+        assert v._tare_g == 125

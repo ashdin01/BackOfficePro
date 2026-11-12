@@ -65,7 +65,7 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
                  tax_rate, reorder_point, reorder_max, variable_weight, expected,
                  active, auto_reorder, product_suppliers, online_available=0,
                  online_notes='', order_prep_include=0, carton_sku='',
-                 warehouse_order_include=0) -> None:
+                 warehouse_order_include=0, tare_g=0) -> None:
     """
     Save product fields and supplier associations.
     Raises ValueError on validation failure.
@@ -79,6 +79,8 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
     percentage(tax_rate,          "Tax rate")
     positive_number(reorder_point, "Reorder point")
     positive_number(reorder_max,   "Reorder max")
+    if int(tare_g) < 0:
+        raise ValueError("Tare (g) cannot be negative.")
 
     product_model.update(
         barcode=barcode,
@@ -106,6 +108,7 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
         order_prep_include=order_prep_include,
         carton_sku=carton_sku,
         warehouse_order_include=warehouse_order_include,
+        tare_g=int(tare_g),
     )
     ps_model.save_for_barcode(barcode, product_suppliers)
 

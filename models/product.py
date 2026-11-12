@@ -147,7 +147,7 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
            sell_price, cost_price, tax_rate, reorder_point, reorder_max=0,
            variable_weight=0, expected=1, active=1, auto_reorder=0, online_available=0,
            online_notes='', order_prep_include=0, carton_sku='',
-           warehouse_order_include=0):
+           warehouse_order_include=0, tare_g=0):
     from models.audit_log import record_changes
     from database.audit_context import get_user
     with db_conn() as conn:
@@ -159,7 +159,7 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
                 sell_price=?, cost_price=?, tax_rate=?, reorder_point=?,
                 reorder_max=?, variable_weight=?, expected=?, active=?, auto_reorder=?,
                 online_available=?, online_notes=?, order_prep_include=?, carton_sku=?,
-                warehouse_order_include=?,
+                warehouse_order_include=?, tare_g=?,
                 updated_at=CURRENT_TIMESTAMP
             WHERE barcode=?
         """, (description, brand, plu, supplier_sku, pack_qty, pack_unit,
@@ -167,7 +167,7 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
               cost_price, tax_rate, reorder_point, reorder_max,
               variable_weight, expected, active, auto_reorder, online_available,
               online_notes or None, order_prep_include, carton_sku,
-              warehouse_order_include, barcode))
+              warehouse_order_include, tare_g, barcode))
         new = dict(description=description, brand=brand, plu=plu, supplier_sku=supplier_sku,
                    pack_qty=pack_qty, pack_unit=pack_unit, group_id=group_id,
                    department_id=department_id, supplier_id=supplier_id, unit=unit,
@@ -176,7 +176,8 @@ def update(barcode, description, brand, plu, supplier_sku, pack_qty, pack_unit,
                    variable_weight=variable_weight, expected=expected,
                    active=active, auto_reorder=auto_reorder, online_available=online_available,
                    online_notes=online_notes, order_prep_include=order_prep_include,
-                   carton_sku=carton_sku, warehouse_order_include=warehouse_order_include)
+                   carton_sku=carton_sku, warehouse_order_include=warehouse_order_include,
+                   tare_g=tare_g)
         record_changes(conn, 'product', barcode, dict(old) if old else {}, new, get_user())
         conn.commit()
 

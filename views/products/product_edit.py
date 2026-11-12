@@ -64,6 +64,8 @@ class ProductEdit(KeyboardMixin, QWidget):
         p = self.product
         self._description   = p['description']
         self._carton_sku    = p['carton_sku'] or '' if 'carton_sku' in p.keys() else ''
+        # Tare weight in GRAMS (container/packaging). Stored only; future scale/label use.
+        self._tare_g        = int(p['tare_g'] or 0) if 'tare_g' in p.keys() else 0
         self._brand         = p['brand'] or ''
         self._plu           = p['plu'] or '' if 'plu' in p.keys() else ''
         self._supplier_sku  = p['supplier_sku'] or ''
@@ -323,6 +325,14 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         third_col.addLayout(self._check_row("Variable Weight", "chk_vw", "_variable_wt"))
 
+        # Tare (grams) sits under Variable Weight and is only editable when
+        # Variable Weight is ticked. The stored value is kept if it is unticked.
+        r, self.lbl_tare = self._ro_row("Tare (g)", self._tare_text(), self._edit_tare)
+        self._btn_tare = r.itemAt(0).widget()
+        third_col.addLayout(r)
+        self.chk_vw.toggled.connect(lambda _checked: self._sync_tare_enabled())
+        self._sync_tare_enabled()
+
         third_col.addLayout(self._check_row("In Stocktake", "chk_stocktake", "_in_stocktake"))
 
         third_col.addLayout(self._check_row("On Reorder", "chk_auto_reorder", "_auto_reorder"))
@@ -501,6 +511,26 @@ class ProductEdit(KeyboardMixin, QWidget):
         if val is not None:
             self._plu = val
             self.lbl_plu.setText(val or "—")
+
+    def _sync_tare_enabled(self):
+        """Tare (g) is active only while Variable Weight is ticked."""
+        on = bool(self._variable_wt) and not self._read_only
+        self._btn_tare.setEnabled(on)
+        self.lbl_tare.setEnabled(bool(self._variable_wt))
+        self.lbl_tare.setToolTip(
+            "Tare weight in grams (g): the weight of the container/packaging.\n"
+            "Stored for the future weigh-and-label scale and POS scale; "
+            "not used by anything yet."
+            + ("" if self._variable_wt else "\nTick Variable Weight to edit."))
+
+    def _tare_text(self):
+        return f"{self._tare_g} g" if self._tare_g else "— (none)"
+
+    def _edit_tare(self):
+        val = number_popup("Edit Tare", "Tare weight (grams, g)", self._tare_g, self)
+        if val is not None:
+            self._tare_g = int(val)
+            self.lbl_tare.setText(self._tare_text())
 
     def _edit_carton_sku(self):
         val = text_popup_optional("Edit Carton SKU", "Carton SKU", self._carton_sku, self)
@@ -848,6 +878,7 @@ class ProductEdit(KeyboardMixin, QWidget):
                 warehouse_order_include=int(self._warehouse_order_include),
                 product_suppliers=self._product_suppliers,
                 carton_sku=self._carton_sku,
+                tare_g=self._tare_g,
             )
             if self.on_save:
                 self.on_save()

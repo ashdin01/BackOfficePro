@@ -481,6 +481,23 @@ class TestProductControllerWrappers:
         row = product_ctrl.get_product_by_barcode(product_barcode)
         assert row['sell_price'] == pytest.approx(9.99)
 
+    def test_save_product_tare_g_round_trips_and_defaults_to_zero(
+        self, test_db, product_barcode, dept_id, supplier_id
+    ):
+        assert product_ctrl.get_product_by_barcode(product_barcode)['tare_g'] == 0
+        kwargs = dict(
+            barcode=product_barcode, description='Test Product', brand='', plu='',
+            supplier_sku='', pack_qty=1, pack_unit='EA', group_id=None,
+            department_id=dept_id, supplier_id=supplier_id, unit='EA',
+            sell_price=9.99, cost_price=5.00, tax_rate=10.0,
+            reorder_point=0, reorder_max=0, variable_weight=0, expected=1,
+            active=1, auto_reorder=0, product_suppliers=[],
+        )
+        product_ctrl.save_product(**kwargs, tare_g=125)
+        assert product_ctrl.get_product_by_barcode(product_barcode)['tare_g'] == 125
+        with pytest.raises(ValueError, match="Tare"):
+            product_ctrl.save_product(**kwargs, tare_g=-1)
+
     def test_save_product_blank_description_raises(self, test_db, product_barcode, dept_id, supplier_id):
         with pytest.raises(ValueError, match="Description is required"):
             product_ctrl.save_product(

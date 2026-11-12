@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS products (
     order_prep_include INTEGER NOT NULL DEFAULT 0 CHECK (order_prep_include IN (0,1)),
     carton_sku      TEXT    DEFAULT '',
     warehouse_order_include INTEGER NOT NULL DEFAULT 0 CHECK (warehouse_order_include IN (0,1)),
+    tare_g          INTEGER NOT NULL DEFAULT 0 CHECK (tare_g >= 0),
     FOREIGN KEY (department_id) REFERENCES departments(id)    ON DELETE RESTRICT,
     FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)      ON DELETE SET NULL,
     FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL

@@ -62,3 +62,6 @@ Thumbs.db
 import_products.py
 LittleRedApple_Merged.csv
 views/purchase_orders/po_receive.py.backup
+
+# Shop price-push credentials (contains a secret token) - never commit
+data/shop_sync.json*

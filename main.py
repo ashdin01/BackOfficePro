@@ -506,6 +506,11 @@ def main():
 
     api_thread = _start_api_server()
 
+    # Push Harcourt Cider price/catalogue edits to the web shop as they happen
+    # (no-op unless DATA_DIR/shop_sync.json exists - see utils/shop_sync.py).
+    from utils import shop_sync
+    shop_sync.start_if_configured()
+
     def _stop_api():
         import subprocess
         proc = api_thread.proc_ref[0]
