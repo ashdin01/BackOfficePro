@@ -1042,6 +1042,7 @@ def get_warehouse_order_items():
         'description': i['description'],
         'unit':        i['unit'],
         'on_hand':     i['on_hand'],
+        'carton_sku':  i.get('carton_sku') or '',
     } for i in warehouse_order_ctrl.get_items()])
 
 

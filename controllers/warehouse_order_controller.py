@@ -18,7 +18,7 @@ def get_items() -> list:
     """Active products flagged warehouse_order_include, with shop SOH."""
     with db_conn() as conn:
         rows = conn.execute("""
-            SELECT p.barcode, p.description, p.unit, p.pack_qty, p.pack_unit,
+            SELECT p.barcode, p.description, p.unit, p.carton_sku,
                    COALESCE(soh.quantity, 0) AS on_hand
             FROM products p
             LEFT JOIN stock_on_hand soh ON p.barcode = soh.barcode
@@ -53,8 +53,7 @@ def validate_lines(lines) -> list:
         if barcode not in allowed:
             raise ValueError(f"{barcode} is not on the Warehouse Order list")
         merged[barcode] = merged.get(barcode, 0.0) + qty
-    return [{"barcode": b, "description": allowed[b]["description"], "qty": q,
-             "pack_qty": allowed[b]["pack_qty"], "pack_unit": allowed[b]["pack_unit"]}
+    return [{"barcode": b, "description": allowed[b]["description"], "qty": q}
             for b, q in merged.items()]
 
 

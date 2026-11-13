@@ -25,25 +25,6 @@ def _fmt_qty(q) -> str:
     return str(int(q)) if float(q) == int(q) else f"{q:g}"
 
 
-def _pack(ln):
-    """(pack_qty, pack_unit) for a line, defaulting to a single each."""
-    try:
-        pq = int(ln.get("pack_qty") or 1)
-    except (TypeError, ValueError):
-        pq = 1
-    return max(pq, 1), (ln.get("pack_unit") or "EA")
-
-
-def _cartons_str(qty, pack_qty, pack_unit) -> str:
-    """PO convention: 'N cartons' when the product has a pack size, else 'N each'."""
-    if pack_qty > 1:
-        n = float(qty) / pack_qty
-        n_txt = str(int(n)) if n == int(n) else f"{n:.2f}".rstrip("0").rstrip(".")
-        return f"{n_txt} carton" + ("" if n == 1 else "s")
-    word = "each" if pack_unit.upper() == "EA" else pack_unit.lower()
-    return f"{_fmt_qty(qty)} {word}"
-
-
 def order_ref(created_at) -> str:
     return f"WO-{created_at:%Y%m%d-%H%M}"
 
@@ -125,29 +106,25 @@ def build_warehouse_order_pdf(path: str, lines: list, created_at, store_name: st
         story.append(Paragraph(store_details, st["small"]))
     story.append(HRFlowable(width="100%", thickness=1.5, color=C_BLACK, spaceAfter=5))
 
-    total_units = sum(float(ln["qty"]) for ln in lines)
+    total_qty = sum(float(ln["qty"]) for ln in lines)
     if notes:
         story.append(Paragraph(f"<b>Notes:</b> {notes}", st["body"]))
         story.append(Spacer(1, 4))
 
-    # Lines table (same Pack / Order / Total Units convention as the PO PDFs).
+    # Lines table: quantity is cartons (the phone scans carton SKUs only).
     # "Picked" is left blank to tick off while picking.
-    col_widths = [W * 0.04, W * 0.13, W * 0.43, W * 0.08, W * 0.10, W * 0.10, W * 0.12]
+    col_widths = [W * 0.04, W * 0.16, W * 0.54, W * 0.13, W * 0.13]
     data = [[Paragraph("#", st["hdr"]), Paragraph("Barcode", st["hdr"]),
-             Paragraph("Description", st["hdr"]), Paragraph("Pack", st["hdr"]),
-             Paragraph("Order<br/>(cartons)", st["hdr_ctr"]),
-             Paragraph("Order<br/>(units)", st["hdr_ctr"]),
+             Paragraph("Description", st["hdr"]),
+             Paragraph("Order Qty", st["hdr_ctr"]),
              Paragraph("Picked", st["hdr_ctr"])]]
     for i, ln in enumerate(lines, 1):
-        pq, pu = _pack(ln)
-        pack_str = f"{pq} x {pu}" if pq > 1 else pu
         data.append([Paragraph(str(i), st["big"]), Paragraph(str(ln["barcode"]), st["big"]),
-                     Paragraph(ln["description"], st["big"]), Paragraph(pack_str, st["big"]),
-                     Paragraph(_cartons_str(ln["qty"], pq, pu), st["big_ctr_n"]),
+                     Paragraph(ln["description"], st["big"]),
                      Paragraph(_fmt_qty(ln["qty"]), st["big_ctr"]), ""])
     row_heights = [None] * len(data)
     for j in range(spare_lines):
-        data.append([Paragraph(str(len(lines) + j + 1), st["big"]), "", "", "", "", "", ""])
+        data.append([Paragraph(str(len(lines) + j + 1), st["big"]), "", "", "", ""])
         row_heights.append(19)
     tbl = Table(data, colWidths=col_widths, rowHeights=row_heights, repeatRows=1)
     tbl.setStyle(TableStyle([
@@ -161,12 +138,9 @@ def build_warehouse_order_pdf(path: str, lines: list, created_at, store_name: st
     ]))
     story += [tbl, Spacer(1, 3)]
 
-    # Cartons only count for lines that have a pack size (PO convention).
-    total_ctn = sum(float(ln["qty"]) / _pack(ln)[0] for ln in lines if _pack(ln)[0] > 1)
-    ctn_txt = str(int(total_ctn)) if total_ctn == int(total_ctn) else f"{total_ctn:.2f}".rstrip("0").rstrip(".")
     totals = Table([[Paragraph("ORDER QTY:", st["tot_label"]),
-                     Paragraph(f"{ctn_txt} ctn / {_fmt_qty(total_units)} units", st["tot_value"])]],
-                   colWidths=[W * 0.76, W * 0.24])
+                     Paragraph(_fmt_qty(total_qty), st["tot_value"])]],
+                   colWidths=[W * 0.74, W * 0.26])
     totals.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LINEABOVE", (0, 0), (-1, 0), 1, C_BLACK), ("LINEBELOW", (0, 0), (-1, 0), 0.75, C_BLACK),
