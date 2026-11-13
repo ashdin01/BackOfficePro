@@ -174,6 +174,17 @@ class TestMissingDates:
 # ── sync_missing_days ─────────────────────────────────────────────────────────
 
 class TestSyncMissingDays:
+    def test_skipped_for_non_atria_store(self, test_db, monkeypatch):
+        """Harcourt Cider has no ATRIA: no login, no import, nothing logged."""
+        import database.connection as dbc
+        monkeypatch.setattr(dbc, "DATABASE_PATH", "/x/data/harcourt_cider.db")
+        fake_login = MagicMock()
+        monkeypatch.setattr(atria, "login", fake_login)
+        monkeypatch.setattr(atria, "get_atria_credentials", MagicMock(return_value=("u", "p")))
+        result = atria.sync_missing_days(days=7)
+        assert result["imported"] == [] and "not the ATRIA store" in result["skipped_reason"]
+        fake_login.assert_not_called()
+
     def test_no_missing_days_skips_network_entirely(self, test_db, monkeypatch):
         today = datetime.date.today()
         for i in range(1, 8):

@@ -334,6 +334,15 @@ def _fetch_and_import_one_day(session: requests.Session, target_date: datetime.d
     return upserted, unmatched
 
 
+def _active_store_is_atria_store() -> bool:
+    """False when the active database is any configured store other than the
+    first one (Little Red Apple, the only store that uses ATRIA)."""
+    import database.connection as _dbc
+    from config.settings import STORES
+    active = os.path.basename(_dbc.DATABASE_PATH).lower()
+    return active not in {st["db"].lower() for st in STORES[1:]}
+
+
 def sync_missing_days(days: int = 7) -> dict:
     """Catch up any of the last `days` calendar days not yet recorded in
     atria_import_log, downloading and importing each one.
@@ -348,9 +357,15 @@ def sync_missing_days(days: int = 7) -> dict:
     day imported in this run, so a caller can decide whether to flag it.
     """
     setup_logging()
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     result = {"imported": [], "failed": [], "skipped_reason": None, "unmatched_total": 0}
 
+    # ATRIA is the Little Red Apple POS only: never import into another store's DB.
+    if not _active_store_is_atria_store():
+        result["skipped_reason"] = "active store is not the ATRIA store"
+        logging.info("Atria sync skipped: active store is not the ATRIA store")
+        return result
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     missing = _missing_dates(days)
     if not missing:
         logging.info("Atria sync: last %d days already accounted for", days)
