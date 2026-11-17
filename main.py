@@ -180,6 +180,22 @@ def _start_api_server():
     _MAX_RESTARTS = 5
     _BACKOFF_BASE = 5   # seconds; doubles each attempt, capped at 60
 
+    # A standalone API (started at Windows login by scripts/install_api_autostart.bat,
+    # so the phone works while this app is closed) may already own port 5050.
+    # Reuse it rather than racing it for the port.  It always serves the main
+    # store's database, same as the child this function would have started.
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", 5050), timeout=1):
+            logging.info("API already listening on port 5050 (standalone) - "
+                         "not starting a second one")
+            t = threading.Thread(target=lambda: None, daemon=True, name="api-external")
+            t.proc_ref = [None]
+            t.start()
+            return t
+    except OSError:
+        pass
+
     if getattr(sys, 'frozen', False):
         # Single frozen executable — re-invoke with a mode flag
         cmd = [sys.executable, '--api-server-mode']

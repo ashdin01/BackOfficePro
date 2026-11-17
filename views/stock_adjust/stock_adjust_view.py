@@ -425,7 +425,7 @@ class StockAdjustView(QWidget):
         self._selected_description = None
         self._thread = None
         self._worker = None
-        self._timer = QTimer()
+        self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._do_search)
 
