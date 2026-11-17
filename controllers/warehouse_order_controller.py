@@ -19,11 +19,13 @@ def get_items() -> list:
     with db_conn() as conn:
         rows = conn.execute("""
             SELECT p.barcode, p.description, p.unit, p.carton_sku,
-                   COALESCE(soh.quantity, 0) AS on_hand
+                   COALESCE(soh.quantity, 0) AS on_hand,
+                   g.name AS group_name
             FROM products p
             LEFT JOIN stock_on_hand soh ON p.barcode = soh.barcode
+            LEFT JOIN product_groups g ON p.group_id = g.id
             WHERE p.active = 1 AND p.warehouse_order_include = 1
-            ORDER BY p.description
+            ORDER BY (g.name IS NULL), g.name COLLATE NOCASE, p.description COLLATE NOCASE
         """).fetchall()
         return [dict(r) for r in rows]
 
@@ -53,8 +55,12 @@ def validate_lines(lines) -> list:
         if barcode not in allowed:
             raise ValueError(f"{barcode} is not on the Warehouse Order list")
         merged[barcode] = merged.get(barcode, 0.0) + qty
-    return [{"barcode": b, "description": allowed[b]["description"], "qty": q}
-            for b, q in merged.items()]
+    out = [{"barcode": b, "description": allowed[b]["description"], "qty": q,
+            "group": allowed[b].get("group_name") or ""}
+           for b, q in merged.items()]
+    # By group (A-Z); items with no group go at the bottom.
+    out.sort(key=lambda l: (not l["group"], l["group"].lower(), l["description"].lower()))
+    return out
 
 
 def write_order_files(lines: list, notes: str = "", now=None, out_dir: str = None) -> dict:
@@ -74,16 +80,17 @@ def write_order_files(lines: list, notes: str = "", now=None, out_dir: str = Non
 
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["Barcode", "Product Description", "Order Qty"])
+        w.writerow(["Barcode", "Product Description", "Order Qty", "Group"])
         for ln in lines:
             q = ln["qty"]
-            w.writerow([ln["barcode"], ln["description"], int(q) if q == int(q) else q])
+            w.writerow([ln["barcode"], ln["description"], int(q) if q == int(q) else q,
+                        ln.get("group") or "Ungrouped"])
     store = settings_ctrl.get_setting("store_name", '')
     details = []
     for key, fmt in (("store_address", "{}"), ("store_phone", "Ph: {}"), ("store_abn", "ABN: {}")):
         val = settings_ctrl.get_setting(key, '')
         if val:
             details.append(fmt.format(val))
-    build_warehouse_order_pdf(pdf_path, lines, now, store_name=store, notes=notes,
+    build_warehouse_order_pdf(pdf_path, lines, now, store_name=store,
                               store_details=" | ".join(details))
     return {"csv": csv_path, "pdf": pdf_path}

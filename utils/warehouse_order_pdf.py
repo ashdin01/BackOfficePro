@@ -77,11 +77,11 @@ def _numbered_canvas_cls(ref):
 
 
 def build_warehouse_order_pdf(path: str, lines: list, created_at, store_name: str = "",
-                              notes: str = "", store_details: str = "", spare_lines: int = 2) -> None:
-    """lines: [{barcode, description, qty}] -> landscape A4 PDF at path.
+                              store_details: str = "") -> None:
+    """lines: [{barcode, description, qty}] -> single-page landscape A4 PDF at path.
 
-    spare_lines blank, numbered rows are added after the items (not counted in
-    totals) so items not yet on the Warehouse Order list can be written in by hand.
+    Items are grouped (group header rows); row padding shrinks if needed so the
+    whole order fits on one page.
     """
     st = _styles()
     ref = order_ref(created_at)
@@ -107,10 +107,6 @@ def build_warehouse_order_pdf(path: str, lines: list, created_at, store_name: st
     story.append(HRFlowable(width="100%", thickness=1.5, color=C_BLACK, spaceAfter=5))
 
     total_qty = sum(float(ln["qty"]) for ln in lines)
-    if notes:
-        story.append(Paragraph(f"<b>Notes:</b> {notes}", st["body"]))
-        story.append(Spacer(1, 4))
-
     # Lines table: quantity is cartons (the phone scans carton SKUs only).
     # "Picked" is left blank to tick off while picking.
     col_widths = [W * 0.04, W * 0.16, W * 0.54, W * 0.13, W * 0.13]
@@ -118,24 +114,39 @@ def build_warehouse_order_pdf(path: str, lines: list, created_at, store_name: st
              Paragraph("Description", st["hdr"]),
              Paragraph("Order Qty", st["hdr_ctr"]),
              Paragraph("Picked", st["hdr_ctr"])]]
+    group_rows = []
+    prev_group = None
     for i, ln in enumerate(lines, 1):
+        grp = ln.get("group") or "Ungrouped"
+        if grp != prev_group:
+            group_rows.append(len(data))
+            data.append([Paragraph(grp.upper(), st["hdr"]), "", "", "", ""])
+            prev_group = grp
         data.append([Paragraph(str(i), st["big"]), Paragraph(str(ln["barcode"]), st["big"]),
                      Paragraph(ln["description"], st["big"]),
                      Paragraph(_fmt_qty(ln["qty"]), st["big_ctr"]), ""])
-    row_heights = [None] * len(data)
-    for j in range(spare_lines):
-        data.append([Paragraph(str(len(lines) + j + 1), st["big"]), "", "", "", ""])
-        row_heights.append(19)
-    tbl = Table(data, colWidths=col_widths, rowHeights=row_heights, repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), C_LGREY),
-        ("TOPPADDING", (0, 0), (-1, 0), 4), ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
-        ("TOPPADDING", (0, 1), (-1, -1), 2), ("BOTTOMPADDING", (0, 1), (-1, -1), 2),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.25, C_BORDER),
-        ("BOX", (0, 0), (-1, -1), 0.75, C_BLACK),
-    ]))
+    def _make_table(pad):
+        tbl = Table(data, colWidths=col_widths, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), C_LGREY),
+            *[cmd for r in group_rows for cmd in (
+                ("SPAN", (0, r), (-1, r)),
+                ("BACKGROUND", (0, r), (-1, r), colors.HexColor("#dcdcdc")))],
+            ("TOPPADDING", (0, 0), (-1, 0), 4), ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
+            ("TOPPADDING", (0, 1), (-1, -1), pad), ("BOTTOMPADDING", (0, 1), (-1, -1), pad),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.25, C_BORDER),
+            ("BOX", (0, 0), (-1, -1), 0.75, C_BLACK),
+        ]))
+        return tbl
+
+    # Leave room for header (~40mm) and totals (~12mm); shrink padding to fit one page.
+    avail = landscape(A4)[1] - 10 * mm - 14 * mm - 55 * mm
+    for pad in (2, 1.5, 1, 0.5, 0):
+        tbl = _make_table(pad)
+        if tbl.wrap(W, 10_000)[1] <= avail:
+            break
     story += [tbl, Spacer(1, 3)]
 
     totals = Table([[Paragraph("ORDER QTY:", st["tot_label"]),

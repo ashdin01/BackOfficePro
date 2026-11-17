@@ -47,7 +47,7 @@ def test_submit_writes_csv_and_pdf_merging_rescans(api_client, product_barcode, 
     body = r.get_json()
     assert body["line_count"] == 1 and body["total_units"] == 5
     rows = list(csv.reader(open(out_dir / body["csv"], encoding="utf-8-sig")))
-    assert rows[0] == ["Barcode", "Product Description", "Order Qty"]
+    assert rows[0] == ["Barcode", "Product Description", "Order Qty", "Group"]
     assert rows[1][0] == product_barcode and rows[1][2] == "5"
     assert (out_dir / body["pdf"]).read_bytes().startswith(b"%PDF")
 
