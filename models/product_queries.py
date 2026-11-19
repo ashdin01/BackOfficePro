@@ -142,7 +142,7 @@ def get_milk_products(supplier_id) -> list:
     """
     Products in the DAIRY department / MILK group for a given supplier.
     Returns list of dicts with barcode, description, cost_price, pack_qty,
-    pack_unit, on_hand, supplier_sku.
+    pack_unit, on_hand, supplier_sku, reorder_point.
     """
     with db_conn() as conn:
         rows = conn.execute("""
@@ -151,7 +151,8 @@ def get_milk_products(supplier_id) -> list:
                    COALESCE(p.pack_qty, 1)     AS pack_qty,
                    COALESCE(p.pack_unit, 'EA') AS pack_unit,
                    COALESCE(soh.quantity, 0)   AS on_hand,
-                   p.supplier_sku
+                   p.supplier_sku,
+                   COALESCE(p.reorder_point, 0) AS reorder_point
             FROM products p
             JOIN product_groups  pg  ON p.group_id       = pg.id
             JOIN departments     d   ON pg.department_id = d.id

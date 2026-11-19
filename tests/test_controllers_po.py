@@ -118,7 +118,7 @@ class TestDaysToNextDelivery:
 
 # ── get_milk_order_recommendations ───────────────────────────────────────────
 
-def _setup_dairy_milk(db_conn, dept_id, supplier_id, delivery_days='TUE,FRI'):
+def _setup_dairy_milk(db_conn, dept_id, supplier_id, delivery_days='TUE,FRI', reorder_point=0):
     """Set delivery_days on supplier, add Dairy dept + Milk group + one milk product."""
     db_conn.execute(
         "UPDATE suppliers SET delivery_days=? WHERE id=?",
@@ -142,6 +142,8 @@ def _setup_dairy_milk(db_conn, dept_id, supplier_id, delivery_days='TUE,FRI'):
             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
         VALUES ('9300000011111', 'MILK 2L', ?, ?, ?, 3.50, 2.00, 10.0, 1, 'EA', 1, 'EA')
     """, (dairy_id, group_id, supplier_id))
+    db_conn.execute("UPDATE products SET reorder_point=? WHERE barcode='9300000011111'",
+                    (reorder_point,))
     db_conn.commit()
     return group_id
 
@@ -162,7 +164,7 @@ def test_milk_recs_no_milk_products_returns_empty(test_db, db_conn, dept_id, sup
 
 
 def test_milk_recs_returns_list_with_required_keys(test_db, db_conn, dept_id, supplier_id):
-    _setup_dairy_milk(db_conn, dept_id, supplier_id)
+    _setup_dairy_milk(db_conn, dept_id, supplier_id, reorder_point=5)
     recs = get_milk_order_recommendations(supplier_id)
     assert len(recs) == 1
     r = recs[0]
@@ -171,11 +173,45 @@ def test_milk_recs_returns_list_with_required_keys(test_db, db_conn, dept_id, su
         assert key in r
 
 
-def test_milk_recs_no_sales_data_cartons_minimum_one(test_db, db_conn, dept_id, supplier_id):
+def test_milk_recs_no_sales_no_min_orders_nothing(test_db, db_conn, dept_id, supplier_id):
+    # No forced 1-carton minimum any more: no demand and no min -> no line
     _setup_dairy_milk(db_conn, dept_id, supplier_id)
+    assert get_milk_order_recommendations(supplier_id) == []
+
+
+def test_milk_recs_dead_product_below_min_tops_up_to_min(test_db, db_conn, dept_id, supplier_id):
+    _setup_dairy_milk(db_conn, dept_id, supplier_id, reorder_point=6)
+    db_conn.execute("INSERT INTO stock_on_hand (barcode, quantity) VALUES ('9300000011111', 2)")
+    db_conn.commit()
     recs = get_milk_order_recommendations(supplier_id)
-    assert recs[0]['cartons'] >= 1
+    assert len(recs) == 1
     assert recs[0]['has_sales_data'] is False
+    assert recs[0]['floor_applied'] is True
+    assert recs[0]['cartons'] == 4          # 6 - 2, pack_qty 1
+
+
+def test_milk_recs_dead_product_at_or_above_min_orders_nothing(test_db, db_conn, dept_id, supplier_id):
+    _setup_dairy_milk(db_conn, dept_id, supplier_id, reorder_point=6)
+    db_conn.execute("INSERT INTO stock_on_hand (barcode, quantity) VALUES ('9300000011111', 6)")
+    db_conn.commit()
+    assert get_milk_order_recommendations(supplier_id) == []
+
+
+def test_milk_recs_negative_soh_clamped_to_zero(test_db, db_conn, dept_id, supplier_id):
+    _setup_dairy_milk(db_conn, dept_id, supplier_id, reorder_point=6)
+    db_conn.execute("INSERT INTO stock_on_hand (barcode, quantity) VALUES ('9300000011111', -20)")
+    db_conn.commit()
+    recs = get_milk_order_recommendations(supplier_id)
+    assert recs[0]['on_hand'] == 0.0
+    assert recs[0]['cartons'] == 6          # tops up from 0, not from -20
+
+
+def test_milk_recs_stock_on_order_prevents_second_min_order(test_db, db_conn, dept_id, supplier_id):
+    from controllers.purchase_order_controller import create_po, add_po_line
+    _setup_dairy_milk(db_conn, dept_id, supplier_id, reorder_point=6)
+    po = create_po(supplier_id)
+    add_po_line(po, '9300000011111', 'MILK 2L', ordered_qty=6, unit_cost=2.0)
+    assert get_milk_order_recommendations(supplier_id) == []
 
 
 def test_milk_recs_cartons_based_on_avg_sales(test_db, db_conn, dept_id, supplier_id):
@@ -200,9 +236,9 @@ def test_milk_recs_cartons_based_on_avg_sales(test_db, db_conn, dept_id, supplie
     r = recs[0]
     assert r['avg_daily'] == 7.0
     assert r['has_sales_data'] is True
-    # cover_days = days_ahead + 1 (SAFETY_DAYS), cartons >= 1
+    # daily delivery: gap of 1 day + SAFETY_DAYS (2)
     assert r['cartons'] >= 1
-    assert r['cover_days'] == r['days_to_delivery'] + 1
+    assert r['cover_days'] == 1 + 2
 
 
 def test_milk_recs_projects_stock_forward_over_lead_time(
@@ -241,20 +277,19 @@ def test_milk_recs_projects_stock_forward_over_lead_time(
     r = recs[0]
     assert r['avg_daily'] == 10.0
     assert r['days_to_delivery'] == 3          # Mon -> Thu
-    assert r['cover_days'] == 8                # Thu -> next Thu (7) + 1 safety day
+    assert r['cover_days'] == 9                # Thu -> next Thu (7) + 2 safety days
     assert r['effective_stock'] == 50.0
     # 50 on hand is sold down at 10/day for the 3 days until delivery arrives
     assert r['projected_stock'] == 20.0
-    # needed = avg_daily * cover_days - projected_stock = 10*8 - 20 = 60
-    assert r['cartons'] == 60
+    # needed = avg_daily * cover_days - projected_stock = 10*9 - 20 = 70
+    assert r['cartons'] == 70
 
 
-def test_milk_recs_high_soh_still_returns_minimum_one(test_db, db_conn, dept_id, supplier_id):
-    _setup_dairy_milk(db_conn, dept_id, supplier_id)
+def test_milk_recs_high_soh_orders_nothing(test_db, db_conn, dept_id, supplier_id):
+    _setup_dairy_milk(db_conn, dept_id, supplier_id, reorder_point=6)
     # Set SOH very high so needed_units would be negative
     db_conn.execute("""
         INSERT INTO stock_on_hand (barcode, quantity) VALUES ('9300000011111', 9999)
     """)
     db_conn.commit()
-    recs = get_milk_order_recommendations(supplier_id)
-    assert recs[0]['cartons'] >= 1
+    assert get_milk_order_recommendations(supplier_id) == []

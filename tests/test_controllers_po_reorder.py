@@ -569,8 +569,9 @@ def _setup_dairy_milk_product(db_conn, supplier_id):
     db_conn.execute("""
         INSERT INTO products
             (barcode, description, department_id, supplier_id, group_id,
-             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit)
-        VALUES (?, 'Full Cream Milk 2L', ?, ?, ?, 3.50, 2.00, 10.0, 12, 'CTN', 1, 'EA')
+             sell_price, cost_price, tax_rate, pack_qty, pack_unit, active, unit,
+             reorder_point)
+        VALUES (?, 'Full Cream Milk 2L', ?, ?, ?, 3.50, 2.00, 10.0, 12, 'CTN', 1, 'EA', 60)
     """, (bc, dairy_id, supplier_id, milk_group_id))
     db_conn.execute(
         "INSERT OR REPLACE INTO stock_on_hand (barcode, quantity) VALUES (?, 10)", (bc,)
@@ -661,6 +662,8 @@ class TestMilkForecastPath:
     ):
         # delivery_days is empty by default
         bc = _setup_dairy_milk_product(db_conn, supplier_id)
+        db_conn.execute("UPDATE products SET reorder_point=0 WHERE barcode=?", (bc,))
+        db_conn.commit()
         po_id = create_po(supplier_id)
 
         auto_populate_po_lines(po_id, supplier_id)

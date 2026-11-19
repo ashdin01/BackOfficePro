@@ -8,7 +8,7 @@ import models.product_queries as product_queries_model
 import models.supplier as supplier_model
 import models.stock_movements as stock_movements_model
 
-SAFETY_DAYS  = 1
+SAFETY_DAYS  = 2   # 1.5 days of buffer, rounded up
 SALES_WINDOW = 28
 
 # Write-offs with this reason count as consumption for demand forecasting —
@@ -121,9 +121,18 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
     Algorithm per product:
         avg_daily         = (units sold + CI write-offs, last SALES_WINDOW days) / SALES_WINDOW
         cover_days        = days_between(next_delivery, following_delivery) + SAFETY_DAYS
+        effective_stock   = max(0, SOH) + on_order
         projected_stock   = effective_stock - avg_daily * days_ahead  (sold down before arrival)
-        needed_units      = max(0, avg_daily * cover_days - projected_stock)
-        cartons           = ceil(needed_units / pack_qty), minimum 1
+        forecast_target   = avg_daily * cover_days
+        target            = max(forecast_target, MIN)   (MIN = product reorder_point)
+        needed_units      = max(0, target - projected_stock)
+        cartons           = ceil(needed_units / pack_qty)  (0 = no line)
+
+    The MIN floor stops the order decaying to nothing as avg_daily falls.
+    For the MIN top-up, projected stock is clamped at 0 (stock can't be
+    negative); the forecast path uses the unclamped figure as before.
+    There is no forced 1-carton minimum — use the product's on-reorder flag
+    for that.
     """
     delivery_days = supplier_model.get_delivery_days(supplier_id)
     if not delivery_days:
@@ -169,13 +178,19 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
         ci_qty          = ci_writeoffs.get(p['barcode'], 0.0)
         total_sales     = plu_qty + ci_qty
         avg_daily       = total_sales / SALES_WINDOW
-        on_hand         = float(p['on_hand'])
+        on_hand         = max(0.0, float(p['on_hand']))   # clamp here only, not in the DB
         on_order        = milk_on_order.get(p['barcode'], 0.0)
         effective_stock = on_hand + on_order
         projected_stock = effective_stock - avg_daily * days_ahead
-        needed_units    = max(0.0, avg_daily * cover_days - projected_stock)
+        reorder_min     = float(p.get('reorder_point') or 0)
+        forecast_units  = max(0.0, avg_daily * cover_days - projected_stock)
+        min_units       = max(0.0, reorder_min - max(0.0, projected_stock))
+        needed_units    = max(forecast_units, min_units)
+        floor_applied   = min_units > forecast_units
         pack_qty        = max(1, int(p['pack_qty']))
-        cartons         = max(1, math.ceil(needed_units / pack_qty))
+        cartons         = math.ceil(needed_units / pack_qty - 1e-9)
+        if cartons <= 0:
+            continue
         recs.append({
             'barcode':          p['barcode'],
             'description':      p['description'],
@@ -194,6 +209,8 @@ def get_milk_order_recommendations(supplier_id) -> list[dict]:
             'next_delivery':    next_delivery,
             'following_delivery': following_delivery,
             'has_sales_data':   total_sales > 0,
+            'reorder_min':      reorder_min,
+            'floor_applied':    floor_applied,
         })
     return recs
 
@@ -227,6 +244,10 @@ def auto_populate_po_lines(po_id, supplier_id) -> str:
     # Milk demand forecast
     milk_recs     = get_milk_order_recommendations(supplier_id)
     milk_barcodes = set()
+    if supplier_model.get_delivery_days(supplier_id):
+        # Milk products are governed by the milk logic even when it orders
+        # nothing for them — keep them out of the standard reorder pass.
+        milk_barcodes = {p['barcode'] for p in product_queries_model.get_milk_products(supplier_id)}
     if milk_recs:
         first          = milk_recs[0]
         nd             = first['next_delivery']
@@ -242,17 +263,21 @@ def auto_populate_po_lines(po_id, supplier_id) -> str:
                 f"  |  Projected at delivery: {r['projected_stock']}"
                 f"  |  {r['pack_qty']} × {r['pack_unit']}"
             )
+            if r['floor_applied']:
+                note += f"  |  Min floor: topped up to min {int(r['reorder_min'])}"
             if not r['has_sales_data']:
-                note += "  ⚠ no sales history — defaulting to 1 carton"
+                note += "  ⚠ no sales history"
             lines_model.add(
                 po_id=po_id, barcode=r['barcode'], description=r['description'],
                 ordered_qty=r['cartons'], unit_cost=r['cost_price'],
                 notes=note, pack_qty=r['pack_qty'],
             )
             milk_barcodes.add(r['barcode'])
+        floor_n = sum(1 for r in milk_recs if r['floor_applied'])
         banner_parts.append(
             f"🥛 {len(milk_recs)} milk line(s) — arriving {delivery_str}, covering to "
             f"{following_str} + {SAFETY_DAYS} day buffer"
+            + (f" ({floor_n} topped up to min)" if floor_n else "")
         )
 
     # Standard reorder points (skip milk products already added)
