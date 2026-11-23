@@ -26,9 +26,9 @@ class ProductEdit(KeyboardMixin, QWidget):
         super().__init__()
         self._read_only = read_only
         self.setWindowTitle("Product Detail  [Read Only]" if read_only else "Product Detail")
-        self.setMinimumWidth(1200)
+        self.setMinimumWidth(1500)
         self.setMinimumHeight(700)
-        self.resize(1400, 900)
+        self.resize(1800, 900)
         self.barcode = barcode
         self.on_save = on_save
         self._depts = dept_ctrl.get_all()
@@ -66,6 +66,14 @@ class ProductEdit(KeyboardMixin, QWidget):
         self._carton_sku    = p['carton_sku'] or '' if 'carton_sku' in p.keys() else ''
         # Tare weight in GRAMS (container/packaging). Stored only; future scale/label use.
         self._tare_g        = int(p['tare_g'] or 0) if 'tare_g' in p.keys() else 0
+        keys = p.keys()
+        self._shelf_life_days = int(p['shelf_life_days'] or 0) if 'shelf_life_days' in keys else 0
+        self._date_type       = (p['date_type'] or 'best_before') if 'date_type' in keys else 'best_before'
+        self._label_format_id = p['label_format_id'] if 'label_format_id' in keys else None
+        self._ingredients     = (p['ingredients'] or '') if 'ingredients' in keys else ''
+        self._allergens       = (p['allergens'] or '') if 'allergens' in keys else ''
+        self._country         = (p['country_of_origin'] or '') if 'country_of_origin' in keys else ''
+        self._label_formats   = product_controller.get_label_formats()
         self._brand         = p['brand'] or ''
         self._plu           = p['plu'] or '' if 'plu' in p.keys() else ''
         self._supplier_sku  = p['supplier_sku'] or ''
@@ -195,12 +203,15 @@ class ProductEdit(KeyboardMixin, QWidget):
         left_col = self._build_identification_column()
         right_col = self._build_pricing_column()
         third_col = self._build_status_column()
+        fourth_col = self._build_label_column()
 
         two_col.addLayout(left_col, 1)
         two_col.addWidget(self._make_vsep())
         two_col.addLayout(right_col, 1)
         two_col.addWidget(self._make_vsep())
         two_col.addLayout(third_col, 1)
+        two_col.addWidget(self._make_vsep())
+        two_col.addLayout(fourth_col, 1)
         layout.addLayout(two_col)
 
     def _build_identification_column(self):
@@ -311,6 +322,31 @@ class ProductEdit(KeyboardMixin, QWidget):
 
         right_col.addStretch()
         return right_col
+
+    def _build_label_column(self):
+        """Fourth column: label settings, stored for the future scale/label printer."""
+        fourth_col = QVBoxLayout()
+        fourth_col.setSpacing(5)
+        hdr = QLabel("<b>Labelling</b>")
+        fourth_col.addWidget(hdr)
+        r, self.lbl_shelf = self._ro_row("Shelf Life (days)", self._shelf_text(), self._edit_shelf_life)
+        self.lbl_shelf.setToolTip("Days from packing. 0 = no date on the label.")
+        fourth_col.addLayout(r)
+        r, self.lbl_date_type = self._ro_row("Date Type", self._DATE_TYPES[self._date_type], self._edit_date_type)
+        fourth_col.addLayout(r)
+        r, self.lbl_label_fmt = self._ro_row("Label Size", self._label_format_name(), self._edit_label_format)
+        fourth_col.addLayout(r)
+        r, self.lbl_country = self._ro_row("Country of Origin", self._country or "—", self._edit_country)
+        fourth_col.addLayout(r)
+        r, self.lbl_allergens = self._ro_row("Allergens", self._elide(self._allergens), self._edit_allergens)
+        self.lbl_allergens.setToolTip(self._allergens)
+        fourth_col.addLayout(r)
+        r, self.lbl_ingredients = self._ro_row("Ingredients", self._elide(self._ingredients), self._edit_ingredients)
+        self.lbl_ingredients.setToolTip(self._ingredients)
+        fourth_col.addLayout(r)
+
+        fourth_col.addStretch()
+        return fourth_col
 
     def _build_status_column(self):
         third_col = QVBoxLayout()
@@ -531,6 +567,65 @@ class ProductEdit(KeyboardMixin, QWidget):
         if val is not None:
             self._tare_g = int(val)
             self.lbl_tare.setText(self._tare_text())
+
+    _DATE_TYPES = {'best_before': 'Best Before', 'use_by': 'Use By',
+                   'packed_on': 'Packed On', 'baked_on': 'Baked On'}
+
+    @staticmethod
+    def _elide(text, n=28):
+        return (text[:n] + "…") if len(text) > n else (text or "—")
+
+    def _shelf_text(self):
+        return f"{self._shelf_life_days} days" if self._shelf_life_days else "— (no date)"
+
+    def _edit_shelf_life(self):
+        val = number_popup("Edit Shelf Life", "Shelf life (days from packing)", self._shelf_life_days, self)
+        if val is not None:
+            self._shelf_life_days = int(val)
+            self.lbl_shelf.setText(self._shelf_text())
+
+    def _edit_date_type(self):
+        names = list(self._DATE_TYPES.values())
+        val = choice_popup("Edit Date Type", "Date type", names, self._DATE_TYPES[self._date_type], self)
+        if val is not None:
+            self._date_type = next(k for k, v in self._DATE_TYPES.items() if v == val)
+            self.lbl_date_type.setText(val)
+
+    def _label_format_name(self):
+        for f in self._label_formats:
+            if f['id'] == self._label_format_id:
+                return f['name']
+        return self._label_formats[0]['name'] + " (default)" if self._label_formats else "—"
+
+    def _edit_label_format(self):
+        if not self._label_formats:
+            return
+        names = [f['name'] for f in self._label_formats]
+        cur = next((f['name'] for f in self._label_formats if f['id'] == self._label_format_id), names[0])
+        val = choice_popup("Edit Label Size", "Label size", names, cur, self)
+        if val is not None:
+            self._label_format_id = self._label_formats[names.index(val)]['id']
+            self.lbl_label_fmt.setText(self._label_format_name())
+
+    def _edit_ingredients(self):
+        val = text_popup_optional("Edit Ingredients", "Ingredients", self._ingredients, self)
+        if val is not None:
+            self._ingredients = val
+            self.lbl_ingredients.setText(self._elide(val))
+            self.lbl_ingredients.setToolTip(val)
+
+    def _edit_allergens(self):
+        val = text_popup_optional("Edit Allergens", "Allergens", self._allergens, self)
+        if val is not None:
+            self._allergens = val
+            self.lbl_allergens.setText(self._elide(val))
+            self.lbl_allergens.setToolTip(val)
+
+    def _edit_country(self):
+        val = text_popup_optional("Edit Country of Origin", "Country of origin", self._country, self)
+        if val is not None:
+            self._country = val
+            self.lbl_country.setText(val or "—")
 
     def _edit_carton_sku(self):
         val = text_popup_optional("Edit Carton SKU", "Carton SKU", self._carton_sku, self)
@@ -879,6 +974,12 @@ class ProductEdit(KeyboardMixin, QWidget):
                 product_suppliers=self._product_suppliers,
                 carton_sku=self._carton_sku,
                 tare_g=self._tare_g,
+                shelf_life_days=self._shelf_life_days,
+                date_type=self._date_type,
+                label_format_id=self._label_format_id,
+                ingredients=self._ingredients,
+                allergens=self._allergens,
+                country_of_origin=self._country,
             )
             if self.on_save:
                 self.on_save()

@@ -365,6 +365,48 @@ def migrate_v80(conn):
     conn.commit()
 
 
+def migrate_v81(conn):
+    """Label settings on products for the future integrated scale/label printer.
+
+    Stored only (edited on Product Detail); BackOfficePro will later send these
+    with the PLU to the scale — it does not print labels itself.
+      shelf_life_days  days from packing; 0 = no date on the label
+      date_type        'best_before', 'use_by', 'packed_on' or 'baked_on'
+      label_format_id  FK to label_formats; NULL = use the default (first active) format
+      ingredients / allergens / country_of_origin  free text for the label
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS label_formats (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name      TEXT    NOT NULL UNIQUE,
+            width_mm  INTEGER NOT NULL CHECK (width_mm  > 0),
+            height_mm INTEGER NOT NULL CHECK (height_mm > 0),
+            active    INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+        )
+    """)
+    conn.execute("""
+        INSERT OR IGNORE INTO label_formats (name, width_mm, height_mm)
+        VALUES ('60 x 55 mm', 60, 55)
+    """)
+    _add_column(conn, """
+        ALTER TABLE products ADD COLUMN shelf_life_days
+            INTEGER NOT NULL DEFAULT 0 CHECK (shelf_life_days >= 0)
+    """)
+    _add_column(conn, """
+        ALTER TABLE products ADD COLUMN date_type
+            TEXT NOT NULL DEFAULT 'best_before'
+            CHECK (date_type IN ('best_before','use_by','packed_on','baked_on'))
+    """)
+    _add_column(conn, """
+        ALTER TABLE products ADD COLUMN label_format_id
+            INTEGER REFERENCES label_formats(id) ON DELETE SET NULL
+    """)
+    _add_column(conn, "ALTER TABLE products ADD COLUMN ingredients TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "ALTER TABLE products ADD COLUMN allergens   TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "ALTER TABLE products ADD COLUMN country_of_origin TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
+
 # ── Migration registry ────────────────────────────────────────────────────────
 # Maps version number → (function, description).
 # Entries are applied in sorted version order by apply_migrations().
@@ -835,4 +877,5 @@ _MIGRATIONS: dict[int, tuple] = {
     78: (migrate_v78, "resolved_at/outcome/qty_remaining on product_batches for waste & order-quantity analysis"),
     79: (migrate_v79, "warehouse_order_include flag on products for the mobile Warehouse Order app"),
     80: (migrate_v80, "tare_g (grams) on products: container/packaging weight for future scale + label printing"),
+    81: (migrate_v81, "label_formats table + shelf_life_days/date_type/label_format_id/ingredients/allergens/country_of_origin on products"),
 }

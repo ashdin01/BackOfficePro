@@ -670,3 +670,26 @@ def test_add_alias_duplicate_reports_owner(test_db, product_barcode):
         product_ctrl.add_alias('9300000000098', product_barcode, 'b')
     with pytest.raises(ValueError, match="already a product"):
         product_ctrl.add_alias(product_barcode, product_barcode, 'c')
+
+
+def test_save_product_label_fields_round_trip(test_db, product_barcode, dept_id, supplier_id):
+    p = product_ctrl.get_product_by_barcode(product_barcode)
+    assert p['shelf_life_days'] == 0 and p['date_type'] == 'best_before'
+    kwargs = dict(
+        barcode=product_barcode, description='Test Product', brand='', plu='',
+        supplier_sku='', pack_qty=1, pack_unit='EA', group_id=None,
+        department_id=dept_id, supplier_id=supplier_id, unit='EA',
+        sell_price=9.99, cost_price=5.00, tax_rate=10.0,
+        reorder_point=0, reorder_max=0, variable_weight=0, expected=1,
+        active=1, auto_reorder=0, product_suppliers=[],
+    )
+    product_ctrl.save_product(**kwargs, shelf_life_days=5, date_type='baked_on',
+                              ingredients='Flour, water', allergens='Gluten',
+                              country_of_origin='Australia')
+    p = product_ctrl.get_product_by_barcode(product_barcode)
+    assert (p['shelf_life_days'], p['date_type'], p['country_of_origin']) == (5, 'baked_on', 'Australia')
+    assert p['ingredients'] == 'Flour, water' and p['allergens'] == 'Gluten'
+    for bad in (dict(date_type='nope'), dict(shelf_life_days=-1)):
+        with pytest.raises(ValueError):
+            product_ctrl.save_product(**kwargs, **bad)
+    assert [f['name'] for f in product_ctrl.get_label_formats()] == ['60 x 55 mm']

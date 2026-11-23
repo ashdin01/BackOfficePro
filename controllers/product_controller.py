@@ -1,5 +1,6 @@
 import logging
 import os
+import models.label_format as label_format_model
 import models.product as product_model
 import models.product_plu as product_plu_model
 import models.product_queries as product_queries_model
@@ -65,7 +66,9 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
                  tax_rate, reorder_point, reorder_max, variable_weight, expected,
                  active, auto_reorder, product_suppliers, online_available=0,
                  online_notes='', order_prep_include=0, carton_sku='',
-                 warehouse_order_include=0, tare_g=0) -> None:
+                 warehouse_order_include=0, tare_g=0, shelf_life_days=0,
+                 date_type='best_before', label_format_id=None, ingredients='',
+                 allergens='', country_of_origin='') -> None:
     """
     Save product fields and supplier associations.
     Raises ValueError on validation failure.
@@ -81,6 +84,10 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
     positive_number(reorder_max,   "Reorder max")
     if int(tare_g) < 0:
         raise ValueError("Tare (g) cannot be negative.")
+    if int(shelf_life_days) < 0:
+        raise ValueError("Shelf life (days) cannot be negative.")
+    if date_type not in ('best_before', 'use_by', 'packed_on', 'baked_on'):
+        raise ValueError("Date type must be Best Before, Use By, Packed On or Baked On.")
 
     product_model.update(
         barcode=barcode,
@@ -109,8 +116,19 @@ def save_product(barcode, description, brand, plu, supplier_sku, pack_qty, pack_
         carton_sku=carton_sku,
         warehouse_order_include=warehouse_order_include,
         tare_g=int(tare_g),
+        shelf_life_days=int(shelf_life_days),
+        date_type=date_type,
+        label_format_id=label_format_id,
+        ingredients=(ingredients or '').strip(),
+        allergens=(allergens or '').strip(),
+        country_of_origin=(country_of_origin or '').strip(),
     )
     ps_model.save_for_barcode(barcode, product_suppliers)
+
+
+def get_label_formats() -> list[dict]:
+    """Active label formats for the Product Detail label-size chooser."""
+    return label_format_model.get_all()
 
 
 def set_online_available(barcode: str, value: bool) -> None:

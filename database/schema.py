@@ -83,6 +83,16 @@ CREATE TABLE IF NOT EXISTS product_groups (
     UNIQUE(department_id, code)
 );
 
+CREATE TABLE IF NOT EXISTS label_formats (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name      TEXT    NOT NULL UNIQUE,
+    width_mm  INTEGER NOT NULL CHECK (width_mm  > 0),
+    height_mm INTEGER NOT NULL CHECK (height_mm > 0),
+    active    INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+);
+
+INSERT OR IGNORE INTO label_formats (name, width_mm, height_mm) VALUES ('60 x 55 mm', 60, 55);
+
 CREATE TABLE IF NOT EXISTS products (
     barcode         TEXT    PRIMARY KEY,
     base_sku        TEXT,
@@ -115,6 +125,12 @@ CREATE TABLE IF NOT EXISTS products (
     carton_sku      TEXT    DEFAULT '',
     warehouse_order_include INTEGER NOT NULL DEFAULT 0 CHECK (warehouse_order_include IN (0,1)),
     tare_g          INTEGER NOT NULL DEFAULT 0 CHECK (tare_g >= 0),
+    shelf_life_days INTEGER NOT NULL DEFAULT 0 CHECK (shelf_life_days >= 0),
+    date_type       TEXT    NOT NULL DEFAULT 'best_before' CHECK (date_type IN ('best_before','use_by','packed_on','baked_on')),
+    label_format_id INTEGER REFERENCES label_formats(id) ON DELETE SET NULL,
+    ingredients     TEXT    NOT NULL DEFAULT '',
+    allergens       TEXT    NOT NULL DEFAULT '',
+    country_of_origin TEXT  NOT NULL DEFAULT '',
     FOREIGN KEY (department_id) REFERENCES departments(id)    ON DELETE RESTRICT,
     FOREIGN KEY (supplier_id)   REFERENCES suppliers(id)      ON DELETE SET NULL,
     FOREIGN KEY (group_id)      REFERENCES product_groups(id) ON DELETE SET NULL
